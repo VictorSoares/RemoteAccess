@@ -1,4 +1,4 @@
-// RemoteAccess Client & Host Management
+// RemoteAccess AnyDesk Portable Edition - Client & Host Engine
 
 let myHostInfo = {
   id: '',
@@ -19,6 +19,9 @@ let pwdVisible = false;
 let currentClientSessionId = 'c_' + Math.random().toString(36).substring(2, 9);
 let currentTargetId = '';
 let logsModalOpen = false;
+let pingIntervalTimer = null;
+let sessionPollingTimer = null;
+let isMouseDown = false;
 
 // Performance counters
 let frameCount = 0;
@@ -33,14 +36,16 @@ const viewerContainer = document.getElementById('viewer-container');
 window.addEventListener('DOMContentLoaded', async () => {
   loadRecentConnections();
   await fetchHostInfo();
+  await fetchSystemInfo();
   connectSignaling();
   setupCanvasEvents();
   setupKeyboardEvents();
 
-  setInterval(() => {
+  sessionPollingTimer = setInterval(() => {
     fetchHostInfo();
+    fetchSessionStatus();
     if (logsModalOpen) refreshLogs();
-  }, 2500);
+  }, 2000);
 });
 
 function switchTab(tab) {
@@ -68,6 +73,51 @@ async function fetchHostInfo() {
   } catch (err) {
     console.error('Failed to fetch host info:', err);
   }
+}
+
+async function fetchSystemInfo() {
+  try {
+    const res = await fetch('/api/system-info');
+    const data = await res.json();
+    if (data.hostname) document.getElementById('sys-hostname').innerText = data.hostname;
+    if (data.os) document.getElementById('sys-os').innerText = data.os;
+    if (data.monitors) {
+      document.getElementById('sys-monitors').innerText = `${data.monitors} Monitor(es)`;
+      
+      const monSelect = document.getElementById('viewer-monitor-select');
+      monSelect.innerHTML = '';
+      for (let i = 0; i < data.monitors; i++) {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.innerText = `🖥️ Monitor ${i + 1}`;
+        monSelect.appendChild(opt);
+      }
+    }
+  } catch (err) {}
+}
+
+async function fetchSessionStatus() {
+  try {
+    const res = await fetch('/api/session-status');
+    const data = await res.json();
+    const box = document.getElementById('active-session-box');
+    if (data.active) {
+      box.style.display = 'block';
+      document.getElementById('host-session-client-id').innerText = data.client_id || 'Cliente';
+      const m = Math.floor(data.duration / 60).toString().padStart(2, '0');
+      const s = (data.duration % 60).toString().padStart(2, '0');
+      document.getElementById('host-session-duration').innerText = `${m}:${s}`;
+    } else {
+      box.style.display = 'none';
+    }
+  } catch (err) {}
+}
+
+async function kickActiveSession() {
+  try {
+    await fetch('/api/kick-session', { method: 'POST' });
+    document.getElementById('active-session-box').style.display = 'none';
+  } catch (err) {}
 }
 
 function updateNetworkBadge(status, url) {
@@ -292,6 +342,8 @@ function connectSignaling() {
               if (ctrl.t === 'pong') {
                 const rtt = Math.round(performance.now() - ctrl.ts);
                 document.getElementById('stat-latency').innerText = `🌐 ${rtt} ms (Nuvem)`;
+              } else if (ctrl.t === 'chat') {
+                appendChatMessage('Remoto', ctrl.text);
               }
             } catch(e) {}
           } else {
@@ -411,6 +463,8 @@ function setupDataChannels(targetId) {
       if (msg.t === 'pong') {
         const rtt = Math.round(performance.now() - msg.ts);
         document.getElementById('stat-latency').innerText = `⚡ ${rtt} ms (P2P)`;
+      } else if (msg.t === 'chat') {
+        appendChatMessage('Remoto', msg.text);
       }
     } catch (e) {}
   };
@@ -493,7 +547,8 @@ function sendControl(ctrlObj) {
 }
 
 function startPingLoop() {
-  setInterval(() => {
+  if (pingIntervalTimer) clearInterval(pingIntervalTimer);
+  pingIntervalTimer = setInterval(() => {
     lastPingTime = performance.now();
     sendControl({ t: 'ping', ts: lastPingTime });
   }, 2000);
@@ -508,8 +563,12 @@ function openViewer() {
 function closeViewer() {
   isConnected = false;
   viewerContainer.style.display = 'none';
+  if (pingIntervalTimer) {
+    clearInterval(pingIntervalTimer);
+    pingIntervalTimer = null;
+  }
   if (peerConnection) {
-    peerConnection.close();
+    try { peerConnection.close(); } catch(e) {}
     peerConnection = null;
   }
   if (signalingWS && signalingWS.readyState === WebSocket.OPEN && currentTargetId) {
@@ -539,25 +598,97 @@ function toggleFullscreen() {
   }
 }
 
+function switchRemoteMonitor(monitorIdx) {
+  sendControl({ t: 'mon_switch', mon: parseInt(monitorIdx) });
+}
+
+function setViewerQuality(mode) {
+  if (mode === 'speed') {
+    sendControl({ t: 'cfg', q: 45, fps: 60 });
+  } else if (mode === 'balanced') {
+    sendControl({ t: 'cfg', q: 65, fps: 30 });
+  } else if (mode === 'hd') {
+    sendControl({ t: 'cfg', q: 85, fps: 30 });
+  }
+}
+
+function openClipboardModal() {
+  const text = prompt('Digite ou cole o texto que deseja enviar para a máquina remota:');
+  if (text !== null && text.length > 0) {
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      sendControl({ t: 'kd', k: ch, c: 'Key' + ch.toUpperCase(), kc: ch.charCodeAt(0) });
+      sendControl({ t: 'ku', k: ch, c: 'Key' + ch.toUpperCase(), kc: ch.charCodeAt(0) });
+    }
+    alert('Texto enviado para o computador remoto!');
+  }
+}
+
+function toggleChatDrawer() {
+  const drawer = document.getElementById('chat-drawer');
+  drawer.style.display = drawer.style.display === 'flex' ? 'none' : 'flex';
+}
+
+function sendChatMessage(e) {
+  if (e) e.preventDefault();
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+
+  sendControl({ t: 'chat', text: text });
+  appendChatMessage('Você', text);
+  input.value = '';
+}
+
+function appendChatMessage(sender, text) {
+  const container = document.getElementById('chat-messages');
+  const msgEl = document.createElement('div');
+  const isMe = sender === 'Você';
+  msgEl.style.alignSelf = isMe ? 'flex-end' : 'flex-start';
+  msgEl.style.background = isMe ? 'rgba(59, 130, 246, 0.4)' : 'rgba(255, 255, 255, 0.1)';
+  msgEl.style.padding = '0.4rem 0.75rem';
+  msgEl.style.borderRadius = '8px';
+  msgEl.style.maxWidth = '85%';
+  msgEl.innerHTML = `<strong style="color: ${isMe ? '#93c5fd' : '#86efac'}; font-size: 0.75rem;">${sender}</strong><div style="margin-top: 0.15rem;">${text}</div>`;
+  container.appendChild(msgEl);
+  container.scrollTop = container.scrollHeight;
+
+  const drawer = document.getElementById('chat-drawer');
+  if (drawer.style.display === 'none') {
+    drawer.style.display = 'flex';
+  }
+}
+
+function getCanvasCoords(e) {
+  const rect = canvas.getBoundingClientRect();
+  const ratioX = (e.clientX - rect.left) / rect.width;
+  const ratioY = (e.clientY - rect.top) / rect.height;
+  return {
+    x: Math.max(0, Math.min(1, ratioX)),
+    y: Math.max(0, Math.min(1, ratioY))
+  };
+}
+
 function setupCanvasEvents() {
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
   canvas.addEventListener('mousemove', (e) => {
     if (!isConnected) return;
-    const rect = canvas.getBoundingClientRect();
-    const ratioX = (e.clientX - rect.left) / rect.width;
-    const ratioY = (e.clientY - rect.top) / rect.height;
-
-    sendControl({ t: 'm', x: ratioX, y: ratioY });
+    const coords = getCanvasCoords(e);
+    sendControl({ t: 'm', x: coords.x, y: coords.y });
   });
 
   canvas.addEventListener('mousedown', (e) => {
     if (!isConnected) return;
+    isMouseDown = true;
+    const coords = getCanvasCoords(e);
+    sendControl({ t: 'm', x: coords.x, y: coords.y });
     sendControl({ t: 'md', b: e.button });
   });
 
-  canvas.addEventListener('mouseup', (e) => {
-    if (!isConnected) return;
+  window.addEventListener('mouseup', (e) => {
+    if (!isConnected || !isMouseDown) return;
+    isMouseDown = false;
     sendControl({ t: 'mu', b: e.button });
   });
 
@@ -571,12 +702,14 @@ function setupCanvasEvents() {
 function setupKeyboardEvents() {
   window.addEventListener('keydown', (e) => {
     if (!isConnected || e.key === 'F12') return;
+    if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
     e.preventDefault();
     sendControl({ t: 'kd', k: e.key, c: e.code, kc: e.keyCode });
   });
 
   window.addEventListener('keyup', (e) => {
     if (!isConnected || e.key === 'F12') return;
+    if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
     e.preventDefault();
     sendControl({ t: 'ku', k: e.key, c: e.code, kc: e.keyCode });
   });
@@ -593,21 +726,37 @@ function sendSpecialKey(type) {
       sendControl({ t: 'ku', k: 'Delete', c: 'Delete', kc: 46 });
       sendControl({ t: 'ku', k: 'Alt', c: 'AltLeft', kc: 18 });
       sendControl({ t: 'ku', k: 'Control', c: 'ControlLeft', kc: 17 });
-    }, 100);
+    }, 120);
+  } else if (type === 'task_manager') {
+    sendControl({ t: 'kd', k: 'Control', c: 'ControlLeft', kc: 17 });
+    sendControl({ t: 'kd', k: 'Shift', c: 'ShiftLeft', kc: 16 });
+    sendControl({ t: 'kd', k: 'Escape', c: 'Escape', kc: 27 });
+    setTimeout(() => {
+      sendControl({ t: 'ku', k: 'Escape', c: 'Escape', kc: 27 });
+      sendControl({ t: 'ku', k: 'Shift', c: 'ShiftLeft', kc: 16 });
+      sendControl({ t: 'ku', k: 'Control', c: 'ControlLeft', kc: 17 });
+    }, 120);
   } else if (type === 'win_d') {
     sendControl({ t: 'kd', k: 'Meta', c: 'MetaLeft', kc: 91 });
     sendControl({ t: 'kd', k: 'd', c: 'KeyD', kc: 68 });
     setTimeout(() => {
       sendControl({ t: 'ku', k: 'd', c: 'KeyD', kc: 68 });
       sendControl({ t: 'ku', k: 'Meta', c: 'MetaLeft', kc: 91 });
-    }, 100);
+    }, 120);
   } else if (type === 'alt_tab') {
     sendControl({ t: 'kd', k: 'Alt', c: 'AltLeft', kc: 18 });
     sendControl({ t: 'kd', k: 'Tab', c: 'Tab', kc: 9 });
     setTimeout(() => {
       sendControl({ t: 'ku', k: 'Tab', c: 'Tab', kc: 9 });
       sendControl({ t: 'ku', k: 'Alt', c: 'AltLeft', kc: 18 });
-    }, 100);
+    }, 120);
+  } else if (type === 'win_l') {
+    sendControl({ t: 'kd', k: 'Meta', c: 'MetaLeft', kc: 91 });
+    sendControl({ t: 'kd', k: 'l', c: 'KeyL', kc: 76 });
+    setTimeout(() => {
+      sendControl({ t: 'ku', k: 'l', c: 'KeyL', kc: 76 });
+      sendControl({ t: 'ku', k: 'Meta', c: 'MetaLeft', kc: 91 });
+    }, 120);
   }
 }
 
@@ -642,3 +791,4 @@ function saveRecentConnection(id, password) {
   localStorage.setItem('ra_saved_devices', JSON.stringify(list));
   loadRecentConnections();
 }
+

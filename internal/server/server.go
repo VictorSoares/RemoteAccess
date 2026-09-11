@@ -7,11 +7,14 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"remoteaccess/internal/capture"
 	"remoteaccess/internal/config"
 	"remoteaccess/internal/logger"
 	"remoteaccess/internal/protocol"
@@ -84,12 +87,59 @@ func (s *LocalServer) Start(port int) error {
 	mux.HandleFunc("/api/autostart", s.handleAutoStart)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/logs", s.handleLogs)
+	mux.HandleFunc("/api/session-status", s.handleSessionStatus)
+	mux.HandleFunc("/api/kick-session", s.handleKickSession)
+	mux.HandleFunc("/api/system-info", s.handleSystemInfo)
 
 	mux.HandleFunc("/ws", s.handleWS)
 
 	addr := fmt.Sprintf(":%d", port)
 	log.Printf("[RemoteAccess] Painel Web iniciado em http://localhost:%d", port)
 	return http.ListenAndServe(addr, mux)
+}
+
+func (s *LocalServer) handleSessionStatus(w http.ResponseWriter, r *http.Request) {
+	s.mu.RLock()
+	sess := s.hostSession
+	s.mu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	if sess != nil {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"active":    true,
+			"client_id": sess.ClientID,
+			"duration":  int(time.Since(sess.ConnectedAt).Seconds()),
+		})
+	} else {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"active": false,
+		})
+	}
+}
+
+func (s *LocalServer) handleKickSession(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	if s.hostSession != nil {
+		s.hostSession.Close()
+		s.hostSession = nil
+	}
+	s.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status": "ok",
+	})
+}
+
+func (s *LocalServer) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
+	hostname, _ := os.Hostname()
+	numDisplays := capture.GetNumDisplays()
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"hostname": hostname,
+		"os":       runtime.GOOS + " " + runtime.GOARCH,
+		"monitors": numDisplays,
+	})
 }
 
 func (s *LocalServer) handleLogs(w http.ResponseWriter, r *http.Request) {
@@ -301,7 +351,7 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 		sess := s.hostSession
 		if sess == nil {
 			var err error
-			sess, err = webrtcmod.NewHostSession(s.Config.Data.FPS, s.Config.Data.Quality, func(outMsg protocol.SignalingMessage) {
+			sess, err = webrtcmod.NewHostSession(senderID, s.Config.Data.FPS, s.Config.Data.Quality, func(outMsg protocol.SignalingMessage) {
 				outMsg.ID = s.Config.Data.ID
 				if outMsg.TargetID == "" {
 					outMsg.TargetID = senderID

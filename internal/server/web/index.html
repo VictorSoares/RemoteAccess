@@ -11,7 +11,7 @@
   <header class="app-header">
     <div class="logo">
       <span>⚡ RemoteAccess</span>
-      <span class="logo-badge">Portátil</span>
+      <span class="logo-badge">AnyDesk Portable Edition</span>
     </div>
     <div style="display: flex; align-items: center; gap: 0.6rem;">
       <button class="btn-icon" onclick="openSignalingModal()" title="Configurar Servidor de Nuvem (Render / VPS)" style="font-size: 0.8rem; padding: 0.35rem 0.7rem;">
@@ -41,8 +41,26 @@
 
     <!-- HOST VIEW: Permitir Acesso a este PC -->
     <section id="host-view" class="card">
+      <!-- Active Session Alert Box (Appears when someone is controlling this host) -->
+      <div id="active-session-box" style="display: none; margin-bottom: 1.25rem; padding: 1.25rem; background: rgba(220, 38, 38, 0.15); border: 1px solid #ef4444; border-radius: 12px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <div class="status-dot" style="background: #ef4444; box-shadow: 0 0 10px #ef4444; width: 14px; height: 14px;"></div>
+            <div>
+              <div style="font-weight: 700; color: #fca5a5; font-size: 1rem;">Sessão Remota em Andamento</div>
+              <div style="font-size: 0.85rem; color: #e2e8f0; margin-top: 0.2rem;">
+                Controlado por: <strong id="host-session-client-id" style="color: #60a5fa;">---</strong> | Tempo: <strong id="host-session-duration">00:00</strong>
+              </div>
+            </div>
+          </div>
+          <button class="btn-icon btn-danger" onclick="kickActiveSession()" style="padding: 0.5rem 1rem; font-weight: 700; background: #dc2626; color: white;">
+            🛑 Encerrar Sessão Imediatamente
+          </button>
+        </div>
+      </div>
+
       <h2 class="card-title">Permitir Controle Remoto (Acesso Não Supervisionado)</h2>
-      <p class="card-desc">Este computador possui um <strong>ID Fixo Permanente</strong>. Você pode definir uma senha fixa e ativar a inicialização com o Windows para acessá-lo sempre que ele ligar.</p>
+      <p class="card-desc">Este computador possui um <strong>ID Fixo Permanente</strong>. Você pode definir sua senha fixa e deixar o programa iniciando junto com o Windows para acessá-lo de qualquer lugar.</p>
 
       <div class="id-display-container">
         <div class="credential-box">
@@ -65,14 +83,27 @@
         </div>
       </div>
 
+      <!-- System info banner -->
+      <div style="margin-top: 1.25rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 200px; padding: 0.75rem 1rem; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem;">
+          <span style="color: var(--text-muted);">💻 Computador:</span> <strong id="sys-hostname">Detectando...</strong>
+        </div>
+        <div style="flex: 1; min-width: 150px; padding: 0.75rem 1rem; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem;">
+          <span style="color: var(--text-muted);">🖥️ Monitores:</span> <strong id="sys-monitors">1 Monitor</strong>
+        </div>
+        <div style="flex: 1; min-width: 150px; padding: 0.75rem 1rem; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border); border-radius: 8px; font-size: 0.85rem;">
+          <span style="color: var(--text-muted);">🪟 Sistema:</span> <strong id="sys-os">Windows</strong>
+        </div>
+      </div>
+
       <!-- Unattended Access / Windows Startup Settings -->
       <div style="margin-top: 1.25rem; padding: 1.25rem; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border); border-radius: 12px;">
         <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer;">
           <input type="checkbox" id="autostart-toggle" onchange="toggleAutoStart(event)" style="width: 1.2rem; height: 1.2rem; accent-color: var(--accent); cursor: pointer;">
           <div>
-            <div style="font-weight: 600; font-size: 0.95rem;">⚡ Iniciar automaticamente junto com o Windows</div>
+            <div style="font-weight: 600; font-size: 0.95rem;">⚡ Iniciar automaticamente em segundo plano com o Windows</div>
             <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.15rem;">
-              O RemoteAccess roda em segundo plano ao ligar o PC, permitindo que você conecte a qualquer momento de casa ou do trabalho.
+              O RemoteAccess roda silenciosamente ao ligar o computador, permitindo que você conecte a qualquer momento de casa ou do trabalho.
             </div>
           </div>
         </label>
@@ -95,14 +126,6 @@
             <option value="60">60 FPS (Ultra Suave)</option>
           </select>
         </div>
-      </div>
-
-      <div id="active-session-box" style="margin-top: 1.5rem; display: none;" class="credential-box">
-        <div>
-          <div class="credential-label">Sessão Ativa</div>
-          <div id="active-session-text" style="color: #60a5fa; font-weight: 600;">Controlador conectado</div>
-        </div>
-        <button class="btn-icon btn-danger" onclick="disconnectHostSession()">🛑 Desconectar</button>
       </div>
     </section>
 
@@ -150,14 +173,32 @@
     </div>
   </div>
 
-  <!-- Fullscreen Remote Desktop Viewer -->
+  <!-- Fullscreen Remote Desktop Viewer (AnyDesk Style) -->
   <div id="viewer-container">
     <div id="viewer-toolbar">
+      <!-- Status Badges -->
       <span class="stat-tag" id="stat-latency">⚡ -- ms</span>
       <span class="stat-tag" id="stat-fps">🎥 -- fps</span>
+
+      <!-- Multi-Monitor Switcher -->
+      <select id="viewer-monitor-select" class="toolbar-select" onchange="switchRemoteMonitor(this.value)" title="Alternar Monitor">
+        <option value="0">🖥️ Monitor 1</option>
+        <option value="1">🖥️ Monitor 2</option>
+      </select>
+
+      <!-- Quality Switcher -->
+      <select id="viewer-quality-select" class="toolbar-select" onchange="setViewerQuality(this.value)" title="Qualidade da Transmissão">
+        <option value="speed">⚡ Velocidade (60 FPS)</option>
+        <option value="balanced" selected>⚖️ Equilibrado (30 FPS)</option>
+        <option value="hd">💎 Alta Definição (HD)</option>
+      </select>
       
+      <!-- System Shortcuts -->
       <button class="toolbar-btn" onclick="sendSpecialKey('ctrl_alt_del')" title="Enviar Ctrl+Alt+Del">
         ⌨️ Ctrl+Alt+Del
+      </button>
+      <button class="toolbar-btn" onclick="sendSpecialKey('task_manager')" title="Gerenciador de Tarefas (Ctrl+Shift+Esc)">
+        ⚡ Tarefas
       </button>
       <button class="toolbar-btn" onclick="sendSpecialKey('win_d')" title="Mostrar Área de Trabalho">
         🪟 Win+D
@@ -165,17 +206,45 @@
       <button class="toolbar-btn" onclick="sendSpecialKey('alt_tab')" title="Alternar Janelas">
         📑 Alt+Tab
       </button>
+      <button class="toolbar-btn" onclick="sendSpecialKey('win_l')" title="Bloquear Computador">
+        🔒 Bloquear
+      </button>
+      <button class="toolbar-btn" onclick="openClipboardModal()" title="Enviar Texto da Área de Transferência">
+        📋 Colar Texto
+      </button>
+      <button class="toolbar-btn" onclick="toggleChatDrawer()" title="Bate-Papo da Sessão">
+        💬 Chat
+      </button>
       <button class="toolbar-btn" onclick="toggleFullscreen()" title="Alternar Tela Cheia">
         ⛶ Tela Cheia
       </button>
-      <button class="toolbar-btn btn-close" onclick="closeViewer()" title="Fechar Conexão">
+      <button class="toolbar-btn btn-close" onclick="closeViewer()" title="Desconectar Imediatamente">
         🛑 Desconectar
       </button>
     </div>
 
-    <canvas id="screen-canvas"></canvas>
+    <!-- Viewer Canvas -->
+    <div style="flex: 1; display: flex; align-items: center; justify-content: center; position: relative; width: 100%; height: 100%; overflow: hidden;">
+      <canvas id="screen-canvas" tabindex="0"></canvas>
+
+      <!-- In-Session Chat Floating Drawer -->
+      <div id="chat-drawer" style="display: none; position: absolute; right: 20px; bottom: 20px; width: 320px; height: 400px; background: rgba(15, 23, 42, 0.95); backdrop-filter: blur(10px); border: 1px solid var(--border); border-radius: 12px; z-index: 50; flex-direction: column; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+        <div style="padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+          <strong style="font-size: 0.9rem;">💬 Chat da Sessão</strong>
+          <button class="btn-icon" onclick="toggleChatDrawer()" style="padding: 0.2rem 0.5rem; font-size: 0.8rem;">✕</button>
+        </div>
+        <div id="chat-messages" style="flex: 1; padding: 0.75rem; overflow-y: auto; font-size: 0.85rem; display: flex; flex-direction: column; gap: 0.5rem;">
+          <div style="color: var(--text-muted); font-size: 0.75rem; text-align: center;">Início da conversa com a máquina remota</div>
+        </div>
+        <form onsubmit="sendChatMessage(event)" style="display: flex; padding: 0.5rem; gap: 0.5rem; border-top: 1px solid var(--border);">
+          <input type="text" id="chat-input" class="form-input" placeholder="Digite uma mensagem..." style="padding: 0.4rem 0.75rem; font-size: 0.85rem;" required>
+          <button type="submit" class="btn-icon" style="padding: 0.4rem 0.8rem; background: var(--accent); color: white;">Enviar</button>
+        </form>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>
 </body>
 </html>
+

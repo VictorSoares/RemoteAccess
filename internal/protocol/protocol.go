@@ -30,22 +30,24 @@ type SignalingMessage struct {
 
 // Control Packet Types
 const (
-	TypeMouseMove = "m"
-	TypeMouseDown = "md"
-	TypeMouseUp   = "mu"
-	TypeWheel     = "w"
-	TypeKeyDown   = "kd"
-	TypeKeyUp     = "ku"
-	TypeClipboard = "clip"
-	TypePing      = "ping"
-	TypePong      = "pong"
-	TypeConfig    = "cfg"
-	TypeAuth      = "auth"
-	TypeAuthOK    = "auth_ok"
-	TypeAuthFail  = "auth_fail"
+	TypeMouseMove     = "m"
+	TypeMouseDown     = "md"
+	TypeMouseUp       = "mu"
+	TypeWheel         = "w"
+	TypeKeyDown       = "kd"
+	TypeKeyUp         = "ku"
+	TypeClipboard     = "clip"
+	TypePing          = "ping"
+	TypePong          = "pong"
+	TypeConfig        = "cfg"
+	TypeMonitorSwitch = "mon_switch"
+	TypeChat          = "chat"
+	TypeAuth          = "auth"
+	TypeAuthOK        = "auth_ok"
+	TypeAuthFail      = "auth_fail"
 )
 
-// ControlMessage represents mouse, keyboard or control command
+// ControlMessage represents mouse, keyboard, monitor, clipboard or chat command
 type ControlMessage struct {
 	Type     string  `json:"t"`
 	X        float64 `json:"x,omitempty"`
@@ -59,5 +61,7 @@ type ControlMessage struct {
 	Time     int64   `json:"ts,omitempty"`
 	Quality  int     `json:"q,omitempty"`
 	FPS      int     `json:"fps,omitempty"`
+	Monitor  int     `json:"mon,omitempty"`
+	Sender   string  `json:"sender,omitempty"`
 	Password string  `json:"pwd,omitempty"`
 }

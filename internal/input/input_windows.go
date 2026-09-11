@@ -3,23 +3,19 @@
 package input
 
 import (
-	"fmt"
 	"strings"
 	"syscall"
-	"unsafe"
 )
 
 var (
 	user32               = syscall.NewLazyDLL("user32.dll")
-	procSendInput        = user32.NewProc("SendInput")
-	procGetSystemMetrics = user32.NewProc("GetSystemMetrics")
 	procSetCursorPos     = user32.NewProc("SetCursorPos")
+	procMouseEvent       = user32.NewProc("mouse_event")
+	procKeybdEvent       = user32.NewProc("keybd_event")
+	procGetSystemMetrics = user32.NewProc("GetSystemMetrics")
 )
 
 const (
-	inputMouse    = 0
-	inputKeyboard = 1
-
 	mouseeventfMove       = 0x0001
 	mouseeventfLeftdown   = 0x0002
 	mouseeventfLeftup     = 0x0004
@@ -28,78 +24,45 @@ const (
 	mouseeventfMiddledown = 0x0020
 	mouseeventfMiddleup   = 0x0040
 	mouseeventfWheel      = 0x0800
-	mouseeventfHwheel     = 0x1000
 	mouseeventfAbsolute   = 0x8000
 
 	keyeventfExtendedkey = 0x0001
 	keyeventfKeyup       = 0x0002
 	keyeventfUnicode     = 0x0004
-	keyeventfScancode    = 0x0008
 )
-
-type mouseInput struct {
-	dx          int32
-	dy          int32
-	mouseData   uint32
-	dwFlags     uint32
-	time        uint32
-	dwExtraInfo uintptr
-}
-
-type keybdInput struct {
-	wVk         uint16
-	wScan       uint16
-	dwFlags     uint32
-	time        uint32
-	dwExtraInfo uintptr
-}
-
-type inputStructure struct {
-	inputType uint32
-	mi        mouseInput
-	_pad      [8]byte
-}
-
-func sendMouseInput(flags uint32, dx, dy int32, data uint32) error {
-	var in inputStructure
-	in.inputType = inputMouse
-	in.mi.dx = dx
-	in.mi.dy = dy
-	in.mi.mouseData = data
-	in.mi.dwFlags = flags
-
-	ret, _, err := procSendInput.Call(1, uintptr(unsafe.Pointer(&in)), unsafe.Sizeof(in))
-	if ret == 0 {
-		return fmt.Errorf("SendInput mouse failed: %v", err)
-	}
-	return nil
-}
 
 // MoveMouseAbsolute sets the cursor to an absolute ratio [0.0, 1.0] across the primary screen
 func MoveMouseAbsolute(ratioX, ratioY float64) error {
 	if ratioX < 0 {
 		ratioX = 0
-	}
-	if ratioX > 1 {
+	} else if ratioX > 1 {
 		ratioX = 1
 	}
 	if ratioY < 0 {
 		ratioY = 0
-	}
-	if ratioY > 1 {
+	} else if ratioY > 1 {
 		ratioY = 1
 	}
 
-	// Normalize to [0, 65535]
-	dx := int32(ratioX * 65535)
-	dy := int32(ratioY * 65535)
+	w, _, _ := procGetSystemMetrics.Call(0) // SM_CXSCREEN
+	h, _, _ := procGetSystemMetrics.Call(1) // SM_CYSCREEN
+	if w == 0 {
+		w = 1920
+	}
+	if h == 0 {
+		h = 1080
+	}
 
-	return sendMouseInput(mouseeventfMove|mouseeventfAbsolute, dx, dy, 0)
+	targetX := int32(ratioX * float64(w))
+	targetY := int32(ratioY * float64(h))
+
+	procSetCursorPos.Call(uintptr(targetX), uintptr(targetY))
+	return nil
 }
 
 // MouseDown triggers a mouse press (0: left, 1: middle, 2: right)
 func MouseDown(button int) error {
-	var flag uint32
+	var flag uintptr
 	switch button {
 	case 0:
 		flag = mouseeventfLeftdown
@@ -110,12 +73,13 @@ func MouseDown(button int) error {
 	default:
 		return nil
 	}
-	return sendMouseInput(flag, 0, 0, 0)
+	procMouseEvent.Call(flag, 0, 0, 0, 0)
+	return nil
 }
 
 // MouseUp triggers a mouse release (0: left, 1: middle, 2: right)
 func MouseUp(button int) error {
-	var flag uint32
+	var flag uintptr
 	switch button {
 	case 0:
 		flag = mouseeventfLeftup
@@ -126,7 +90,8 @@ func MouseUp(button int) error {
 	default:
 		return nil
 	}
-	return sendMouseInput(flag, 0, 0, 0)
+	procMouseEvent.Call(flag, 0, 0, 0, 0)
+	return nil
 }
 
 // MouseWheel triggers a vertical scroll wheel action
@@ -137,27 +102,45 @@ func MouseWheel(deltaY int) error {
 	} else if deltaY < 0 {
 		delta = -120
 	}
-	return sendMouseInput(mouseeventfWheel, 0, 0, uint32(delta))
+	procMouseEvent.Call(mouseeventfWheel, 0, 0, uintptr(uint32(delta)), 0)
+	return nil
 }
 
-type kbInputStructure struct {
-	inputType uint32
-	ki        keybdInput
-	_pad      [8]byte
-}
-
-func sendKeyboardInput(vk uint16, scan uint16, flags uint32) error {
-	var in kbInputStructure
-	in.inputType = inputKeyboard
-	in.ki.wVk = vk
-	in.ki.wScan = scan
-	in.ki.dwFlags = flags
-
-	ret, _, err := procSendInput.Call(1, uintptr(unsafe.Pointer(&in)), unsafe.Sizeof(in))
-	if ret == 0 {
-		return fmt.Errorf("SendInput keyboard failed: %v", err)
+// KeyDown simulates key press
+func KeyDown(key, code string, keyCode int) error {
+	vk := resolveVK(key, code, keyCode)
+	if vk != 0 {
+		flags := uintptr(0)
+		if isExtendedKey(vk) {
+			flags |= keyeventfExtendedkey
+		}
+		procKeybdEvent.Call(uintptr(vk), 0, flags, 0)
+		return nil
 	}
 	return nil
+}
+
+// KeyUp simulates key release
+func KeyUp(key, code string, keyCode int) error {
+	vk := resolveVK(key, code, keyCode)
+	if vk != 0 {
+		flags := uintptr(keyeventfKeyup)
+		if isExtendedKey(vk) {
+			flags |= keyeventfExtendedkey
+		}
+		procKeybdEvent.Call(uintptr(vk), 0, flags, 0)
+		return nil
+	}
+	return nil
+}
+
+func isExtendedKey(vk uint16) bool {
+	switch vk {
+	case 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E, 0x5B, 0x5C, 0x5D:
+		return true
+	default:
+		return false
+	}
 }
 
 // Virtual Key Codes mapping
@@ -186,12 +169,28 @@ var jsKeyToVK = map[string]uint16{
 	"ArrowUp":      0x26,
 	"ArrowRight":   0x27,
 	"ArrowDown":    0x28,
+	"PrintScreen":  0x2C,
 	"Insert":       0x2D,
 	"Delete":       0x2E,
 	"Meta":         0x5B,
 	"MetaLeft":     0x5B,
 	"MetaRight":    0x5C,
 	"ContextMenu":  0x5D,
+	"Numpad0":      0x60,
+	"Numpad1":      0x61,
+	"Numpad2":      0x62,
+	"Numpad3":      0x63,
+	"Numpad4":      0x64,
+	"Numpad5":      0x65,
+	"Numpad6":      0x66,
+	"Numpad7":      0x67,
+	"Numpad8":      0x68,
+	"Numpad9":      0x69,
+	"NumpadMultiply": 0x6A,
+	"NumpadAdd":      0x6B,
+	"NumpadSubtract": 0x6D,
+	"NumpadDecimal":  0x6E,
+	"NumpadDivide":   0x6F,
 	"F1":           0x70,
 	"F2":           0x71,
 	"F3":           0x72,
@@ -204,32 +203,19 @@ var jsKeyToVK = map[string]uint16{
 	"F10":          0x79,
 	"F11":          0x7A,
 	"F12":          0x7B,
-}
-
-// KeyDown simulates key press
-func KeyDown(key, code string, keyCode int) error {
-	vk := resolveVK(key, code, keyCode)
-	if vk != 0 {
-		return sendKeyboardInput(vk, 0, 0)
-	}
-	if len(key) == 1 {
-		r := []rune(key)[0]
-		return sendKeyboardInput(0, uint16(r), keyeventfUnicode)
-	}
-	return nil
-}
-
-// KeyUp simulates key release
-func KeyUp(key, code string, keyCode int) error {
-	vk := resolveVK(key, code, keyCode)
-	if vk != 0 {
-		return sendKeyboardInput(vk, 0, keyeventfKeyup)
-	}
-	if len(key) == 1 {
-		r := []rune(key)[0]
-		return sendKeyboardInput(0, uint16(r), keyeventfUnicode|keyeventfKeyup)
-	}
-	return nil
+	"NumLock":      0x90,
+	"ScrollLock":   0x91,
+	"Semicolon":    0xBA,
+	"Equal":        0xBB,
+	"Comma":        0xBC,
+	"Minus":        0xBD,
+	"Period":       0xBE,
+	"Slash":        0xBF,
+	"Backquote":    0xC0,
+	"BracketLeft":  0xDB,
+	"Backslash":    0xDC,
+	"BracketRight": 0xDD,
+	"Quote":        0xDE,
 }
 
 func resolveVK(key, code string, keyCode int) uint16 {
@@ -247,6 +233,18 @@ func resolveVK(key, code string, keyCode int) uint16 {
 	}
 	if keyCode >= 32 && keyCode <= 126 {
 		return uint16(keyCode)
+	}
+	if len(key) == 1 {
+		ch := key[0]
+		if ch >= 'a' && ch <= 'z' {
+			return uint16(ch - 32)
+		}
+		if ch >= 'A' && ch <= 'Z' {
+			return uint16(ch)
+		}
+		if ch >= '0' && ch <= '9' {
+			return uint16(ch)
+		}
 	}
 	return 0
 }

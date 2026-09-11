@@ -1,6 +1,7 @@
 package webrtc
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -32,16 +33,20 @@ type HostSession struct {
 	inputChannel *pion.DataChannel
 	videoChannel *pion.DataChannel
 	capturer     *capture.ScreenCapturer
-	stopCapture  chan struct{}
+	ctx          context.Context
+	cancel       context.CancelFunc
 	running      int32
 	FPS          int
 	Quality      int
+	ClientID     string
+	ConnectedAt  time.Time
 	OnStatus     func(status string, msg string)
 	SendSignal   func(msg protocol.SignalingMessage)
 	OnRelayFrame func(jpegBase64 string)
+	OnChat       func(sender string, text string)
 }
 
-func NewHostSession(fps int, quality int, sendSignal func(protocol.SignalingMessage)) (*HostSession, error) {
+func NewHostSession(clientID string, fps int, quality int, sendSignal func(protocol.SignalingMessage)) (*HostSession, error) {
 	capturer, err := capture.NewScreenCapturer(0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init screen capture: %w", err)
@@ -52,11 +57,16 @@ func NewHostSession(fps int, quality int, sendSignal func(protocol.SignalingMess
 		fps = 30
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+
 	return &HostSession{
+		ClientID:    clientID,
+		ConnectedAt: time.Now(),
 		capturer:    capturer,
 		FPS:         fps,
 		Quality:     quality,
-		stopCapture: make(chan struct{}),
+		ctx:         ctx,
+		cancel:      cancel,
 		SendSignal:  sendSignal,
 	}, nil
 }
@@ -176,12 +186,18 @@ func (h *HostSession) HandleControlData(data []byte) {
 		_ = input.KeyDown(ctrl.Key, ctrl.Code, ctrl.KeyCode)
 	case protocol.TypeKeyUp:
 		_ = input.KeyUp(ctrl.Key, ctrl.Code, ctrl.KeyCode)
+	case protocol.TypeMonitorSwitch:
+		_ = h.capturer.SetDisplayIndex(ctrl.Monitor)
 	case protocol.TypeConfig:
 		if ctrl.Quality > 0 {
 			h.capturer.SetQuality(ctrl.Quality)
 		}
 		if ctrl.FPS > 0 && ctrl.FPS <= 60 {
 			h.FPS = ctrl.FPS
+		}
+	case protocol.TypeChat:
+		if h.OnChat != nil {
+			h.OnChat(h.ClientID, ctrl.Text)
 		}
 	case protocol.TypePing:
 		pongData, _ := json.Marshal(protocol.ControlMessage{
@@ -211,7 +227,7 @@ func (h *HostSession) StartStreaming() {
 
 		for {
 			select {
-			case <-h.stopCapture:
+			case <-h.ctx.Done():
 				return
 			case <-ticker.C:
 				frameData, err := h.capturer.CaptureFrame()
@@ -240,15 +256,12 @@ func (h *HostSession) StartStreaming() {
 
 func (h *HostSession) StopStreaming() {
 	if atomic.CompareAndSwapInt32(&h.running, 1, 0) {
-		select {
-		case h.stopCapture <- struct{}{}:
-		default:
-		}
+		h.cancel()
 	}
 }
 
 func (h *HostSession) Close() {
-	h.StopStreaming()
+	h.cancel()
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.peerConn != nil {
