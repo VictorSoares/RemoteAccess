@@ -7,7 +7,9 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"remoteaccess/internal/config"
@@ -20,46 +22,69 @@ import (
 var webFS embed.FS
 
 type LocalServer struct {
-	mu          sync.RWMutex
-	Config      *config.ConfigManager
-	Signaling   *signaling.Server
-	hostSession *webrtcmod.HostSession
-	upgrader    websocket.Upgrader
+	mu           sync.RWMutex
+	Config       *config.ConfigManager
+	Signaling    *signaling.Server
+	hostSession  *webrtcmod.HostSession
+	upgrader     websocket.Upgrader
+	cloudWS      *websocket.Conn
+	cloudStatus  string
+	stopCloud    chan struct{}
+}
+
+func normalizeWSURL(rawURL string) string {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return ""
+	}
+	if strings.HasPrefix(rawURL, "https://") {
+		rawURL = "wss://" + strings.TrimPrefix(rawURL, "https://")
+	} else if strings.HasPrefix(rawURL, "http://") {
+		rawURL = "ws://" + strings.TrimPrefix(rawURL, "http://")
+	} else if !strings.HasPrefix(rawURL, "ws://") && !strings.HasPrefix(rawURL, "wss://") {
+		rawURL = "wss://" + rawURL
+	}
+	rawURL = strings.TrimSuffix(rawURL, "/")
+	if !strings.HasSuffix(rawURL, "/ws") {
+		rawURL = rawURL + "/ws"
+	}
+	return rawURL
 }
 
 func NewLocalServer(cfg *config.ConfigManager) *LocalServer {
-	return &LocalServer{
-		Config:    cfg,
-		Signaling: signaling.NewServer(),
+	ls := &LocalServer{
+		Config:      cfg,
+		Signaling:   signaling.NewServer(),
+		cloudStatus: "local",
+		stopCloud:   make(chan struct{}),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true
 			},
 		},
 	}
+	return ls
 }
 
 func (s *LocalServer) Start(port int) error {
+	// Start background Cloud Signaling Client if configured
+	go s.cloudSignalingLoop()
+
 	mux := http.NewServeMux()
 
-	// Sub-filesystem for embedded web files
 	webContent, err := fs.Sub(webFS, "web")
 	if err != nil {
 		return fmt.Errorf("failed to load embedded web assets: %w", err)
 	}
 
-	// Serve Static Files
-	fileServer := http.FileServer(http.FS(webContent))
-	mux.Handle("/", fileServer)
+	mux.Handle("/", http.FileServer(http.FS(webContent)))
 
-	// API Routes
 	mux.HandleFunc("/api/host-info", s.handleHostInfo)
 	mux.HandleFunc("/api/set-password", s.handleSetPassword)
 	mux.HandleFunc("/api/set-signaling", s.handleSetSignaling)
 	mux.HandleFunc("/api/autostart", s.handleAutoStart)
 	mux.HandleFunc("/api/config", s.handleConfig)
 
-	// WebSocket Signaling Route
 	mux.HandleFunc("/ws", s.handleWS)
 
 	addr := fmt.Sprintf(":%d", port)
@@ -79,6 +104,7 @@ func (s *LocalServer) handleHostInfo(w http.ResponseWriter, r *http.Request) {
 		"fps":           s.Config.Data.FPS,
 		"auto_start":    s.Config.Data.AutoStart,
 		"signaling_url": s.Config.Data.SignalingURL,
+		"cloud_status":  s.cloudStatus,
 	})
 }
 
@@ -91,12 +117,21 @@ func (s *LocalServer) handleSetSignaling(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	_ = s.Config.SetSignalingURL(req.SignalingURL)
+	normURL := normalizeWSURL(req.SignalingURL)
+	_ = s.Config.SetSignalingURL(normURL)
+
+	// Trigger immediate reconnect
+	s.mu.Lock()
+	if s.cloudWS != nil {
+		_ = s.cloudWS.Close()
+		s.cloudWS = nil
+	}
+	s.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status":        "ok",
-		"signaling_url": req.SignalingURL,
+		"signaling_url": normURL,
 	})
 }
 
@@ -112,6 +147,20 @@ func (s *LocalServer) handleSetPassword(w http.ResponseWriter, r *http.Request) 
 	if err := s.Config.SetPassword(req.Password); err != nil {
 		http.Error(w, "Erro ao salvar senha", http.StatusInternalServerError)
 		return
+	}
+
+	// Re-register with cloud if connected
+	s.mu.RLock()
+	cws := s.cloudWS
+	hostID := s.Config.Data.ID
+	s.mu.RUnlock()
+
+	if cws != nil {
+		_ = cws.WriteJSON(protocol.SignalingMessage{
+			Action:   protocol.ActionRegister,
+			ID:       hostID,
+			Password: req.Password,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -153,100 +202,154 @@ func (s *LocalServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = s.Config.SetConfig(req.Quality, req.FPS)
-
 	w.WriteHeader(http.StatusOK)
 }
 
+// cloudSignalingLoop connects the Go host daemon to the Render/Cloud signaling server
+func (s *LocalServer) cloudSignalingLoop() {
+	for {
+		s.mu.RLock()
+		targetURL := s.Config.Data.SignalingURL
+		s.mu.RUnlock()
+
+		if targetURL == "" {
+			s.mu.Lock()
+			s.cloudStatus = "local"
+			s.mu.Unlock()
+			time.Sleep(2 * time.Second)
+			continue
+		}
+
+		s.mu.Lock()
+		s.cloudStatus = "connecting"
+		s.mu.Unlock()
+
+		log.Printf("[Cloud Signaling] Conectando a %s ...", targetURL)
+		conn, _, err := websocket.DefaultDialer.Dial(targetURL, nil)
+		if err != nil {
+			log.Printf("[Cloud Signaling] Falha ao conectar: %v. Tentando novamente em 4s...", err)
+			s.mu.Lock()
+			s.cloudStatus = "error"
+			s.mu.Unlock()
+			time.Sleep(4 * time.Second)
+			continue
+		}
+
+		s.mu.Lock()
+		s.cloudWS = conn
+		s.cloudStatus = "connected"
+		hostID := s.Config.Data.ID
+		hostPwd := s.Config.Data.Password
+		s.mu.Unlock()
+
+		log.Printf("[Cloud Signaling] Conectado com sucesso! Registrando Host ID: %s", hostID)
+
+		// Register host ID on Render signaling server
+		err = conn.WriteJSON(protocol.SignalingMessage{
+			Action:   protocol.ActionRegister,
+			ID:       hostID,
+			Password: hostPwd,
+		})
+		if err != nil {
+			conn.Close()
+			continue
+		}
+
+		// Listen for connection requests from remote clients across the internet
+		for {
+			var msg protocol.SignalingMessage
+			err := conn.ReadJSON(&msg)
+			if err != nil {
+				log.Printf("[Cloud Signaling] Conexao perdida: %v", err)
+				break
+			}
+
+			s.handleSignalingMessage(conn, msg)
+		}
+
+		conn.Close()
+		s.mu.Lock()
+		s.cloudWS = nil
+		s.cloudStatus = "disconnected"
+		s.mu.Unlock()
+
+		time.Sleep(3 * time.Second)
+	}
+}
+
+func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.SignalingMessage) {
+	switch msg.Action {
+	case protocol.ActionConnect:
+		log.Printf("[Signaling] Cliente remoto solicitou conexao: %s", msg.TargetID)
+
+	case protocol.ActionOffer:
+		log.Printf("[Signaling] Recebida oferta WebRTC de cliente remoto")
+
+		// Create WebRTC Host Session
+		hostSess, err := webrtcmod.NewHostSession(s.Config.Data.FPS, s.Config.Data.Quality, func(outMsg protocol.SignalingMessage) {
+			_ = conn.WriteJSON(outMsg)
+		})
+		if err != nil {
+			log.Printf("[Signaling] Erro ao criar sessao host: %v", err)
+			return
+		}
+
+		s.mu.Lock()
+		if s.hostSession != nil {
+			s.hostSession.Close()
+		}
+		s.hostSession = hostSess
+		s.mu.Unlock()
+
+		err = hostSess.HandleRemoteOffer(msg.TargetID, msg.SDP)
+		if err != nil {
+			log.Printf("[Signaling] Erro ao responder oferta WebRTC: %v", err)
+		}
+
+	case protocol.ActionCandidate:
+		s.mu.RLock()
+		sess := s.hostSession
+		s.mu.RUnlock()
+
+		if sess != nil && len(msg.Candidate) > 0 {
+			_ = sess.AddICECandidate(msg.Candidate)
+		}
+
+	case protocol.ActionClose:
+		s.mu.Lock()
+		if s.hostSession != nil {
+			s.hostSession.Close()
+			s.hostSession = nil
+		}
+		s.mu.Unlock()
+	}
+}
+
+// handleWS handles local dashboard WebSocket connections
 func (s *LocalServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("[WS] Upgrade error: %v", err)
 		return
 	}
 	defer conn.Close()
 
 	for {
-		_, msgBytes, err := conn.ReadMessage()
-		if err != nil {
+		var msg protocol.SignalingMessage
+		if err := conn.ReadJSON(&msg); err != nil {
 			break
 		}
 
-		var msg protocol.SignalingMessage
-		if err := json.Unmarshal(msgBytes, &msg); err != nil {
-			continue
-		}
+		// If this is a local client request, forward or handle
+		s.mu.RLock()
+		cloudConn := s.cloudWS
+		s.mu.RUnlock()
 
-		switch msg.Action {
-		case protocol.ActionRegister:
-			s.mu.Lock()
-			s.Config.Data.ID = msg.ID
-			s.Config.Data.Password = msg.Password
-			s.mu.Unlock()
-
-			conn.WriteJSON(protocol.SignalingMessage{
-				Action:  protocol.ActionStatus,
-				Status:  "registered",
-				Message: "Host registrado com sucesso.",
-				ID:      msg.ID,
-			})
-
-		case protocol.ActionOffer:
-			s.mu.RLock()
-			expectedPwd := s.Config.Data.Password
-			s.mu.RUnlock()
-
-			if msg.Password != "" && msg.Password != expectedPwd {
-				conn.WriteJSON(protocol.SignalingMessage{
-					Action:  protocol.ActionError,
-					Message: "Senha incorreta.",
-				})
-				continue
-			}
-
-			// Initialize WebRTC Host Session
-			hostSess, err := webrtcmod.NewHostSession(s.Config.Data.FPS, s.Config.Data.Quality, func(outMsg protocol.SignalingMessage) {
-				_ = conn.WriteJSON(outMsg)
-			})
-			if err != nil {
-				conn.WriteJSON(protocol.SignalingMessage{
-					Action:  protocol.ActionError,
-					Message: fmt.Sprintf("Erro ao iniciar sessão host: %v", err),
-				})
-				continue
-			}
-
-			s.mu.Lock()
-			if s.hostSession != nil {
-				s.hostSession.Close()
-			}
-			s.hostSession = hostSess
-			s.mu.Unlock()
-
-			err = hostSess.HandleRemoteOffer(msg.TargetID, msg.SDP)
-			if err != nil {
-				conn.WriteJSON(protocol.SignalingMessage{
-					Action:  protocol.ActionError,
-					Message: fmt.Sprintf("Erro ao processar oferta WebRTC: %v", err),
-				})
-				continue
-			}
-
-		case protocol.ActionCandidate:
-			s.mu.RLock()
-			sess := s.hostSession
-			s.mu.RUnlock()
-
-			if sess != nil && len(msg.Candidate) > 0 {
-				_ = sess.AddICECandidate(msg.Candidate)
-			}
-
-		case protocol.ActionClose:
-			s.mu.Lock()
-			if s.hostSession != nil {
-				s.hostSession.Close()
-				s.hostSession = nil
-			}
-			s.mu.Unlock()
+		if cloudConn != nil {
+			// Forward to Cloud Relay
+			_ = cloudConn.WriteJSON(msg)
+		} else {
+			// Local handling fallback
+			s.handleSignalingMessage(conn, msg)
 		}
 	}
 }

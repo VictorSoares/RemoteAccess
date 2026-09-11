@@ -5,7 +5,8 @@ let myHostInfo = {
   pwd: '',
   rawPwd: '',
   autoStart: false,
-  signalingURL: ''
+  signalingURL: '',
+  cloudStatus: 'local'
 };
 
 let signalingWS = null;
@@ -32,6 +33,9 @@ window.addEventListener('DOMContentLoaded', async () => {
   connectSignaling();
   setupCanvasEvents();
   setupKeyboardEvents();
+
+  // Poll status every 3 seconds
+  setInterval(fetchHostInfo, 3000);
 });
 
 function switchTab(tab) {
@@ -50,12 +54,33 @@ async function fetchHostInfo() {
     myHostInfo.rawPwd = data.password;
     myHostInfo.autoStart = data.auto_start;
     myHostInfo.signalingURL = data.signaling_url || '';
+    myHostInfo.cloudStatus = data.cloud_status || 'local';
     
     document.getElementById('my-id').innerText = formatID(data.id);
     document.getElementById('autostart-toggle').checked = !!data.auto_start;
     updatePasswordDisplay();
+    updateNetworkBadge(data.cloud_status, data.signaling_url);
   } catch (err) {
     console.error('Failed to fetch host info:', err);
+  }
+}
+
+function updateNetworkBadge(status, url) {
+  const dot = document.getElementById('status-indicator');
+  const text = document.getElementById('status-text');
+
+  if (!url || status === 'local') {
+    dot.className = 'status-dot online';
+    text.innerText = 'Pronto (Rede Local)';
+  } else if (status === 'connected') {
+    dot.className = 'status-dot online';
+    text.innerText = 'Online (Nuvem Ativa)';
+  } else if (status === 'connecting') {
+    dot.className = 'status-dot';
+    text.innerText = 'Conectando à Nuvem...';
+  } else {
+    dot.className = 'status-dot';
+    text.innerText = 'Desconectado da Nuvem';
   }
 }
 
@@ -100,15 +125,6 @@ async function openCustomPasswordModal() {
       myHostInfo.rawPwd = data.password;
       updatePasswordDisplay();
       alert('Senha fixa salva com sucesso! Ela será mantida mesmo ao reiniciar o PC.');
-      
-      // Update signaling with new password
-      if (signalingWS && signalingWS.readyState === WebSocket.OPEN) {
-        signalingWS.send(JSON.stringify({
-          action: 'register',
-          id: myHostInfo.id,
-          password: myHostInfo.rawPwd
-        }));
-      }
     }
   } catch (err) {
     alert('Erro ao salvar nova senha.');
@@ -158,7 +174,7 @@ function updateHostConfig() {
 
 async function openSignalingModal() {
   const current = myHostInfo.signalingURL || '';
-  const newUrl = prompt('Digite o endereço do seu servidor de sinalização na nuvem (ex: wss://seu-app.onrender.com/ws ou deixe em branco para usar o padrão local):', current);
+  const newUrl = prompt('Digite o endereço do seu servidor Render (ex: https://remoteaccess-ltwx.onrender.com ou deixe em branco para modo local):', current);
   if (newUrl === null) return;
 
   try {
@@ -170,26 +186,30 @@ async function openSignalingModal() {
     const data = await res.json();
     if (data.status === 'ok') {
       myHostInfo.signalingURL = data.signaling_url;
-      alert('Endereço do servidor atualizado com sucesso! Reconectando...');
-      if (signalingWS) {
-        signalingWS.close();
-      } else {
-        connectSignaling();
-      }
+      alert('Servidor de Nuvem configurado! Conectando ao Render em segundo plano...');
+      await fetchHostInfo();
+      connectSignaling();
     }
   } catch (err) {
     alert('Erro ao salvar servidor de sinalização.');
   }
 }
 
-// Signaling WebSocket Connection
+// Signaling WebSocket Connection for Client control
 function connectSignaling() {
+  if (signalingWS) {
+    try { signalingWS.close(); } catch(e) {}
+  }
+
+  // Use the cloud signaling URL if set, otherwise local /ws
   let wsUrl = '';
   if (myHostInfo.signalingURL && myHostInfo.signalingURL.trim() !== '') {
     wsUrl = myHostInfo.signalingURL.trim();
-    if (wsUrl.startsWith('http://')) wsUrl = wsUrl.replace('http://', 'ws://');
-    if (wsUrl.startsWith('https://')) wsUrl = wsUrl.replace('https://', 'wss://');
-    if (!wsUrl.endsWith('/ws')) wsUrl = wsUrl.replace(/\/$/, '') + '/ws';
+    if (wsUrl.startsWith('https://')) wsUrl = 'wss://' + wsUrl.slice(8);
+    if (wsUrl.startsWith('http://')) wsUrl = 'ws://' + wsUrl.slice(7);
+    if (!wsUrl.startsWith('ws://') && !wsUrl.startsWith('wss://')) wsUrl = 'wss://' + wsUrl;
+    wsUrl = wsUrl.replace(/\/$/, '');
+    if (!wsUrl.endsWith('/ws')) wsUrl += '/ws';
   } else {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     wsUrl = `${protocol}//${window.location.host}/ws`;
@@ -198,64 +218,53 @@ function connectSignaling() {
   try {
     signalingWS = new WebSocket(wsUrl);
   } catch (err) {
-    document.getElementById('status-indicator').className = 'status-dot';
-    document.getElementById('status-text').innerText = 'Erro no Relay';
+    console.error('WebSocket connection error:', err);
     return;
   }
 
   signalingWS.onopen = () => {
-    document.getElementById('status-indicator').className = 'status-dot online';
-    document.getElementById('status-text').innerText = 'Online / Nuvem Conectada';
-
-    // Register local host
-    if (myHostInfo.id) {
-      signalingWS.send(JSON.stringify({
-        action: 'register',
-        id: myHostInfo.id,
-        password: myHostInfo.rawPwd
-      }));
-    }
+    console.log('[Signaling WS] Conectado a:', wsUrl);
   };
 
   signalingWS.onmessage = async (event) => {
-    const msg = JSON.parse(event.data);
+    try {
+      const msg = JSON.parse(event.data);
+      switch (msg.action) {
+        case 'status':
+          console.log('[Signaling Status]', msg.message);
+          break;
 
-    switch (msg.action) {
-      case 'status':
-        console.log('[Signaling Status]', msg.message);
-        break;
+        case 'error':
+          alert(msg.message || 'Erro de conexão.');
+          resetConnectButton();
+          break;
 
-      case 'error':
-        alert(msg.message || 'Erro de conexão.');
-        resetConnectButton();
-        break;
+        case 'answer':
+          if (peerConnection) {
+            await peerConnection.setRemoteDescription(new RTCSessionDescription({
+              type: 'answer',
+              sdp: msg.sdp
+            }));
+          }
+          break;
 
-      case 'answer':
-        // Client receives answer from host
-        if (peerConnection) {
-          await peerConnection.setRemoteDescription(new RTCSessionDescription({
-            type: 'answer',
-            sdp: msg.sdp
-          }));
-        }
-        break;
+        case 'candidate':
+          if (peerConnection && msg.candidate) {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(msg.candidate));
+          }
+          break;
 
-      case 'candidate':
-        if (peerConnection && msg.candidate) {
-          await peerConnection.addIceCandidate(new RTCIceCandidate(msg.candidate));
-        }
-        break;
-
-      case 'close':
-        closeViewer();
-        break;
+        case 'close':
+          closeViewer();
+          break;
+      }
+    } catch (e) {
+      console.error('[Signaling Message Parse Error]', e);
     }
   };
 
   signalingWS.onclose = () => {
-    document.getElementById('status-indicator').className = 'status-dot';
-    document.getElementById('status-text').innerText = 'Reconectando...';
-    setTimeout(connectSignaling, 3000);
+    setTimeout(connectSignaling, 4000);
   };
 }
 
@@ -276,11 +285,18 @@ async function connectToRemote(e) {
 
   saveRecentConnection(rawTargetId);
 
+  // Reconnect signaling if needed
+  if (!signalingWS || signalingWS.readyState !== WebSocket.OPEN) {
+    connectSignaling();
+    await new Promise(r => setTimeout(r, 800));
+  }
+
   // Setup WebRTC Peer Connection
   const config = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
       { urls: 'stun:stun.cloudflare.com:3478' }
     ]
   };
@@ -294,7 +310,7 @@ async function connectToRemote(e) {
   setupDataChannels(rawTargetId);
 
   peerConnection.onicecandidate = (event) => {
-    if (event.candidate && signalingWS) {
+    if (event.candidate && signalingWS && signalingWS.readyState === WebSocket.OPEN) {
       signalingWS.send(JSON.stringify({
         action: 'candidate',
         targetId: rawTargetId,
@@ -308,12 +324,17 @@ async function connectToRemote(e) {
   await peerConnection.setLocalDescription(offer);
 
   // Send Offer through Signaling Server
-  signalingWS.send(JSON.stringify({
-    action: 'offer',
-    targetId: rawTargetId,
-    password: targetPwd,
-    sdp: offer.sdp
-  }));
+  if (signalingWS && signalingWS.readyState === WebSocket.OPEN) {
+    signalingWS.send(JSON.stringify({
+      action: 'offer',
+      targetId: rawTargetId,
+      password: targetPwd,
+      sdp: offer.sdp
+    }));
+  } else {
+    alert('Não foi possível conectar ao servidor de sinalização. Verifique se o servidor está online.');
+    resetConnectButton();
+  }
 }
 
 function setupDataChannels(targetId) {
