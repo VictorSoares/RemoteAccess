@@ -37,6 +37,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   loadRecentConnections();
   await fetchHostInfo();
   await fetchSystemInfo();
+  await refreshLogs();
   connectSignaling();
   setupCanvasEvents();
   setupKeyboardEvents();
@@ -44,7 +45,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   sessionPollingTimer = setInterval(() => {
     fetchHostInfo();
     fetchSessionStatus();
-    if (logsModalOpen) refreshLogs();
+    refreshLogs();
   }, 2000);
 });
 
@@ -242,12 +243,22 @@ async function refreshLogs() {
   try {
     const res = await fetch('/api/logs');
     const data = await res.json();
-    const container = document.getElementById('logs-container');
+    const modalContainer = document.getElementById('logs-container');
+    const hostTerminal = document.getElementById('host-terminal-logs');
+    
+    let content = 'Nenhum log registrado ainda.';
     if (data.logs && data.logs.length > 0) {
-      container.innerText = data.logs.join('\n');
-      container.scrollTop = container.scrollHeight;
-    } else {
-      container.innerText = 'Nenhum log registrado ainda.';
+      content = data.logs.join('\n');
+    }
+
+    if (modalContainer && (logsModalOpen || modalContainer.innerText !== content)) {
+      modalContainer.innerText = content;
+      modalContainer.scrollTop = modalContainer.scrollHeight;
+    }
+
+    if (hostTerminal) {
+      hostTerminal.innerText = content;
+      hostTerminal.scrollTop = hostTerminal.scrollHeight;
     }
   } catch (err) {
     console.error('Failed to fetch logs:', err);
@@ -431,7 +442,10 @@ function connectSignaling() {
               const ctrl = JSON.parse(msg.payload);
               if (ctrl.t === 'pong') {
                 const rtt = Math.round(performance.now() - ctrl.ts);
-                document.getElementById('stat-latency').innerText = `🌐 ${rtt} ms (Nuvem)`;
+                const latEl = document.getElementById('stat-latency');
+                if (latEl) latEl.innerText = `⚡ ${rtt} ms`;
+                const badgeEl = document.getElementById('hud-status-badge');
+                if (badgeEl) badgeEl.innerHTML = `<span class="hud-dot" style="background-color: #38bdf8; box-shadow: 0 0 6px #38bdf8;"></span> Nuvem Relay`;
               } else if (ctrl.t === 'chat') {
                 appendChatMessage('Remoto', ctrl.text);
               }
@@ -552,7 +566,10 @@ function setupDataChannels(targetId) {
       const msg = JSON.parse(event.data);
       if (msg.t === 'pong') {
         const rtt = Math.round(performance.now() - msg.ts);
-        document.getElementById('stat-latency').innerText = `⚡ ${rtt} ms (P2P)`;
+        const latEl = document.getElementById('stat-latency');
+        if (latEl) latEl.innerText = `⚡ ${rtt} ms`;
+        const badgeEl = document.getElementById('hud-status-badge');
+        if (badgeEl) badgeEl.innerHTML = `<span class="hud-dot"></span> P2P Direct`;
       } else if (msg.t === 'chat') {
         appendChatMessage('Remoto', msg.text);
       }
@@ -570,7 +587,8 @@ function renderBase64Frame(b64) {
   frameCount++;
   const now = performance.now();
   if (now - lastFpsTime >= 1000) {
-    document.getElementById('stat-fps').innerText = `🎥 ${frameCount} fps (Nuvem)`;
+    const fpsEl = document.getElementById('stat-fps');
+    if (fpsEl) fpsEl.innerText = `🎥 ${frameCount} FPS`;
     frameCount = 0;
     lastFpsTime = now;
   }
@@ -590,7 +608,8 @@ function renderRawBlob(blobData) {
   frameCount++;
   const now = performance.now();
   if (now - lastFpsTime >= 1000) {
-    document.getElementById('stat-fps').innerText = `🎥 ${frameCount} fps (P2P)`;
+    const fpsEl = document.getElementById('stat-fps');
+    if (fpsEl) fpsEl.innerText = `🎥 ${frameCount} FPS`;
     frameCount = 0;
     lastFpsTime = now;
   }
