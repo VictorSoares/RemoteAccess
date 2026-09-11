@@ -20,6 +20,7 @@ type AppConfig struct {
 	FPS          int    `json:"fps"`
 	AutoStart    bool   `json:"auto_start"`
 	SignalingURL string `json:"signaling_url"`
+	SaveLogFile  bool   `json:"save_log_file"`
 }
 
 type ConfigManager struct {
@@ -30,18 +31,26 @@ type ConfigManager struct {
 }
 
 func getConfigPath() string {
-	// Priority 1: Alongside executable
-	exePath, err := os.Executable()
-	if err == nil {
-		dir := filepath.Dir(exePath)
-		return filepath.Join(dir, "config.json")
-	}
-
-	// Priority 2: AppData
+	// Priority 1: AppData (%APPDATA%\RemoteAccess\config.json) - keeps executable directory 100% clean
 	appData := os.Getenv("APPDATA")
 	if appData != "" {
 		dir := filepath.Join(appData, "RemoteAccess")
 		_ = os.MkdirAll(dir, 0755)
+		return filepath.Join(dir, "config.json")
+	}
+
+	// Priority 2: UserProfile
+	userProfile := os.Getenv("USERPROFILE")
+	if userProfile != "" {
+		dir := filepath.Join(userProfile, ".remoteaccess")
+		_ = os.MkdirAll(dir, 0755)
+		return filepath.Join(dir, "config.json")
+	}
+
+	// Priority 3: Alongside executable
+	exePath, err := os.Executable()
+	if err == nil {
+		dir := filepath.Dir(exePath)
 		return filepath.Join(dir, "config.json")
 	}
 
@@ -123,6 +132,13 @@ func (cm *ConfigManager) SetConfig(quality, fps int) error {
 	if fps > 0 {
 		cm.Data.FPS = fps
 	}
+	cm.mu.Unlock()
+	return cm.Save()
+}
+
+func (cm *ConfigManager) SetSaveLogFile(enable bool) error {
+	cm.mu.Lock()
+	cm.Data.SaveLogFile = enable
 	cm.mu.Unlock()
 	return cm.Save()
 }

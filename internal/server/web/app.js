@@ -56,6 +56,8 @@ function switchTab(tab) {
   document.getElementById('client-view').style.display = tab === 'client' ? 'block' : 'none';
 }
 
+let isInputBlocked = false;
+
 async function fetchHostInfo() {
   try {
     const res = await fetch('/api/host-info');
@@ -68,11 +70,99 @@ async function fetchHostInfo() {
     
     document.getElementById('my-id').innerText = formatID(data.id);
     document.getElementById('autostart-toggle').checked = !!data.auto_start;
+    const saveLogEl = document.getElementById('savelog-toggle');
+    if (saveLogEl) saveLogEl.checked = !!data.save_log_file;
     updatePasswordDisplay();
     updateNetworkBadge(data.cloud_status, data.signaling_url);
   } catch (err) {
     console.error('Failed to fetch host info:', err);
   }
+}
+
+async function toggleSaveLogFile(e) {
+  const enable = e.target.checked;
+  try {
+    const res = await fetch('/api/set-log-file', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enable: enable })
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      if (enable) {
+        alert('Gravação de arquivo de log em disco ativada (%APPDATA%\\RemoteAccess\\remoteaccess.log).');
+      } else {
+        alert('Gravação de arquivo de log desativada. A pasta permanecerá limpa.');
+      }
+    }
+  } catch (err) {
+    alert('Erro ao salvar configuração de log.');
+    e.target.checked = !enable;
+  }
+}
+
+function sendSystemAction(action) {
+  if (!isConnected) return;
+  if (action === 'cad') {
+    sendControl({ t: 'kd', k: 'Control', c: 'ControlLeft', kc: 17 });
+    sendControl({ t: 'kd', k: 'Alt', c: 'AltLeft', kc: 18 });
+    sendControl({ t: 'kd', k: 'Delete', c: 'Delete', kc: 46 });
+    setTimeout(() => {
+      sendControl({ t: 'ku', k: 'Delete', c: 'Delete', kc: 46 });
+      sendControl({ t: 'ku', k: 'Alt', c: 'AltLeft', kc: 18 });
+      sendControl({ t: 'ku', k: 'Control', c: 'ControlLeft', kc: 17 });
+    }, 120);
+  } else {
+    sendControl({ t: 'sys_cmd', cmd: action });
+  }
+}
+
+function toggleBlockInput() {
+  if (!isConnected) return;
+  isInputBlocked = !isInputBlocked;
+  sendControl({ t: 'sys_cmd', cmd: 'block_input', block: isInputBlocked });
+  const btn = document.getElementById('btn-block-input');
+  if (btn) {
+    btn.classList.toggle('btn-active', isInputBlocked);
+    btn.innerText = isInputBlocked ? '🔒 Entrada Bloqueada' : '🚫 Bloquear Entrada';
+  }
+}
+
+function getCanvasCoords(e) {
+  const rect = canvas.getBoundingClientRect();
+  const nativeWidth = canvas.width || 1920;
+  const nativeHeight = canvas.height || 1080;
+  
+  // Calculate aspect ratios
+  const containerRatio = rect.width / rect.height;
+  const imageRatio = nativeWidth / nativeHeight;
+
+  let actualWidth, actualHeight, offsetX, offsetY;
+
+  if (containerRatio > imageRatio) {
+    // Letterbox on sides (pillarbox)
+    actualHeight = rect.height;
+    actualWidth = rect.height * imageRatio;
+    offsetX = (rect.width - actualWidth) / 2;
+    offsetY = 0;
+  } else {
+    // Letterbox on top & bottom
+    actualWidth = rect.width;
+    actualHeight = rect.width / imageRatio;
+    offsetX = 0;
+    offsetY = (rect.height - actualHeight) / 2;
+  }
+
+  const mouseX = e.clientX - rect.left - offsetX;
+  const mouseY = e.clientY - rect.top - offsetY;
+
+  const ratioX = mouseX / actualWidth;
+  const ratioY = mouseY / actualHeight;
+
+  return {
+    x: Math.max(0, Math.min(1, ratioX)),
+    y: Math.max(0, Math.min(1, ratioY))
+  };
 }
 
 async function fetchSystemInfo() {
@@ -659,15 +749,6 @@ function appendChatMessage(sender, text) {
   }
 }
 
-function getCanvasCoords(e) {
-  const rect = canvas.getBoundingClientRect();
-  const ratioX = (e.clientX - rect.left) / rect.width;
-  const ratioY = (e.clientY - rect.top) / rect.height;
-  return {
-    x: Math.max(0, Math.min(1, ratioX)),
-    y: Math.max(0, Math.min(1, ratioY))
-  };
-}
 
 function setupCanvasEvents() {
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());

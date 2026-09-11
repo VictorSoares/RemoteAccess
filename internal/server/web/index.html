@@ -11,13 +11,13 @@
   <header class="app-header">
     <div class="logo">
       <span>⚡ RemoteAccess</span>
-      <span class="logo-badge">AnyDesk Portable Edition</span>
+      <span class="logo-badge">AnyDesk Edition</span>
     </div>
     <div style="display: flex; align-items: center; gap: 0.6rem;">
       <button class="btn-icon" onclick="openSignalingModal()" title="Configurar Servidor de Nuvem (Render / VPS)" style="font-size: 0.8rem; padding: 0.35rem 0.7rem;">
         🌐 Nuvem
       </button>
-      <button class="btn-icon" onclick="toggleLogsModal()" title="Visualizar Logs em Tempo Real" style="font-size: 0.8rem; padding: 0.35rem 0.7rem;">
+      <button class="btn-icon" onclick="toggleLogsModal()" title="Visualizar Logs em Janela Flutuante" style="font-size: 0.8rem; padding: 0.35rem 0.7rem;">
         📜 Logs
       </button>
       <div class="network-badge">
@@ -54,13 +54,13 @@
             </div>
           </div>
           <button class="btn-icon btn-danger" onclick="kickActiveSession()" style="padding: 0.5rem 1rem; font-weight: 700; background: #dc2626; color: white;">
-            🛑 Encerrar Sessão Imediatamente
+            🛑 Forçar Desconexão
           </button>
         </div>
       </div>
 
       <h2 class="card-title">Permitir Controle Remoto (Acesso Não Supervisionado)</h2>
-      <p class="card-desc">Este computador possui um <strong>ID Fixo Permanente</strong>. Você pode definir sua senha fixa e deixar o programa iniciando junto com o Windows para acessá-lo de qualquer lugar.</p>
+      <p class="card-desc">Este computador possui um <strong>ID Fixo Permanente</strong>. Você pode definir sua senha fixa e deixar o programa iniciando com o Windows para acessá-lo de qualquer lugar.</p>
 
       <div class="id-display-container">
         <div class="credential-box">
@@ -97,13 +97,23 @@
       </div>
 
       <!-- Unattended Access / Windows Startup Settings -->
-      <div style="margin-top: 1.25rem; padding: 1.25rem; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border); border-radius: 12px;">
+      <div style="margin-top: 1.25rem; padding: 1.25rem; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; gap: 1rem;">
         <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer;">
           <input type="checkbox" id="autostart-toggle" onchange="toggleAutoStart(event)" style="width: 1.2rem; height: 1.2rem; accent-color: var(--accent); cursor: pointer;">
           <div>
             <div style="font-weight: 600; font-size: 0.95rem;">⚡ Iniciar automaticamente em segundo plano com o Windows</div>
             <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.15rem;">
               O RemoteAccess roda silenciosamente ao ligar o computador, permitindo que você conecte a qualquer momento de casa ou do trabalho.
+            </div>
+          </div>
+        </label>
+
+        <label style="display: flex; align-items: center; gap: 0.75rem; cursor: pointer; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 0.75rem;">
+          <input type="checkbox" id="savelog-toggle" onchange="toggleSaveLogFile(event)" style="width: 1.2rem; height: 1.2rem; accent-color: var(--accent); cursor: pointer;">
+          <div>
+            <div style="font-weight: 600; font-size: 0.95rem;">📁 Gravar arquivo de log em disco (remoteaccess.log)</div>
+            <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.15rem;">
+              Desativado por padrão para manter a pasta 100% limpa. Ative apenas para diagnóstico.
             </div>
           </div>
         </label>
@@ -164,7 +174,7 @@
   <div id="logs-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.75); z-index: 10000; align-items: center; justify-content: center;">
     <div class="card" style="max-width: 750px; width: 90%; max-height: 80vh; display: flex; flex-direction: column;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-        <h3 style="font-size: 1.1rem; font-weight: 700;">📜 Logs do Sistema</h3>
+        <h3 style="font-size: 1.1rem; font-weight: 700;">📜 Logs em Tempo Real</h3>
         <button class="btn-icon btn-danger" onclick="toggleLogsModal()" style="padding: 0.3rem 0.6rem;">✕ Fechar</button>
       </div>
       <div id="logs-container" style="background: #020617; border: 1px solid var(--border); border-radius: 8px; padding: 1rem; font-family: monospace; font-size: 0.82rem; color: #a5f3fc; overflow-y: auto; flex: 1; min-height: 250px; max-height: 450px; white-space: pre-wrap;">
@@ -173,9 +183,9 @@
     </div>
   </div>
 
-  <!-- Fullscreen Remote Desktop Viewer (AnyDesk Style) -->
+  <!-- Fullscreen Remote Desktop Viewer (AnyDesk Style Retractable Toolbar) -->
   <div id="viewer-container">
-    <div id="viewer-toolbar">
+    <div id="viewer-toolbar" class="autohide-toolbar">
       <!-- Status Badges -->
       <span class="stat-tag" id="stat-latency">⚡ -- ms</span>
       <span class="stat-tag" id="stat-fps">🎥 -- fps</span>
@@ -193,21 +203,21 @@
         <option value="hd">💎 Alta Definição (HD)</option>
       </select>
       
-      <!-- System Shortcuts -->
-      <button class="toolbar-btn" onclick="sendSpecialKey('ctrl_alt_del')" title="Enviar Ctrl+Alt+Del">
+      <!-- System Actions Button Menu -->
+      <button class="toolbar-btn" onclick="sendSystemAction('cad')" title="Enviar Ctrl+Alt+Del">
         ⌨️ Ctrl+Alt+Del
       </button>
-      <button class="toolbar-btn" onclick="sendSpecialKey('task_manager')" title="Gerenciador de Tarefas (Ctrl+Shift+Esc)">
+      <button class="toolbar-btn" onclick="sendSystemAction('taskmgr')" title="Abrir Gerenciador de Tarefas">
         ⚡ Tarefas
       </button>
-      <button class="toolbar-btn" onclick="sendSpecialKey('win_d')" title="Mostrar Área de Trabalho">
+      <button class="toolbar-btn" onclick="sendSystemAction('desktop')" title="Mostrar Área de Trabalho (Win+D)">
         🪟 Win+D
       </button>
-      <button class="toolbar-btn" onclick="sendSpecialKey('alt_tab')" title="Alternar Janelas">
-        📑 Alt+Tab
-      </button>
-      <button class="toolbar-btn" onclick="sendSpecialKey('win_l')" title="Bloquear Computador">
+      <button class="toolbar-btn" onclick="sendSystemAction('lock')" title="Bloquear Computador Remoto">
         🔒 Bloquear
+      </button>
+      <button class="toolbar-btn" id="btn-block-input" onclick="toggleBlockInput()" title="Bloquear Mouse e Teclado Local do PC Acessado">
+        🚫 Bloquear Entrada
       </button>
       <button class="toolbar-btn" onclick="openClipboardModal()" title="Enviar Texto da Área de Transferência">
         📋 Colar Texto
@@ -224,7 +234,7 @@
     </div>
 
     <!-- Viewer Canvas -->
-    <div style="flex: 1; display: flex; align-items: center; justify-content: center; position: relative; width: 100%; height: 100%; overflow: hidden;">
+    <div id="canvas-wrapper" style="flex: 1; display: flex; align-items: center; justify-content: center; position: relative; width: 100%; height: 100%; overflow: hidden; background: #000;">
       <canvas id="screen-canvas" tabindex="0"></canvas>
 
       <!-- In-Session Chat Floating Drawer -->

@@ -3,17 +3,31 @@
 package input
 
 import (
+	"os/exec"
 	"strings"
 	"syscall"
 )
 
 var (
-	user32               = syscall.NewLazyDLL("user32.dll")
-	procSetCursorPos     = user32.NewProc("SetCursorPos")
-	procMouseEvent       = user32.NewProc("mouse_event")
-	procKeybdEvent       = user32.NewProc("keybd_event")
-	procGetSystemMetrics = user32.NewProc("GetSystemMetrics")
+	user32                       = syscall.NewLazyDLL("user32.dll")
+	procSetCursorPos             = user32.NewProc("SetCursorPos")
+	procMouseEvent               = user32.NewProc("mouse_event")
+	procKeybdEvent               = user32.NewProc("keybd_event")
+	procGetSystemMetrics         = user32.NewProc("GetSystemMetrics")
+	procBlockInput               = user32.NewProc("BlockInput")
+	procLockWorkStation          = user32.NewProc("LockWorkStation")
+	procSetProcessDpiAwarenessCtx = user32.NewProc("SetProcessDpiAwarenessContext")
+	procSetProcessDPIAware       = user32.NewProc("SetProcessDPIAware")
 )
+
+func init() {
+	// Enable Per-Monitor DPI Awareness V2 (-4) so Windows gives us exact physical pixel coordinates
+	if procSetProcessDpiAwarenessCtx.Find() == nil {
+		_, _, _ = procSetProcessDpiAwarenessCtx.Call(uintptr(^uintptr(3))) // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+	} else if procSetProcessDPIAware.Find() == nil {
+		_, _, _ = procSetProcessDPIAware.Call()
+	}
+}
 
 const (
 	mouseeventfMove       = 0x0001
@@ -30,6 +44,34 @@ const (
 	keyeventfKeyup       = 0x0002
 	keyeventfUnicode     = 0x0004
 )
+
+// BlockLocalInput blocks or unblocks physical mouse and keyboard inputs on the local machine
+func BlockLocalInput(block bool) error {
+	val := uintptr(0)
+	if block {
+		val = 1
+	}
+	procBlockInput.Call(val)
+	return nil
+}
+
+// LockWorkstation immediately locks the Windows desktop
+func LockWorkstation() {
+	procLockWorkStation.Call()
+}
+
+// OpenTaskManager launches Windows Task Manager directly
+func OpenTaskManager() {
+	_ = exec.Command("taskmgr.exe").Start()
+}
+
+// ShowDesktop minimizes or restores all windows
+func ShowDesktop() {
+	_ = KeyDown("Meta", "MetaLeft", 91)
+	_ = KeyDown("d", "KeyD", 68)
+	_ = KeyUp("d", "KeyD", 68)
+	_ = KeyUp("Meta", "MetaLeft", 91)
+}
 
 // MoveMouseAbsolute sets the cursor to an absolute ratio [0.0, 1.0] across the primary screen
 func MoveMouseAbsolute(ratioX, ratioY float64) error {

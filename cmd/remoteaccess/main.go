@@ -63,16 +63,16 @@ func findAvailablePort(startPort int) int {
 }
 
 func main() {
-	// Initialize in-memory and file logging
-	logger.InitLogger()
+	cfg := config.LoadConfig()
+
+	// Initialize in-memory (and optional file) logging
+	logger.InitLogger(cfg.Data.SaveLogFile)
 
 	portFlag := flag.Int("port", 8080, "Porta local para o painel de controle")
 	noBrowser := flag.Bool("no-browser", false, "Modo silencioso de segundo plano (para inicializacao com Windows)")
 	autostart := flag.Bool("autostart", false, "Ativar inicialização automática com o Windows")
 	defaultPwd := flag.String("password", "", "Definir senha padrao")
 	flag.Parse()
-
-	cfg := config.LoadConfig()
 
 	if *defaultPwd != "" {
 		_ = cfg.SetPassword(*defaultPwd)

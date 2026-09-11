@@ -18,27 +18,52 @@ type MemoryLogWriter struct {
 
 var globalLogger *MemoryLogWriter
 
-func InitLogger() *MemoryLogWriter {
-	exePath, err := os.Executable()
-	var logFilePath string
-	if err == nil {
-		logFilePath = filepath.Join(filepath.Dir(exePath), "remoteaccess.log")
-	} else {
-		logFilePath = "remoteaccess.log"
+func InitLogger(enableFileLogging bool) *MemoryLogWriter {
+	mw := &MemoryLogWriter{
+		lines:   make([]string, 0, 300),
+		maxSize: 300,
 	}
 
-	f, _ := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-
-	mw := &MemoryLogWriter{
-		lines:   make([]string, 0, 200),
-		maxSize: 200,
-		file:    f,
+	if enableFileLogging {
+		mw.enableFile()
 	}
 
 	globalLogger = mw
 	log.SetOutput(mw)
 	log.SetFlags(log.Ltime | log.Lshortfile)
 	return mw
+}
+
+func (m *MemoryLogWriter) enableFile() {
+	appData := os.Getenv("APPDATA")
+	var logFilePath string
+	if appData != "" {
+		dir := filepath.Join(appData, "RemoteAccess")
+		_ = os.MkdirAll(dir, 0755)
+		logFilePath = filepath.Join(dir, "remoteaccess.log")
+	} else {
+		logFilePath = "remoteaccess.log"
+	}
+
+	f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err == nil {
+		m.file = f
+	}
+}
+
+func SetFileLogging(enable bool) {
+	if globalLogger == nil {
+		return
+	}
+	globalLogger.mu.Lock()
+	defer globalLogger.mu.Unlock()
+
+	if enable && globalLogger.file == nil {
+		globalLogger.enableFile()
+	} else if !enable && globalLogger.file != nil {
+		_ = globalLogger.file.Close()
+		globalLogger.file = nil
+	}
 }
 
 func (m *MemoryLogWriter) Write(p []byte) (n int, err error) {

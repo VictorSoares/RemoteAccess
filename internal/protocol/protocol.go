@@ -42,12 +42,13 @@ const (
 	TypeConfig        = "cfg"
 	TypeMonitorSwitch = "mon_switch"
 	TypeChat          = "chat"
+	TypeSysCommand    = "sys_cmd"
 	TypeAuth          = "auth"
 	TypeAuthOK        = "auth_ok"
 	TypeAuthFail      = "auth_fail"
 )
 
-// ControlMessage represents mouse, keyboard, monitor, clipboard or chat command
+// ControlMessage represents mouse, keyboard, monitor, clipboard, chat or system action command
 type ControlMessage struct {
 	Type     string  `json:"t"`
 	X        float64 `json:"x,omitempty"`
@@ -58,6 +59,8 @@ type ControlMessage struct {
 	Code     string  `json:"c,omitempty"`
 	KeyCode  int     `json:"kc,omitempty"`
 	Text     string  `json:"text,omitempty"`
+	Command  string  `json:"cmd,omitempty"`
+	Block    bool    `json:"block,omitempty"`
 	Time     int64   `json:"ts,omitempty"`
 	Quality  int     `json:"q,omitempty"`
 	FPS      int     `json:"fps,omitempty"`

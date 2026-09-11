@@ -87,6 +87,7 @@ func (s *LocalServer) Start(port int) error {
 	mux.HandleFunc("/api/autostart", s.handleAutoStart)
 	mux.HandleFunc("/api/config", s.handleConfig)
 	mux.HandleFunc("/api/logs", s.handleLogs)
+	mux.HandleFunc("/api/set-log-file", s.handleSetLogFile)
 	mux.HandleFunc("/api/session-status", s.handleSessionStatus)
 	mux.HandleFunc("/api/kick-session", s.handleKickSession)
 	mux.HandleFunc("/api/system-info", s.handleSystemInfo)
@@ -96,6 +97,25 @@ func (s *LocalServer) Start(port int) error {
 	addr := fmt.Sprintf(":%d", port)
 	log.Printf("[RemoteAccess] Painel Web iniciado em http://localhost:%d", port)
 	return http.ListenAndServe(addr, mux)
+}
+
+func (s *LocalServer) handleSetLogFile(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Enable bool `json:"enable"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	_ = s.Config.SetSaveLogFile(req.Enable)
+	logger.SetFileLogging(req.Enable)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":        "ok",
+		"save_log_file": req.Enable,
+	})
 }
 
 func (s *LocalServer) handleSessionStatus(w http.ResponseWriter, r *http.Request) {
@@ -162,6 +182,7 @@ func (s *LocalServer) handleHostInfo(w http.ResponseWriter, r *http.Request) {
 		"fps":           s.Config.Data.FPS,
 		"auto_start":    s.Config.Data.AutoStart,
 		"signaling_url": s.Config.Data.SignalingURL,
+		"save_log_file": s.Config.Data.SaveLogFile,
 		"cloud_status":  s.cloudStatus,
 	})
 }

@@ -195,6 +195,17 @@ func (h *HostSession) HandleControlData(data []byte) {
 		if ctrl.FPS > 0 && ctrl.FPS <= 60 {
 			h.FPS = ctrl.FPS
 		}
+	case protocol.TypeSysCommand:
+		switch ctrl.Command {
+		case "lock":
+			input.LockWorkstation()
+		case "taskmgr":
+			input.OpenTaskManager()
+		case "desktop":
+			input.ShowDesktop()
+		case "block_input":
+			_ = input.BlockLocalInput(ctrl.Block)
+		}
 	case protocol.TypeChat:
 		if h.OnChat != nil {
 			h.OnChat(h.ClientID, ctrl.Text)
@@ -261,6 +272,7 @@ func (h *HostSession) StopStreaming() {
 }
 
 func (h *HostSession) Close() {
+	_ = input.BlockLocalInput(false)
 	h.cancel()
 	h.mu.Lock()
 	defer h.mu.Unlock()

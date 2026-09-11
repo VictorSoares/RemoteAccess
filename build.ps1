@@ -3,11 +3,17 @@ param (
     [string]$Mode = "release"
 )
 
-$env:Path = "C:\Program Files\Go\bin;" + $env:Path
+$env:Path = "C:\Program Files\Go\bin;$env:USERPROFILE\go\bin;" + $env:Path
 
 Write-Host "=============================================" -ForegroundColor Cyan
-Write-Host " Compilando RemoteAccess Portable ($Mode)   " -ForegroundColor Cyan
+Write-Host " Compilando RemoteAccess AnyDesk Edition ($Mode) " -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
+
+# Generate embedded Windows resources (Icon, Version, DPI Manifest)
+if (Test-Path "$env:USERPROFILE\go\bin\go-winres.exe") {
+    Write-Host "Embutindo icone de alta definicao e manifesto Windows..." -ForegroundColor DarkCyan
+    & "$env:USERPROFILE\go\bin\go-winres.exe" make --in winres/winres.json --out ./cmd/remoteaccess/rsrc
+}
 
 if ($Mode -eq "release") {
     # -H=windowsgui removes CMD console window
