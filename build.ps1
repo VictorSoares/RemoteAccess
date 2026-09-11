@@ -10,9 +10,10 @@ Write-Host " Compilando RemoteAccess Portable ($Mode)   " -ForegroundColor Cyan
 Write-Host "=============================================" -ForegroundColor Cyan
 
 if ($Mode -eq "release") {
+    # -H=windowsgui removes CMD console window
     # -s -w removes debug info and symbol table for smaller binary
-    Write-Host "Gerando executavel de producao otimizado..." -ForegroundColor Yellow
-    go build -ldflags="-s -w" -o "RemoteAccess.exe" ./cmd/remoteaccess
+    Write-Host "Gerando executavel de producao otimizado (sem janela CMD)..." -ForegroundColor Yellow
+    go build -ldflags="-H=windowsgui -s -w" -o "RemoteAccess.exe" ./cmd/remoteaccess
 } else {
     Write-Host "Gerando executavel de desenvolvimento..." -ForegroundColor Yellow
     go build -o "RemoteAccess.exe" ./cmd/remoteaccess
@@ -24,6 +25,7 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "=============================================" -ForegroundColor Green
     Write-Host " [SUCESSO] Executavel gerado: $($file.FullName)" -ForegroundColor Green
     Write-Host " [TAMANHO] $sizeMB MB" -ForegroundColor Green
+    Write-Host " [MODO] Janela Nativa GUI (Sem CMD)" -ForegroundColor Green
     Write-Host "=============================================" -ForegroundColor Green
 } else {
     Write-Host "[ERRO] Falha na compilacao." -ForegroundColor Red

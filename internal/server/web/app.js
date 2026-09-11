@@ -18,6 +18,7 @@ let currentTab = 'host';
 let pwdVisible = false;
 let currentClientSessionId = 'c_' + Math.random().toString(36).substring(2, 9);
 let currentTargetId = '';
+let logsModalOpen = false;
 
 // Performance counters
 let frameCount = 0;
@@ -36,7 +37,10 @@ window.addEventListener('DOMContentLoaded', async () => {
   setupCanvasEvents();
   setupKeyboardEvents();
 
-  setInterval(fetchHostInfo, 3000);
+  setInterval(() => {
+    fetchHostInfo();
+    if (logsModalOpen) refreshLogs();
+  }, 2500);
 });
 
 function switchTab(tab) {
@@ -82,6 +86,31 @@ function updateNetworkBadge(status, url) {
   } else {
     dot.className = 'status-dot';
     text.innerText = 'Desconectado da Nuvem';
+  }
+}
+
+async function toggleLogsModal() {
+  const modal = document.getElementById('logs-modal');
+  logsModalOpen = !logsModalOpen;
+  modal.style.display = logsModalOpen ? 'flex' : 'none';
+  if (logsModalOpen) {
+    await refreshLogs();
+  }
+}
+
+async function refreshLogs() {
+  try {
+    const res = await fetch('/api/logs');
+    const data = await res.json();
+    const container = document.getElementById('logs-container');
+    if (data.logs && data.logs.length > 0) {
+      container.innerText = data.logs.join('\n');
+      container.scrollTop = container.scrollHeight;
+    } else {
+      container.innerText = 'Nenhum log registrado ainda.';
+    }
+  } catch (err) {
+    console.error('Failed to fetch logs:', err);
   }
 }
 
@@ -290,7 +319,6 @@ async function connectToRemote(e) {
   btn.disabled = true;
   btn.innerHTML = '<span>⏳ Conectando...</span>';
 
-  // Save ID and Password in saved connections
   saveRecentConnection(rawTargetId, targetPwd);
   currentClientSessionId = 'c_' + Math.random().toString(36).substring(2, 9);
 
@@ -547,7 +575,7 @@ function sendSpecialKey(type) {
     setTimeout(() => {
       sendControl({ t: 'ku', k: 'Delete', c: 'Delete', kc: 46 });
       sendControl({ t: 'ku', k: 'Alt', c: 'AltLeft', kc: 18 });
-      sendControl({ t: 'ku', k: 'Control', c: 'ControlLeft', kc: 17 }));
+      sendControl({ t: 'ku', k: 'Control', c: 'ControlLeft', kc: 17 });
     }, 100);
   } else if (type === 'win_d') {
     sendControl({ t: 'kd', k: 'Meta', c: 'MetaLeft', kc: 91 });

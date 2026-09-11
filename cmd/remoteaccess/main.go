@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"remoteaccess/internal/config"
+	"remoteaccess/internal/logger"
 	"remoteaccess/internal/server"
 )
 
@@ -62,6 +63,9 @@ func findAvailablePort(startPort int) int {
 }
 
 func main() {
+	// Initialize in-memory and file logging
+	logger.InitLogger()
+
 	portFlag := flag.Int("port", 8080, "Porta local para o painel de controle")
 	noBrowser := flag.Bool("no-browser", false, "Modo silencioso de segundo plano (para inicializacao com Windows)")
 	autostart := flag.Bool("autostart", false, "Ativar inicialização automática com o Windows")
@@ -83,17 +87,8 @@ func main() {
 
 	url := fmt.Sprintf("http://localhost:%d", port)
 
-	fmt.Println("================================================================")
-	fmt.Printf("   ⚡ RemoteAccess Portable v%s - Janela Nativa Desktop\n", version)
-	fmt.Println("   Sem Instalacao | Janela Propria | Senha Salva Automatica")
-	fmt.Println("================================================================")
-	fmt.Printf("   [+] Seu ID Fixo       : %s\n", cfg.Data.ID)
-	fmt.Printf("   [+] Sua Senha Fixa    : %s\n", cfg.Data.Password)
-	fmt.Printf("   [+] Auto-start Windows: %v\n", cfg.Data.AutoStart)
-	fmt.Printf("   [+] Servidor Nuvem    : %s\n", cfg.Data.SignalingURL)
-	fmt.Println("================================================================")
-	fmt.Println("   Pressione Ctrl+C para encerrar o programa a qualquer momento.")
-	fmt.Println()
+	log.Printf("[Início] RemoteAccess v%s iniciado na porta :%d", version, port)
+	log.Printf("[Início] Seu ID: %s | AutoStart: %v", cfg.Data.ID, cfg.Data.AutoStart)
 
 	// Launch as Standalone Desktop Window (unless in silent autostart background mode)
 	if !*noBrowser {
@@ -113,5 +108,5 @@ func main() {
 	}()
 
 	<-stop
-	fmt.Println("\n[RemoteAccess] Encerrando com seguranca...")
+	log.Println("[RemoteAccess] Encerrando com segurança...")
 }

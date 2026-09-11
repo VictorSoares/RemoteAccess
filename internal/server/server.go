@@ -13,6 +13,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"remoteaccess/internal/config"
+	"remoteaccess/internal/logger"
 	"remoteaccess/internal/protocol"
 	"remoteaccess/internal/signaling"
 	webrtcmod "remoteaccess/internal/webrtc"
@@ -82,12 +83,21 @@ func (s *LocalServer) Start(port int) error {
 	mux.HandleFunc("/api/set-signaling", s.handleSetSignaling)
 	mux.HandleFunc("/api/autostart", s.handleAutoStart)
 	mux.HandleFunc("/api/config", s.handleConfig)
+	mux.HandleFunc("/api/logs", s.handleLogs)
 
 	mux.HandleFunc("/ws", s.handleWS)
 
 	addr := fmt.Sprintf(":%d", port)
 	log.Printf("[RemoteAccess] Painel Web iniciado em http://localhost:%d", port)
 	return http.ListenAndServe(addr, mux)
+}
+
+func (s *LocalServer) handleLogs(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	logs := logger.GetLogs()
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"logs": logs,
+	})
 }
 
 func (s *LocalServer) handleHostInfo(w http.ResponseWriter, r *http.Request) {
@@ -125,6 +135,8 @@ func (s *LocalServer) handleSetSignaling(w http.ResponseWriter, r *http.Request)
 	}
 	s.mu.Unlock()
 
+	log.Printf("[Config] Novo servidor de sinalização configurado: %s", normURL)
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status":        "ok",
@@ -159,6 +171,8 @@ func (s *LocalServer) handleSetPassword(w http.ResponseWriter, r *http.Request) 
 		})
 	}
 
+	log.Printf("[Config] Senha fixa atualizada com sucesso")
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
 		"status":   "ok",
@@ -179,6 +193,8 @@ func (s *LocalServer) handleAutoStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("Erro ao configurar inicialização: %v", err), http.StatusInternalServerError)
 		return
 	}
+
+	log.Printf("[Config] Auto-start com Windows alterado para: %v", req.Enable)
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -221,10 +237,10 @@ func (s *LocalServer) cloudSignalingLoop() {
 		s.cloudStatus = "connecting"
 		s.mu.Unlock()
 
-		log.Printf("[Cloud Signaling] Conectando a %s ...", targetURL)
+		log.Printf("[Nuvem] Conectando a %s ...", targetURL)
 		conn, _, err := websocket.DefaultDialer.Dial(targetURL, nil)
 		if err != nil {
-			log.Printf("[Cloud Signaling] Falha ao conectar: %v. Tentando novamente em 4s...", err)
+			log.Printf("[Nuvem] Falha ao conectar: %v. Tentando novamente em 4s...", err)
 			s.mu.Lock()
 			s.cloudStatus = "error"
 			s.mu.Unlock()
@@ -239,7 +255,7 @@ func (s *LocalServer) cloudSignalingLoop() {
 		hostPwd := s.Config.Data.Password
 		s.mu.Unlock()
 
-		log.Printf("[Cloud Signaling] Conectado com sucesso! Registrando Host ID: %s", hostID)
+		log.Printf("[Nuvem] Conectado com sucesso! Registrado Host ID: %s", hostID)
 
 		err = conn.WriteJSON(protocol.SignalingMessage{
 			Action:   protocol.ActionRegister,
@@ -255,7 +271,7 @@ func (s *LocalServer) cloudSignalingLoop() {
 			var msg protocol.SignalingMessage
 			err := conn.ReadJSON(&msg)
 			if err != nil {
-				log.Printf("[Cloud Signaling] Conexao perdida: %v", err)
+				log.Printf("[Nuvem] Conexão perdida: %v", err)
 				break
 			}
 
@@ -279,18 +295,17 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 		if senderID == "" {
 			senderID = msg.TargetID
 		}
-		log.Printf("[Signaling] Cliente remoto conectado: %s (iniciando stream)", senderID)
+		log.Printf("[Conexão] Cliente remoto conectado: %s (iniciando captura de tela)", senderID)
 
 		hostSess, err := webrtcmod.NewHostSession(s.Config.Data.FPS, s.Config.Data.Quality, func(outMsg protocol.SignalingMessage) {
 			outMsg.ID = s.Config.Data.ID
 			_ = conn.WriteJSON(outMsg)
 		})
 		if err != nil {
-			log.Printf("[Signaling] Erro ao criar sessao host: %v", err)
+			log.Printf("[Conexão] Erro ao criar sessão host: %v", err)
 			return
 		}
 
-		// Setup WebSocket Relay fallback frame sender
 		hostSess.OnRelayFrame = func(jpegBase64 string) {
 			_ = conn.WriteJSON(protocol.SignalingMessage{
 				Action:   protocol.ActionData,
@@ -314,7 +329,6 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 		hostSess.StartStreaming()
 
 	case protocol.ActionData:
-		// Received input event from remote client via WebSocket Relay
 		s.mu.RLock()
 		sess := s.hostSession
 		s.mu.RUnlock()
@@ -333,6 +347,7 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 		}
 
 	case protocol.ActionClose:
+		log.Printf("[Conexão] Sessão remota encerrada")
 		s.mu.Lock()
 		if s.hostSession != nil {
 			s.hostSession.Close()
