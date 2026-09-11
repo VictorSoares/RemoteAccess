@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: remoteaccess-signaling
+    env: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /healthz
+    envVars:
+      - key: PORT
+        value: 8080

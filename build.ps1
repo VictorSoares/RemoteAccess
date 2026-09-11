@@ -1,0 +1,30 @@
+# Build Script for RemoteAccess Portable (Windows)
+param (
+    [string]$Mode = "release"
+)
+
+$env:Path = "C:\Program Files\Go\bin;" + $env:Path
+
+Write-Host "=============================================" -ForegroundColor Cyan
+Write-Host " Compilando RemoteAccess Portable ($Mode)   " -ForegroundColor Cyan
+Write-Host "=============================================" -ForegroundColor Cyan
+
+if ($Mode -eq "release") {
+    # -s -w removes debug info and symbol table for smaller binary
+    Write-Host "Gerando executavel de producao otimizado..." -ForegroundColor Yellow
+    go build -ldflags="-s -w" -o "RemoteAccess.exe" ./cmd/remoteaccess
+} else {
+    Write-Host "Gerando executavel de desenvolvimento..." -ForegroundColor Yellow
+    go build -o "RemoteAccess.exe" ./cmd/remoteaccess
+}
+
+if ($LASTEXITCODE -eq 0) {
+    $file = Get-Item "RemoteAccess.exe"
+    $sizeMB = [math]::Round($file.Length / 1MB, 2)
+    Write-Host "=============================================" -ForegroundColor Green
+    Write-Host " [SUCESSO] Executavel gerado: $($file.FullName)" -ForegroundColor Green
+    Write-Host " [TAMANHO] $sizeMB MB" -ForegroundColor Green
+    Write-Host "=============================================" -ForegroundColor Green
+} else {
+    Write-Host "[ERRO] Falha na compilacao." -ForegroundColor Red
+}

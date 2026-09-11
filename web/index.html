@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RemoteAccess Portable - Acesso Remoto Bidirecional</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Header -->
+  <header class="app-header">
+    <div class="logo">
+      <span>⚡ RemoteAccess</span>
+      <span class="logo-badge">Portátil</span>
+    </div>
+    <div class="network-badge">
+      <div id="status-indicator" class="status-dot online"></div>
+      <span id="status-text">Conectado ao Relay</span>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="container">
+    <!-- Navigation Tabs -->
+    <div class="tabs">
+      <button id="tab-host-btn" class="tab-btn active" onclick="switchTab('host')">
+        🖥️ Esta Máquina (Permitir Controle)
+      </button>
+      <button id="tab-client-btn" class="tab-btn" onclick="switchTab('client')">
+        🚀 Computador Remoto (Controlar)
+      </button>
+    </div>
+
+    <!-- HOST VIEW: Permitir Acesso a este PC -->
+    <section id="host-view" class="card">
+      <h2 class="card-title">Permitir Controle Remoto</h2>
+      <p class="card-desc">Compartilhe o ID e a Senha abaixo para permitir que outro computador acesse este PC com segurança.</p>
+
+      <div class="id-display-container">
+        <div class="credential-box">
+          <div>
+            <div class="credential-label">Seu ID de Conexão</div>
+            <div id="my-id" class="id-value">--- ---</div>
+          </div>
+          <button class="btn-icon" onclick="copyToClipboard('my-id')">📋 Copiar ID</button>
+        </div>
+
+        <div class="credential-box">
+          <div>
+            <div class="credential-label">Sua Senha de Acesso</div>
+            <div id="my-pwd" class="pwd-value">••••••••</div>
+          </div>
+          <div style="display: flex; gap: 0.5rem;">
+            <button class="btn-icon" onclick="togglePasswordVisibility()">👁️ Mostrar</button>
+            <button class="btn-icon" onclick="regeneratePassword()">🔄 Nova Senha</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-grid">
+        <div class="form-group">
+          <label class="form-label">Qualidade da Transmissão:</label>
+          <select id="host-quality" class="select-custom" onchange="updateHostConfig()">
+            <option value="50">Econômica (Redes lentas / 4G)</option>
+            <option value="65" selected>Equilibrada (Recomendada)</option>
+            <option value="85">Alta Definição (Rede local / Fibra)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Taxa de Quadros (FPS):</label>
+          <select id="host-fps" class="select-custom" onchange="updateHostConfig()">
+            <option value="15">15 FPS (Baixo consumo)</option>
+            <option value="30" selected>30 FPS (Padrão Fluido)</option>
+            <option value="60">60 FPS (Ultra Suave)</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="active-session-box" style="margin-top: 1.5rem; display: none;" class="credential-box">
+        <div>
+          <div class="credential-label">Sessão Ativa</div>
+          <div id="active-session-text" style="color: #60a5fa; font-weight: 600;">Controlador conectado</div>
+        </div>
+        <button class="btn-icon btn-danger" onclick="disconnectHostSession()">🛑 Desconectar</button>
+      </div>
+    </section>
+
+    <!-- CLIENT VIEW: Conectar a outro PC -->
+    <section id="client-view" class="card" style="display: none;">
+      <h2 class="card-title">Controlar Computador Remoto</h2>
+      <p class="card-desc">Digite o ID e a Senha da máquina remota (ex: do trabalho ou de casa) para assumir o controle.</p>
+
+      <form id="connect-form" onsubmit="connectToRemote(event)">
+        <div class="form-group">
+          <label class="form-label" for="target-id">ID do Computador Remoto</label>
+          <input type="text" id="target-id" class="form-input" placeholder="Ex: 849 201" maxlength="10" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="target-pwd">Senha de Acesso</label>
+          <input type="password" id="target-pwd" class="form-input" placeholder="Digite a senha" required>
+        </div>
+
+        <button type="submit" id="btn-connect" class="btn-primary">
+          <span>🚀 Conectar e Assumir Controle</span>
+        </button>
+      </form>
+
+      <!-- Conexões Recentes -->
+      <div class="recent-section">
+        <div class="recent-title">Conexões Salvas / Recentes</div>
+        <div id="recent-list" class="recent-list">
+          <span style="font-size: 0.85rem; color: var(--text-muted);">Nenhuma conexão recente ainda.</span>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Fullscreen Remote Desktop Viewer -->
+  <div id="viewer-container">
+    <div id="viewer-toolbar">
+      <span class="stat-tag" id="stat-latency">⚡ -- ms</span>
+      <span class="stat-tag" id="stat-fps">🎥 -- fps</span>
+      
+      <button class="toolbar-btn" onclick="sendSpecialKey('ctrl_alt_del')" title="Enviar Ctrl+Alt+Del">
+        ⌨️ Ctrl+Alt+Del
+      </button>
+      <button class="toolbar-btn" onclick="sendSpecialKey('win_d')" title="Mostrar Área de Trabalho">
+        🪟 Win+D
+      </button>
+      <button class="toolbar-btn" onclick="sendSpecialKey('alt_tab')" title="Alternar Janelas">
+        📑 Alt+Tab
+      </button>
+      <button class="toolbar-btn" onclick="toggleFullscreen()" title="Alternar Tela Cheia">
+        ⛶ Tela Cheia
+      </button>
+      <button class="toolbar-btn btn-close" onclick="closeViewer()" title="Fechar Conexão">
+        🛑 Desconectar
+      </button>
+    </div>
+
+    <canvas id="screen-canvas"></canvas>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
