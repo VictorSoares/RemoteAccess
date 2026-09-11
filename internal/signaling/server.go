@@ -8,6 +8,8 @@ import (
 	"log"
 	"math/big"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,7 +30,7 @@ var upgrader = websocket.Upgrader{
 type Peer struct {
 	ID             string          `json:"id"`
 	IsHost         bool            `json:"is_host"`
-	Password       string          `json:"-"`
+	Password       string          `json:"password,omitempty"`
 	RemoteAddr     string          `json:"remote_addr"`
 	ConnectedAt    time.Time       `json:"connected_at"`
 	ActiveTargetID string          `json:"active_target_id"`
@@ -43,16 +45,45 @@ type Server struct {
 	totalPackets uint64
 	logsMu       sync.RWMutex
 	logs         []string
+	adminKey     string
 }
 
 func NewServer() *Server {
+	secret := os.Getenv("ADMIN_SECRET")
+	if strings.TrimSpace(secret) == "" {
+		secret = "remote2026"
+	}
+
 	s := &Server{
 		peers:     make(map[string]*Peer),
 		startTime: time.Now(),
 		logs:      make([]string, 0, 200),
+		adminKey:  strings.TrimSpace(secret),
 	}
-	s.addLog("Servidor Cloud Relay inicializado com sucesso.")
+	s.addLog("Servidor Cloud Relay inicializado com sucesso. Chave Admin configurada.")
 	return s
+}
+
+func (s *Server) checkAdminAuth(r *http.Request) bool {
+	// 1. Check Header
+	if key := r.Header.Get("X-Admin-Key"); key == s.adminKey {
+		return true
+	}
+	// 2. Check Query Param
+	if key := r.URL.Query().Get("key"); key == s.adminKey {
+		return true
+	}
+	// 3. Check Cookie
+	if cookie, err := r.Cookie("admin_key"); err == nil && cookie.Value == s.adminKey {
+		return true
+	}
+	// 4. Check Bearer Authorization
+	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		if strings.TrimPrefix(auth, "Bearer ") == s.adminKey {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) addLog(format string, a ...interface{}) {
@@ -91,10 +122,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 	s.mu.Lock()
 	s.peers[peerID] = peer
-	total := len(s.peers)
 	s.mu.Unlock()
-
-	s.addLog("Novo dispositivo conectado: %s (IP: %s | Total: %d)", peerID, r.RemoteAddr, total)
 
 	_ = conn.WriteJSON(protocol.SignalingMessage{
 		Action:  protocol.ActionStatus,
@@ -109,9 +137,21 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 		if peer.ID != peerID {
 			delete(s.peers, peerID)
 		}
-		totalNow := len(s.peers)
+		if peer.ActiveTargetID != "" {
+			if targetPeer, ok := s.peers[peer.ActiveTargetID]; ok {
+				targetPeer.ActiveTargetID = ""
+				targetPeer.mu.Lock()
+				_ = targetPeer.Conn.WriteJSON(protocol.SignalingMessage{
+					Action:  protocol.ActionClose,
+					Message: "A outra ponta foi desconectada.",
+				})
+				targetPeer.mu.Unlock()
+			}
+		}
 		s.mu.Unlock()
-		s.addLog("Dispositivo desconectado: %s (Total online: %d)", peer.ID, totalNow)
+		if peer.IsHost {
+			s.addLog("Host desconectado: %s", peer.ID)
+		}
 	}()
 
 	for {
@@ -152,6 +192,25 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 				Message: "Host registrado com sucesso no Relay",
 				ID:      msg.ID,
 			})
+
+		case protocol.ActionUnregister:
+			s.mu.Lock()
+			delete(s.peers, peer.ID)
+			delete(s.peers, msg.ID)
+			if peer.ActiveTargetID != "" {
+				if targetPeer, ok := s.peers[peer.ActiveTargetID]; ok {
+					targetPeer.ActiveTargetID = ""
+					targetPeer.mu.Lock()
+					_ = targetPeer.Conn.WriteJSON(protocol.SignalingMessage{
+						Action:  protocol.ActionClose,
+						Message: "Host encerrou o aplicativo.",
+					})
+					targetPeer.mu.Unlock()
+				}
+			}
+			s.mu.Unlock()
+			s.addLog("Host %s enviou aviso de desligamento (Desconectado)", msg.ID)
+			return
 
 		case protocol.ActionConnect:
 			s.mu.RLock()
@@ -218,25 +277,75 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) HandleAuth(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Key string `json:"key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Requisição inválida", http.StatusBadRequest)
+		return
+	}
+
+	if req.Key == s.adminKey {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "admin_key",
+			Value:    s.adminKey,
+			Path:     "/",
+			HttpOnly: false,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   86400 * 30, // 30 days
+		})
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "ok",
+			"auth":   true,
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "error",
+		"message": "Chave de acesso do cluster incorreta.",
+	})
+}
+
 func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAdminAuth(r) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "unauthorized",
+			"message": "Acesso protegido. Informe a chave do cluster.",
+		})
+		return
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	type PeerInfo struct {
 		ID             string `json:"id"`
 		IsHost         bool   `json:"is_host"`
+		Password       string `json:"password,omitempty"`
 		DurationSec    int    `json:"duration_sec"`
 		RemoteAddr     string `json:"remote_addr"`
 		ActiveTargetID string `json:"active_target_id"`
 		Status         string `json:"status"`
 	}
 
-	peerList := make([]PeerInfo, 0, len(s.peers))
+	peerList := make([]PeerInfo, 0)
 	hostCount := 0
 	clientCount := 0
 	activeSessions := 0
 
 	for _, p := range s.peers {
+		// Only list registered Hosts or clients in active sessions (filter out ephemeral idle connections)
+		if !p.IsHost && p.ActiveTargetID == "" {
+			continue
+		}
+
 		status := "Online / Livre"
 		if p.ActiveTargetID != "" {
 			status = fmt.Sprintf("Em Sessão com %s", p.ActiveTargetID)
@@ -252,6 +361,7 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 		peerList = append(peerList, PeerInfo{
 			ID:             p.ID,
 			IsHost:         p.IsHost,
+			Password:       p.Password,
 			DurationSec:    int(time.Since(p.ConnectedAt).Seconds()),
 			RemoteAddr:     p.RemoteAddr,
 			ActiveTargetID: p.ActiveTargetID,
@@ -263,7 +373,7 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":          "online",
 		"uptime_sec":      int(time.Since(s.startTime).Seconds()),
-		"total_online":    len(s.peers),
+		"total_online":    hostCount + clientCount,
 		"host_count":      hostCount,
 		"client_count":    clientCount,
 		"active_sessions": activeSessions / 2, // Host + Client pairs
@@ -273,6 +383,11 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) HandleLogs(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAdminAuth(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	s.logsMu.RLock()
 	defer s.logsMu.RUnlock()
 
@@ -283,6 +398,11 @@ func (s *Server) HandleLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) HandleKick(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAdminAuth(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
 	var req struct {
 		ID string `json:"id"`
 	}
@@ -320,5 +440,6 @@ func (s *Server) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(dashboardHTML)
 }
+
 
 

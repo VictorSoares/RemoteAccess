@@ -28,6 +28,7 @@ func main() {
 	http.HandleFunc("/ws", srv.HandleWS)
 
 	// API endpoints for cloud cluster management
+	http.HandleFunc("/api/auth", srv.HandleAuth)
 	http.HandleFunc("/api/stats", srv.HandleStats)
 	http.HandleFunc("/api/logs", srv.HandleLogs)
 	http.HandleFunc("/api/kick", srv.HandleKick)

@@ -108,5 +108,7 @@ func main() {
 	}()
 
 	<-stop
-	log.Println("[RemoteAccess] Encerrando com segurança...")
+	log.Println("[RemoteAccess] Notificando nuvem e encerrando com segurança...")
+	srv.Shutdown()
+	time.Sleep(200 * time.Millisecond)
 }

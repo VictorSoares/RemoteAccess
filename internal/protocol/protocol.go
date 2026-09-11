@@ -4,15 +4,16 @@ import "encoding/json"
 
 // Signaling Action Types
 const (
-	ActionRegister  = "register"
-	ActionConnect   = "connect"
-	ActionOffer     = "offer"
-	ActionAnswer    = "answer"
-	ActionCandidate = "candidate"
-	ActionData      = "data"
-	ActionStatus    = "status"
-	ActionError     = "error"
-	ActionClose     = "close"
+	ActionRegister   = "register"
+	ActionUnregister = "unregister"
+	ActionConnect    = "connect"
+	ActionOffer      = "offer"
+	ActionAnswer     = "answer"
+	ActionCandidate  = "candidate"
+	ActionData       = "data"
+	ActionStatus     = "status"
+	ActionError      = "error"
+	ActionClose      = "close"
 )
 
 // SignalingMessage represents a packet routed by the signaling relay server

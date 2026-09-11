@@ -72,6 +72,8 @@ func generateRandomPassword() string {
 	return string(b)
 }
 
+const DefaultSignalingURL = "https://remoteaccess-ltwx.onrender.com"
+
 func LoadConfig() *ConfigManager {
 	configPath := getConfigPath()
 	exePath, _ := os.Executable()
@@ -80,14 +82,19 @@ func LoadConfig() *ConfigManager {
 		filePath:   configPath,
 		executable: exePath,
 		Data: AppConfig{
-			Quality: 65,
-			FPS:     30,
+			Quality:      65,
+			FPS:          30,
+			SignalingURL: DefaultSignalingURL,
 		},
 	}
 
 	data, err := os.ReadFile(configPath)
 	if err == nil {
 		if err := json.Unmarshal(data, &cm.Data); err == nil && cm.Data.ID != "" {
+			if cm.Data.SignalingURL == "" {
+				cm.Data.SignalingURL = DefaultSignalingURL
+				_ = cm.Save()
+			}
 			return cm
 		}
 	}
@@ -95,6 +102,7 @@ func LoadConfig() *ConfigManager {
 	// Generate new fixed ID and initial Password
 	cm.Data.ID = generateRandomID()
 	cm.Data.Password = generateRandomPassword()
+	cm.Data.SignalingURL = DefaultSignalingURL
 	_ = cm.Save()
 	return cm
 }

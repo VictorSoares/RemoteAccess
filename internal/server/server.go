@@ -456,3 +456,26 @@ func (s *LocalServer) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
+
+func (s *LocalServer) Shutdown() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.cloudWS != nil {
+		log.Printf("[RemoteAccess] Notificando servidor Cloud que o Host %s foi encerrado...", s.Config.Data.ID)
+		_ = s.cloudWS.WriteJSON(protocol.SignalingMessage{
+			Action: protocol.ActionUnregister,
+			ID:     s.Config.Data.ID,
+		})
+		_ = s.cloudWS.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Host shutdown"))
+		_ = s.cloudWS.Close()
+		s.cloudWS = nil
+	}
+
+	if s.hostSession != nil {
+		s.hostSession.Close()
+		s.hostSession = nil
+	}
+}
+
+

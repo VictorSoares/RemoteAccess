@@ -65,6 +65,11 @@
       color: #60a5fa;
       letter-spacing: 0.1em;
     }
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
     .status-pill {
       display: flex;
       align-items: center;
@@ -85,9 +90,9 @@
       box-shadow: 0 0 8px #10b981;
     }
     main {
-      max-width: 1200px;
+      max-width: 1240px;
       width: 100%;
-      margin: 2rem auto;
+      margin: 1.5rem auto 2.5rem;
       padding: 0 1.5rem;
       flex: 1;
       display: flex;
@@ -140,8 +145,8 @@
       margin-bottom: 1.25rem;
     }
     .panel-title {
-      font-size: 1.1rem;
-      font-weight: 700;
+      font-size: 1.15rem;
+      font-weight: 800;
     }
     table {
       width: 100%;
@@ -159,8 +164,9 @@
       letter-spacing: 0.05em;
     }
     td {
-      padding: 1rem;
+      padding: 0.9rem 1rem;
       border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      vertical-align: middle;
     }
     tr:hover td {
       background: rgba(255, 255, 255, 0.02);
@@ -183,20 +189,51 @@
     }
     .id-tag {
       font-family: var(--font-mono);
-      font-weight: 700;
-      font-size: 1rem;
+      font-weight: 800;
+      font-size: 1.1rem;
       color: #38bdf8;
+      letter-spacing: 0.05em;
+    }
+    .pwd-tag {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      font-size: 0.9rem;
+      color: #e2e8f0;
+      background: rgba(255,255,255,0.06);
+      padding: 0.2rem 0.5rem;
+      border-radius: 6px;
+    }
+    .actions-cell {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.5rem;
+    }
+    .btn-action {
+      border: none;
+      padding: 0.45rem 0.85rem;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      transition: all 0.2s;
+    }
+    .btn-connect-direct {
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      color: white;
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+    }
+    .btn-connect-direct:hover {
+      background: #059669;
+      transform: translateY(-1px);
     }
     .btn-kill {
       background: rgba(239, 68, 68, 0.15);
       border: 1px solid rgba(239, 68, 68, 0.4);
       color: #fca5a5;
-      padding: 0.35rem 0.75rem;
-      border-radius: 6px;
-      font-size: 0.78rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
     }
     .btn-kill:hover {
       background: #dc2626;
@@ -211,18 +248,130 @@
       font-size: 0.8rem;
       color: #7dd3fc;
       line-height: 1.5;
-      max-height: 250px;
+      max-height: 220px;
       overflow-y: auto;
       white-space: pre-wrap;
     }
     .empty-row {
       text-align: center;
       color: var(--text-muted);
+      padding: 2.5rem;
+    }
+
+    /* Auth Modal */
+    #auth-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.85);
+      backdrop-filter: blur(10px);
+      z-index: 100000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .auth-box {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
       padding: 2rem;
+      max-width: 440px;
+      width: 90%;
+      text-align: center;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8);
+    }
+    .auth-input {
+      width: 100%;
+      background: var(--bg-card-alt);
+      border: 1px solid var(--border);
+      color: #fff;
+      padding: 0.85rem 1rem;
+      border-radius: 10px;
+      font-size: 1.1rem;
+      font-family: var(--font-mono);
+      text-align: center;
+      margin: 1.25rem 0;
+      outline: none;
+    }
+    .auth-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    /* Embedded Web Viewer */
+    #web-viewer-container {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: #000;
+      z-index: 99999;
+      flex-direction: column;
+    }
+    .web-viewer-hud {
+      position: fixed;
+      top: 14px;
+      left: 16px;
+      z-index: 100001;
+      background: rgba(9, 13, 22, 0.9);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 9999px;
+      padding: 5px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      color: #e2e8f0;
+      pointer-events: none;
+    }
+    .web-viewer-dock {
+      position: fixed;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 100000;
+      background: rgba(15, 23, 42, 0.9);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 9999px;
+      padding: 5px 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    #viewer-canvas {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      cursor: crosshair;
+      display: block;
     }
   </style>
 </head>
 <body>
+  <!-- Auth Modal -->
+  <div id="auth-overlay" style="display: none;">
+    <div class="auth-box">
+      <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">🔒</div>
+      <h2 style="font-size: 1.25rem; font-weight: 800;">Acesso Administrativo</h2>
+      <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.35rem;">
+        Informe a chave de segurança do cluster para acessar o painel e os computadores.
+      </p>
+      <form onsubmit="submitAuth(event)">
+        <input type="password" id="auth-key-input" class="auth-input" placeholder="Digite a chave (Padrão: remote2026)" required autocomplete="current-password">
+        <button type="submit" class="btn-action btn-connect-direct" style="width: 100%; justify-content: center; padding: 0.85rem;">
+          🔓 Desbloquear Cluster
+        </button>
+      </form>
+    </div>
+  </div>
+
   <header>
     <div class="brand">
       <div class="brand-icon">⚡</div>
@@ -231,9 +380,14 @@
         <div class="brand-badge">GLOBAL SIGNALING & WEBRTC HUB</div>
       </div>
     </div>
-    <div class="status-pill">
-      <div class="dot"></div>
-      <span>Cluster Online</span>
+    <div class="header-right">
+      <div class="status-pill">
+        <div class="dot"></div>
+        <span>Cluster 100% Online</span>
+      </div>
+      <button onclick="logoutAdmin()" class="btn-action" style="background: rgba(255,255,255,0.06); color: var(--text-muted); font-size: 0.75rem;">
+        Sair
+      </button>
     </div>
   </header>
 
@@ -253,24 +407,27 @@
       </div>
 
       <div class="stat-card">
-        <span class="stat-label">⏱️ Tempo de Atividade (Uptime)</span>
+        <span class="stat-label">⏱️ Uptime do Cluster</span>
         <span id="stat-uptime" class="stat-val" style="font-size: 1.4rem;">00:00:00</span>
-        <span class="stat-hint">Servidor sem quedas</span>
+        <span class="stat-hint">Tempo sem reinicializações</span>
       </div>
 
       <div class="stat-card">
         <span class="stat-label">📊 Pacotes Trafegados</span>
         <span id="stat-packets" class="stat-val">0</span>
-        <span class="stat-hint">Mensagens de sinalização/relay</span>
+        <span class="stat-hint">Mensagens relay e signaling</span>
       </div>
     </div>
 
     <!-- Active Nodes Table -->
     <div class="panel">
       <div class="panel-header">
-        <h2 class="panel-title">🌐 Dispositivos Conectados na Nuvem</h2>
-        <button onclick="refreshData()" style="background: rgba(255,255,255,0.06); border: 1px solid var(--border); color: #fff; padding: 0.35rem 0.8rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">
-          🔄 Atualizar Agora
+        <div>
+          <h2 class="panel-title">🌐 Computadores Online no Cluster</h2>
+          <span style="font-size: 0.82rem; color: var(--text-muted);">Clique em <strong>Acessar</strong> em qualquer máquina para assumir o controle imediatamente sem digitar ID ou senha.</span>
+        </div>
+        <button onclick="refreshData()" class="btn-action" style="background: rgba(255,255,255,0.08); color: #fff;">
+          🔄 Atualizar
         </button>
       </div>
 
@@ -280,15 +437,16 @@
             <tr>
               <th>Tipo</th>
               <th>Identificador (ID)</th>
-              <th>Status Atual</th>
-              <th>Tempo Conectado</th>
+              <th>Senha Fixa</th>
+              <th>Status</th>
+              <th>Tempo Online</th>
               <th>IP / Endpoint</th>
-              <th style="text-align: right;">Ação</th>
+              <th style="text-align: right;">Ações de Controle</th>
             </tr>
           </thead>
           <tbody id="peers-table-body">
             <tr>
-              <td colspan="6" class="empty-row">Carregando dispositivos conectados...</td>
+              <td colspan="7" class="empty-row">Carregando computadores online...</td>
             </tr>
           </tbody>
         </table>
@@ -306,7 +464,40 @@
     </div>
   </main>
 
+  <!-- Embedded Web Viewer (1-Click Remote Access straight from Browser) -->
+  <div id="web-viewer-container">
+    <div class="web-viewer-hud">
+      <span style="color: #4ade80;">● Online</span>
+      <span>|</span>
+      <span id="web-stat-fps">🎥 0 FPS</span>
+      <span>|</span>
+      <span id="web-stat-target">Host: ---</span>
+    </div>
+
+    <div class="web-viewer-dock">
+      <button class="btn-action" onclick="sendViewerSys('cad')" style="background: rgba(255,255,255,0.1); color: #fff;">⌨️ Ctrl+Alt+Del</button>
+      <button class="btn-action" onclick="sendViewerSys('desktop')" style="background: rgba(255,255,255,0.1); color: #fff;">🪟 Win+D</button>
+      <button class="btn-action" onclick="sendViewerSys('taskmgr')" style="background: rgba(255,255,255,0.1); color: #fff;">⚡ Tarefas</button>
+      <button class="btn-action" onclick="sendViewerSys('lock')" style="background: rgba(255,255,255,0.1); color: #fff;">🔒 Bloquear</button>
+      <button class="btn-action" onclick="toggleViewerFullscreen()" style="background: rgba(255,255,255,0.1); color: #fff;">⛶ Tela Cheia</button>
+      <button class="btn-action btn-kill" onclick="closeWebViewer()">🛑 Encerrar Acesso</button>
+    </div>
+
+    <div style="flex: 1; display: flex; align-items: center; justify-content: center; position: relative; width: 100%; height: 100%; overflow: hidden; background: #000;">
+      <canvas id="viewer-canvas" tabindex="0"></canvas>
+    </div>
+  </div>
+
   <script>
+    let adminKey = localStorage.getItem('ra_admin_key') || '';
+    let viewerWS = null;
+    let currentSessionTarget = '';
+    let viewerConnected = false;
+    let vFrameCount = 0;
+    let vLastFpsTime = performance.now();
+    const vCanvas = document.getElementById('viewer-canvas');
+    const vCtx = vCanvas.getContext('2d');
+
     function formatDuration(sec) {
       const h = Math.floor(sec / 3600).toString().padStart(2, '0');
       const m = Math.floor((sec % 3600) / 60).toString().padStart(2, '0');
@@ -323,9 +514,52 @@
       return id;
     }
 
-    async function refreshData() {
+    function checkAuth() {
+      if (!adminKey) {
+        document.getElementById('auth-overlay').style.display = 'flex';
+        return false;
+      }
+      return true;
+    }
+
+    async function submitAuth(e) {
+      e.preventDefault();
+      const key = document.getElementById('auth-key-input').value.trim();
       try {
-        const res = await fetch('/api/stats');
+        const res = await fetch('/api/auth', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: key })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          adminKey = key;
+          localStorage.setItem('ra_admin_key', key);
+          document.getElementById('auth-overlay').style.display = 'none';
+          refreshData();
+        } else {
+          alert('Chave incorreta.');
+        }
+      } catch (err) {
+        alert('Erro ao autenticar.');
+      }
+    }
+
+    function logoutAdmin() {
+      adminKey = '';
+      localStorage.removeItem('ra_admin_key');
+      document.getElementById('auth-overlay').style.display = 'flex';
+    }
+
+    async function refreshData() {
+      if (!checkAuth()) return;
+
+      try {
+        const res = await fetch('/api/stats?key=' + encodeURIComponent(adminKey));
+        if (res.status === 401) {
+          logoutAdmin();
+          return;
+        }
         const data = await res.json();
 
         document.getElementById('stat-hosts').innerText = data.host_count || 0;
@@ -335,7 +569,7 @@
 
         const tbody = document.getElementById('peers-table-body');
         if (!data.peers || data.peers.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" class="empty-row">Nenhum computador ou cliente conectado no momento.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="7" class="empty-row">Nenhum computador registrado online no momento.</td></tr>';
         } else {
           tbody.innerHTML = '';
           data.peers.forEach(p => {
@@ -345,31 +579,38 @@
               : '<span class="badge-type badge-client">🚀 CLIENTE</span>';
 
             const statusHtml = p.active_target_id 
-              ? '<span style="color: #f87171; font-weight: 600;">🔴 Em Sessão com ' + p.active_target_id + '</span>'
-              : '<span style="color: #4ade80; font-weight: 600;">🟢 Disponível</span>';
+              ? '<span style="color: #f87171; font-weight: 700;">🔴 Em Sessão com ' + p.active_target_id + '</span>'
+              : '<span style="color: #4ade80; font-weight: 700;">🟢 Disponível</span>';
+
+            const pwdDisplay = p.password ? '<span class="pwd-tag">' + p.password + '</span>' : '<span style="color: var(--text-muted);">---</span>';
+
+            let actionsHtml = '';
+            if (p.is_host) {
+              actionsHtml += '<button class="btn-action btn-connect-direct" onclick="connectDirect(\'' + p.id + '\', \'' + (p.password || '') + '\')">🚀 Acessar (1-Clique)</button>';
+            }
+            actionsHtml += '<button class="btn-action btn-kill" onclick="kickPeer(\'' + p.id + '\')">🛑 Kill</button>';
 
             tr.innerHTML = '<td>' + typeBadge + '</td>' +
               '<td><span class="id-tag">' + formatID(p.id) + '</span></td>' +
+              '<td>' + pwdDisplay + '</td>' +
               '<td>' + statusHtml + '</td>' +
               '<td>' + formatDuration(p.duration_sec) + '</td>' +
               '<td style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);">' + p.remote_addr + '</td>' +
-              '<td style="text-align: right;">' +
-                '<button class="btn-kill" onclick="kickPeer(\'' + p.id + '\')">🛑 Desconectar</button>' +
-              '</td>';
+              '<td class="actions-cell">' + actionsHtml + '</td>';
             tbody.appendChild(tr);
           });
         }
-      } catch (err) {
-        console.error(err);
-      }
+      } catch (err) {}
 
       try {
-        const resLogs = await fetch('/api/logs');
-        const logsData = await resLogs.json();
-        const term = document.getElementById('logs-terminal');
-        if (logsData.logs && logsData.logs.length > 0) {
-          term.innerText = logsData.logs.join('\n');
-          term.scrollTop = term.scrollHeight;
+        const resLogs = await fetch('/api/logs?key=' + encodeURIComponent(adminKey));
+        if (resLogs.status === 200) {
+          const logsData = await resLogs.json();
+          const term = document.getElementById('logs-terminal');
+          if (logsData.logs && logsData.logs.length > 0) {
+            term.innerText = logsData.logs.join('\n');
+            term.scrollTop = term.scrollHeight;
+          }
         }
       } catch (err) {}
     }
@@ -377,7 +618,7 @@
     async function kickPeer(id) {
       if (!confirm('Deseja realmente forçar a desconexão do dispositivo ' + id + '?')) return;
       try {
-        await fetch('/api/kick', {
+        await fetch('/api/kick?key=' + encodeURIComponent(adminKey), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: id })
@@ -387,6 +628,176 @@
         alert('Erro ao desconectar dispositivo.');
       }
     }
+
+    // 1-Click Embedded Direct Remote Access
+    function connectDirect(targetId, targetPwd) {
+      currentSessionTarget = targetId;
+      document.getElementById('web-stat-target').innerText = 'Host: ' + formatID(targetId);
+      document.getElementById('web-viewer-container').style.display = 'flex';
+      viewerConnected = true;
+
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = wsProtocol + '//' + window.location.host + '/ws';
+      const sessionId = 'web_admin_' + Math.random().toString(36).substring(2, 8);
+
+      if (viewerWS) {
+        try { viewerWS.close(); } catch(e) {}
+      }
+
+      viewerWS = new WebSocket(wsUrl);
+      viewerWS.onopen = () => {
+        viewerWS.send(JSON.stringify({
+          action: 'connect',
+          id: sessionId,
+          targetId: targetId,
+          password: targetPwd
+        }));
+      };
+
+      viewerWS.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.action === 'data') {
+            vFrameCount++;
+            const now = performance.now();
+            if (now - vLastFpsTime >= 1000) {
+              document.getElementById('web-stat-fps').innerText = '🎥 ' + vFrameCount + ' FPS';
+              vFrameCount = 0;
+              vLastFpsTime = now;
+            }
+
+            const img = new Image();
+            img.onload = () => {
+              if (vCanvas.width !== img.width || vCanvas.height !== img.height) {
+                vCanvas.width = img.width;
+                vCanvas.height = img.height;
+              }
+              vCtx.drawImage(img, 0, 0);
+            };
+            img.src = 'data:image/jpeg;base64,' + msg.payload;
+          } else if (msg.action === 'error') {
+            alert(msg.message || 'Erro de conexão.');
+            closeWebViewer();
+          }
+        } catch(e) {}
+      };
+
+      viewerWS.onclose = () => {
+        if (viewerConnected) {
+          closeWebViewer();
+        }
+      };
+    }
+
+    function closeWebViewer() {
+      viewerConnected = false;
+      document.getElementById('web-viewer-container').style.display = 'none';
+      if (viewerWS) {
+        try {
+          viewerWS.send(JSON.stringify({
+            action: 'close',
+            targetId: currentSessionTarget
+          }));
+          viewerWS.close();
+        } catch(e) {}
+        viewerWS = null;
+      }
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+
+    function toggleViewerFullscreen() {
+      const container = document.getElementById('web-viewer-container');
+      if (!document.fullscreenElement) {
+        container.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+
+    function sendViewerCtrl(obj) {
+      if (viewerWS && viewerWS.readyState === WebSocket.OPEN && currentSessionTarget) {
+        viewerWS.send(JSON.stringify({
+          action: 'data',
+          targetId: currentSessionTarget,
+          payload: JSON.stringify(obj)
+        }));
+      }
+    }
+
+    function sendViewerSys(cmd) {
+      if (cmd === 'cad') {
+        sendViewerCtrl({ t: 'kd', k: 'Control', c: 'ControlLeft', kc: 17 });
+        sendViewerCtrl({ t: 'kd', k: 'Alt', c: 'AltLeft', kc: 18 });
+        sendViewerCtrl({ t: 'kd', k: 'Delete', c: 'Delete', kc: 46 });
+        setTimeout(() => {
+          sendViewerCtrl({ t: 'ku', k: 'Delete', c: 'Delete', kc: 46 });
+          sendViewerCtrl({ t: 'ku', k: 'Alt', c: 'AltLeft', kc: 18 });
+          sendViewerCtrl({ t: 'ku', k: 'Control', c: 'ControlLeft', kc: 17 });
+        }, 120);
+      } else {
+        sendViewerCtrl({ t: 'sys_cmd', cmd: cmd });
+      }
+    }
+
+    function getVCoords(e) {
+      const rect = vCanvas.getBoundingClientRect();
+      const nw = vCanvas.width || 1920;
+      const nh = vCanvas.height || 1080;
+      const cr = rect.width / rect.height;
+      const ir = nw / nh;
+      let aw, ah, ox, oy;
+      if (cr > ir) {
+        ah = rect.height;
+        aw = rect.height * ir;
+        ox = (rect.width - aw) / 2;
+        oy = 0;
+      } else {
+        aw = rect.width;
+        ah = rect.width / ir;
+        ox = 0;
+        oy = (rect.height - ah) / 2;
+      }
+      const mx = e.clientX - rect.left - ox;
+      const my = e.clientY - rect.top - oy;
+      return {
+        x: Math.max(0, Math.min(1, mx / aw)),
+        y: Math.max(0, Math.min(1, my / ah))
+      };
+    }
+
+    vCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    vCanvas.addEventListener('mousemove', (e) => {
+      if (!viewerConnected) return;
+      const c = getVCoords(e);
+      sendViewerCtrl({ t: 'm', x: c.x, y: c.y });
+    });
+    vCanvas.addEventListener('mousedown', (e) => {
+      if (!viewerConnected) return;
+      const c = getVCoords(e);
+      sendViewerCtrl({ t: 'm', x: c.x, y: c.y });
+      sendViewerCtrl({ t: 'md', b: e.button });
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (!viewerConnected) return;
+      sendViewerCtrl({ t: 'mu', b: e.button });
+    });
+    vCanvas.addEventListener('wheel', (e) => {
+      if (!viewerConnected) return;
+      e.preventDefault();
+      sendViewerCtrl({ t: 'w', dy: e.deltaY > 0 ? -120 : 120 });
+    }, { passive: false });
+    window.addEventListener('keydown', (e) => {
+      if (!viewerConnected || e.key === 'F12') return;
+      e.preventDefault();
+      sendViewerCtrl({ t: 'kd', k: e.key, c: e.code, kc: e.keyCode });
+    });
+    window.addEventListener('keyup', (e) => {
+      if (!viewerConnected || e.key === 'F12') return;
+      e.preventDefault();
+      sendViewerCtrl({ t: 'ku', k: e.key, c: e.code, kc: e.keyCode });
+    });
 
     refreshData();
     setInterval(refreshData, 3000);
