@@ -15,7 +15,7 @@ import (
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true // Allow all origins for signaling
+		return true
 	},
 }
 
@@ -29,7 +29,7 @@ type Peer struct {
 
 type Server struct {
 	mu    sync.RWMutex
-	peers map[string]*Peer // ID -> Peer (Both Hosts and Clients)
+	peers map[string]*Peer
 }
 
 func NewServer() *Server {
@@ -64,7 +64,6 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("[Signaling] Peer conectado: %s (Total online: %d)", peerID, len(s.peers))
 
-	// Send assigned client ID to the peer
 	_ = conn.WriteJSON(protocol.SignalingMessage{
 		Action:  protocol.ActionStatus,
 		Status:  "connected",
@@ -96,9 +95,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 		switch msg.Action {
 		case protocol.ActionRegister:
-			// Host registers its fixed ID
 			s.mu.Lock()
-			// Remove previous peerID entry and map to host ID
 			delete(s.peers, peer.ID)
 			peer.ID = msg.ID
 			peer.IsHost = true
@@ -114,8 +111,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 				ID:      msg.ID,
 			})
 
-		case protocol.ActionOffer:
-			// Client wants to send WebRTC Offer to Host
+		case protocol.ActionConnect:
 			s.mu.RLock()
 			targetPeer, exists := s.peers[msg.TargetID]
 			s.mu.RUnlock()
@@ -136,19 +132,23 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			// Ensure message has sender ID
 			if msg.ID == "" {
 				msg.ID = peer.ID
 			}
 
-			// Forward Offer to Target Host
+			// Forward connect request to Host
 			targetPeer.mu.Lock()
 			_ = targetPeer.Conn.WriteJSON(msg)
 			targetPeer.mu.Unlock()
-			log.Printf("[Signaling] Offer roteada: %s -> %s", peer.ID, msg.TargetID)
 
-		case protocol.ActionAnswer, protocol.ActionCandidate, protocol.ActionClose:
-			// Relay packet directly to TargetID (Host -> Client or Client -> Host)
+			_ = conn.WriteJSON(protocol.SignalingMessage{
+				Action:  protocol.ActionStatus,
+				Status:  "auth_ok",
+				Message: "Autenticado com sucesso! Conectando à tela remota...",
+				ID:      msg.TargetID,
+			})
+
+		case protocol.ActionOffer, protocol.ActionAnswer, protocol.ActionCandidate, protocol.ActionData, protocol.ActionClose:
 			s.mu.RLock()
 			targetPeer, exists := s.peers[msg.TargetID]
 			s.mu.RUnlock()
@@ -160,7 +160,6 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 				targetPeer.mu.Lock()
 				_ = targetPeer.Conn.WriteJSON(msg)
 				targetPeer.mu.Unlock()
-				log.Printf("[Signaling] %s roteada: %s -> %s", msg.Action, peer.ID, msg.TargetID)
 			}
 		}
 	}

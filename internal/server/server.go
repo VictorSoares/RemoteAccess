@@ -52,7 +52,7 @@ func normalizeWSURL(rawURL string) string {
 }
 
 func NewLocalServer(cfg *config.ConfigManager) *LocalServer {
-	ls := &LocalServer{
+	return &LocalServer{
 		Config:      cfg,
 		Signaling:   signaling.NewServer(),
 		cloudStatus: "local",
@@ -63,11 +63,9 @@ func NewLocalServer(cfg *config.ConfigManager) *LocalServer {
 			},
 		},
 	}
-	return ls
 }
 
 func (s *LocalServer) Start(port int) error {
-	// Start background Cloud Signaling Client if configured
 	go s.cloudSignalingLoop()
 
 	mux := http.NewServeMux()
@@ -120,7 +118,6 @@ func (s *LocalServer) handleSetSignaling(w http.ResponseWriter, r *http.Request)
 	normURL := normalizeWSURL(req.SignalingURL)
 	_ = s.Config.SetSignalingURL(normURL)
 
-	// Trigger immediate reconnect
 	s.mu.Lock()
 	if s.cloudWS != nil {
 		_ = s.cloudWS.Close()
@@ -244,7 +241,6 @@ func (s *LocalServer) cloudSignalingLoop() {
 
 		log.Printf("[Cloud Signaling] Conectado com sucesso! Registrando Host ID: %s", hostID)
 
-		// Register host ID
 		err = conn.WriteJSON(protocol.SignalingMessage{
 			Action:   protocol.ActionRegister,
 			ID:       hostID,
@@ -278,15 +274,12 @@ func (s *LocalServer) cloudSignalingLoop() {
 
 func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.SignalingMessage) {
 	switch msg.Action {
-	case protocol.ActionConnect:
-		log.Printf("[Signaling] Cliente remoto solicitou conexao: %s", msg.TargetID)
-
-	case protocol.ActionOffer:
+	case protocol.ActionConnect, protocol.ActionOffer:
 		senderID := msg.ID
 		if senderID == "" {
 			senderID = msg.TargetID
 		}
-		log.Printf("[Signaling] Recebida oferta WebRTC de cliente remoto: %s", senderID)
+		log.Printf("[Signaling] Cliente remoto conectado: %s (iniciando stream)", senderID)
 
 		hostSess, err := webrtcmod.NewHostSession(s.Config.Data.FPS, s.Config.Data.Quality, func(outMsg protocol.SignalingMessage) {
 			outMsg.ID = s.Config.Data.ID
@@ -297,6 +290,16 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 			return
 		}
 
+		// Setup WebSocket Relay fallback frame sender
+		hostSess.OnRelayFrame = func(jpegBase64 string) {
+			_ = conn.WriteJSON(protocol.SignalingMessage{
+				Action:   protocol.ActionData,
+				ID:       s.Config.Data.ID,
+				TargetID: senderID,
+				Payload:  jpegBase64,
+			})
+		}
+
 		s.mu.Lock()
 		if s.hostSession != nil {
 			s.hostSession.Close()
@@ -304,9 +307,20 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 		s.hostSession = hostSess
 		s.mu.Unlock()
 
-		err = hostSess.HandleRemoteOffer(senderID, msg.SDP)
-		if err != nil {
-			log.Printf("[Signaling] Erro ao responder oferta WebRTC: %v", err)
+		if msg.SDP != "" {
+			_ = hostSess.HandleRemoteOffer(senderID, msg.SDP)
+		}
+
+		hostSess.StartStreaming()
+
+	case protocol.ActionData:
+		// Received input event from remote client via WebSocket Relay
+		s.mu.RLock()
+		sess := s.hostSession
+		s.mu.RUnlock()
+
+		if sess != nil && msg.Payload != "" {
+			sess.HandleControlData([]byte(msg.Payload))
 		}
 
 	case protocol.ActionCandidate:

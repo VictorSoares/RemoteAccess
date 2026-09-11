@@ -17,6 +17,7 @@ let isConnected = false;
 let currentTab = 'host';
 let pwdVisible = false;
 let currentClientSessionId = 'c_' + Math.random().toString(36).substring(2, 9);
+let currentTargetId = '';
 
 // Performance counters
 let frameCount = 0;
@@ -35,7 +36,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   setupCanvasEvents();
   setupKeyboardEvents();
 
-  // Poll status every 3 seconds
   setInterval(fetchHostInfo, 3000);
 });
 
@@ -125,7 +125,7 @@ async function openCustomPasswordModal() {
     if (data.status === 'ok') {
       myHostInfo.rawPwd = data.password;
       updatePasswordDisplay();
-      alert('Senha fixa salva com sucesso! Ela será mantida mesmo ao reiniciar o PC.');
+      alert('Senha fixa salva com sucesso!');
     }
   } catch (err) {
     alert('Erro ao salvar nova senha.');
@@ -144,7 +144,7 @@ async function toggleAutoStart(e) {
     if (data.status === 'ok') {
       myHostInfo.autoStart = enable;
       if (enable) {
-        alert('RemoteAccess agora iniciará automaticamente em segundo plano sempre que o Windows for ligado!');
+        alert('RemoteAccess agora iniciará automaticamente em segundo plano com o Windows!');
       } else {
         alert('Inicialização automática desativada.');
       }
@@ -187,7 +187,7 @@ async function openSignalingModal() {
     const data = await res.json();
     if (data.status === 'ok') {
       myHostInfo.signalingURL = data.signaling_url;
-      alert('Servidor de Nuvem configurado! Conectando ao Render em segundo plano...');
+      alert('Servidor de Nuvem configurado!');
       await fetchHostInfo();
       connectSignaling();
     }
@@ -196,7 +196,6 @@ async function openSignalingModal() {
   }
 }
 
-// Signaling WebSocket Connection for Client control
 function connectSignaling() {
   if (signalingWS) {
     try { signalingWS.close(); } catch(e) {}
@@ -218,7 +217,6 @@ function connectSignaling() {
   try {
     signalingWS = new WebSocket(wsUrl);
   } catch (err) {
-    console.error('WebSocket connection error:', err);
     return;
   }
 
@@ -229,11 +227,13 @@ function connectSignaling() {
   signalingWS.onmessage = async (event) => {
     try {
       const msg = JSON.parse(event.data);
-      console.log('[Signaling RX]', msg.action, msg);
 
       switch (msg.action) {
         case 'status':
-          console.log('[Signaling Status]', msg.message);
+          if (msg.status === 'auth_ok') {
+            openViewer();
+            startPingLoop();
+          }
           break;
 
         case 'error':
@@ -243,7 +243,6 @@ function connectSignaling() {
 
         case 'answer':
           if (peerConnection) {
-            console.log('[WebRTC] Recebida SDP Answer do Host Remoto!');
             await peerConnection.setRemoteDescription(new RTCSessionDescription({
               type: 'answer',
               sdp: msg.sdp
@@ -257,12 +256,17 @@ function connectSignaling() {
           }
           break;
 
+        case 'data':
+          // Received frame from WebSocket Relay
+          renderBase64Frame(msg.payload);
+          break;
+
         case 'close':
           closeViewer();
           break;
       }
     } catch (e) {
-      console.error('[Signaling Message Parse Error]', e);
+      console.error(e);
     }
   };
 
@@ -282,32 +286,39 @@ async function connectToRemote(e) {
     return;
   }
 
+  currentTargetId = rawTargetId;
   const btn = document.getElementById('btn-connect');
   btn.disabled = true;
-  btn.innerHTML = '<span>⏳ Negociando conexão...</span>';
+  btn.innerHTML = '<span>⏳ Conectando...</span>';
 
   saveRecentConnection(rawTargetId);
   currentClientSessionId = 'c_' + Math.random().toString(36).substring(2, 9);
 
-  // Reconnect signaling if needed
   if (!signalingWS || signalingWS.readyState !== WebSocket.OPEN) {
     connectSignaling();
-    await new Promise(r => setTimeout(r, 1000));
+    await new Promise(r => setTimeout(r, 800));
   }
 
-  // Setup WebRTC Peer Connection
+  // 1. Send authentication / connect request
+  if (signalingWS && signalingWS.readyState === WebSocket.OPEN) {
+    signalingWS.send(JSON.stringify({
+      action: 'connect',
+      id: currentClientSessionId,
+      targetId: rawTargetId,
+      password: targetPwd
+    }));
+  }
+
+  // 2. Setup WebRTC Peer Connection with public STUN
   const config = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun2.l.google.com:19302' },
       { urls: 'stun:stun.cloudflare.com:3478' }
     ]
   };
 
   peerConnection = new RTCPeerConnection(config);
-
-  // Create Data Channels
   inputChannel = peerConnection.createDataChannel('input', { ordered: true });
   videoChannel = peerConnection.createDataChannel('video', { maxRetransmits: 0, ordered: false });
 
@@ -324,29 +335,27 @@ async function connectToRemote(e) {
     }
   };
 
-  // Create Offer
-  const offer = await peerConnection.createOffer();
-  await peerConnection.setLocalDescription(offer);
+  try {
+    const offer = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offer);
 
-  // Send Offer through Signaling Server
-  if (signalingWS && signalingWS.readyState === WebSocket.OPEN) {
-    console.log('[WebRTC] Enviando Offer para o Host:', rawTargetId);
-    signalingWS.send(JSON.stringify({
-      action: 'offer',
-      id: currentClientSessionId,
-      targetId: rawTargetId,
-      password: targetPwd,
-      sdp: offer.sdp
-    }));
-  } else {
-    alert('Não foi possível conectar ao servidor de sinalização. Verifique sua conexão com a internet.');
-    resetConnectButton();
+    if (signalingWS && signalingWS.readyState === WebSocket.OPEN) {
+      signalingWS.send(JSON.stringify({
+        action: 'offer',
+        id: currentClientSessionId,
+        targetId: rawTargetId,
+        password: targetPwd,
+        sdp: offer.sdp
+      }));
+    }
+  } catch (err) {
+    console.warn('WebRTC offer failed, using WebSocket Relay fallback:', err);
   }
 }
 
 function setupDataChannels(targetId) {
   inputChannel.onopen = () => {
-    console.log('[Client] Input DataChannel Aberto com Sucesso!');
+    console.log('[Client] WebRTC P2P DataChannel Aberto!');
     openViewer();
     startPingLoop();
   };
@@ -356,62 +365,97 @@ function setupDataChannels(targetId) {
       const msg = JSON.parse(event.data);
       if (msg.t === 'pong') {
         const rtt = Math.round(performance.now() - msg.ts);
-        document.getElementById('stat-latency').innerText = `⚡ ${rtt} ms`;
+        document.getElementById('stat-latency').innerText = `⚡ ${rtt} ms (P2P)`;
       }
     } catch (e) {}
   };
 
-  videoChannel.onopen = () => {
-    console.log('[Client] Video DataChannel Aberto com Sucesso!');
-  };
-
   videoChannel.onmessage = async (event) => {
-    frameCount++;
-    const now = performance.now();
-    if (now - lastFpsTime >= 1000) {
-      document.getElementById('stat-fps').innerText = `🎥 ${frameCount} fps`;
-      frameCount = 0;
-      lastFpsTime = now;
-    }
-
-    const blob = new Blob([event.data], { type: 'image/jpeg' });
-    try {
-      const imgBitmap = await createImageBitmap(blob);
-      if (canvas.width !== imgBitmap.width || canvas.height !== imgBitmap.height) {
-        canvas.width = imgBitmap.width;
-        canvas.height = imgBitmap.height;
-      }
-      ctx.drawImage(imgBitmap, 0, 0);
-      imgBitmap.close();
-    } catch (err) {
-      const img = new Image();
-      const url = URL.createObjectURL(blob);
-      img.onload = () => {
-        if (canvas.width !== img.width || canvas.height !== img.height) {
-          canvas.width = img.width;
-          canvas.height = img.height;
-        }
-        ctx.drawImage(img, 0, 0);
-        URL.revokeObjectURL(url);
-      };
-      img.src = url;
-    }
+    renderRawBlob(event.data);
   };
+}
+
+function renderBase64Frame(b64) {
+  if (!isConnected) openViewer();
+
+  frameCount++;
+  const now = performance.now();
+  if (now - lastFpsTime >= 1000) {
+    document.getElementById('stat-fps').innerText = `🎥 ${frameCount} fps`;
+    frameCount = 0;
+    lastFpsTime = now;
+  }
+
+  const img = new Image();
+  img.onload = () => {
+    if (canvas.width !== img.width || canvas.height !== img.height) {
+      canvas.width = img.width;
+      canvas.height = img.height;
+    }
+    ctx.drawImage(img, 0, 0);
+  };
+  img.src = 'data:image/jpeg;base64,' + b64;
+}
+
+function renderRawBlob(blobData) {
+  frameCount++;
+  const now = performance.now();
+  if (now - lastFpsTime >= 1000) {
+    document.getElementById('stat-fps').innerText = `🎥 ${frameCount} fps (P2P)`;
+    frameCount = 0;
+    lastFpsTime = now;
+  }
+
+  const blob = new Blob([blobData], { type: 'image/jpeg' });
+  createImageBitmap(blob).then((imgBitmap) => {
+    if (canvas.width !== imgBitmap.width || canvas.height !== imgBitmap.height) {
+      canvas.width = imgBitmap.width;
+      canvas.height = imgBitmap.height;
+    }
+    ctx.drawImage(imgBitmap, 0, 0);
+    imgBitmap.close();
+  }).catch(() => {
+    const img = new Image();
+    const url = URL.createObjectURL(blob);
+    img.onload = () => {
+      if (canvas.width !== img.width || canvas.height !== img.height) {
+        canvas.width = img.width;
+        canvas.height = img.height;
+      }
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  });
+}
+
+function sendControl(ctrlObj) {
+  if (!isConnected) return;
+
+  // 1. Try sending via WebRTC DataChannel
+  if (inputChannel && inputChannel.readyState === 'open') {
+    inputChannel.send(JSON.stringify(ctrlObj));
+    return;
+  }
+
+  // 2. Fallback: Send via WebSocket Relay
+  if (signalingWS && signalingWS.readyState === WebSocket.OPEN && currentTargetId) {
+    signalingWS.send(JSON.stringify({
+      action: 'data',
+      id: currentClientSessionId,
+      targetId: currentTargetId,
+      payload: JSON.stringify(ctrlObj)
+    }));
+  }
 }
 
 function startPingLoop() {
   setInterval(() => {
-    if (inputChannel && inputChannel.readyState === 'open') {
-      lastPingTime = performance.now();
-      inputChannel.send(JSON.stringify({
-        t: 'ping',
-        ts: lastPingTime
-      }));
-    }
+    lastPingTime = performance.now();
+    sendControl({ t: 'ping', ts: lastPingTime });
   }, 2000);
 }
 
-// Viewer UI Management
 function openViewer() {
   isConnected = true;
   viewerContainer.style.display = 'flex';
@@ -424,6 +468,13 @@ function closeViewer() {
   if (peerConnection) {
     peerConnection.close();
     peerConnection = null;
+  }
+  if (signalingWS && signalingWS.readyState === WebSocket.OPEN && currentTargetId) {
+    signalingWS.send(JSON.stringify({
+      action: 'close',
+      id: currentClientSessionId,
+      targetId: currentTargetId
+    }));
   }
   if (document.fullscreenElement) {
     document.exitFullscreen().catch(() => {});
@@ -445,108 +496,78 @@ function toggleFullscreen() {
   }
 }
 
-// Canvas & Input Event Listeners
 function setupCanvasEvents() {
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
   canvas.addEventListener('mousemove', (e) => {
-    if (!isConnected || !inputChannel || inputChannel.readyState !== 'open') return;
-
+    if (!isConnected) return;
     const rect = canvas.getBoundingClientRect();
     const ratioX = (e.clientX - rect.left) / rect.width;
     const ratioY = (e.clientY - rect.top) / rect.height;
 
-    inputChannel.send(JSON.stringify({
-      t: 'm',
-      x: ratioX,
-      y: ratioY
-    }));
+    sendControl({ t: 'm', x: ratioX, y: ratioY });
   });
 
   canvas.addEventListener('mousedown', (e) => {
-    if (!isConnected || !inputChannel || inputChannel.readyState !== 'open') return;
-    inputChannel.send(JSON.stringify({
-      t: 'md',
-      b: e.button
-    }));
+    if (!isConnected) return;
+    sendControl({ t: 'md', b: e.button });
   });
 
   canvas.addEventListener('mouseup', (e) => {
-    if (!isConnected || !inputChannel || inputChannel.readyState !== 'open') return;
-    inputChannel.send(JSON.stringify({
-      t: 'mu',
-      b: e.button
-    }));
+    if (!isConnected) return;
+    sendControl({ t: 'mu', b: e.button });
   });
 
   canvas.addEventListener('wheel', (e) => {
-    if (!isConnected || !inputChannel || inputChannel.readyState !== 'open') return;
+    if (!isConnected) return;
     e.preventDefault();
-    inputChannel.send(JSON.stringify({
-      t: 'w',
-      dy: e.deltaY > 0 ? -120 : 120
-    }));
+    sendControl({ t: 'w', dy: e.deltaY > 0 ? -120 : 120 });
   }, { passive: false });
 }
 
 function setupKeyboardEvents() {
   window.addEventListener('keydown', (e) => {
-    if (!isConnected || !inputChannel || inputChannel.readyState !== 'open') return;
-    if (e.key === 'F12') return;
-
+    if (!isConnected || e.key === 'F12') return;
     e.preventDefault();
-    inputChannel.send(JSON.stringify({
-      t: 'kd',
-      k: e.key,
-      c: e.code,
-      kc: e.keyCode
-    }));
+    sendControl({ t: 'kd', k: e.key, c: e.code, kc: e.keyCode });
   });
 
   window.addEventListener('keyup', (e) => {
-    if (!isConnected || !inputChannel || inputChannel.readyState !== 'open') return;
-    if (e.key === 'F12') return;
-
+    if (!isConnected || e.key === 'F12') return;
     e.preventDefault();
-    inputChannel.send(JSON.stringify({
-      t: 'ku',
-      k: e.key,
-      c: e.code,
-      kc: e.keyCode
-    }));
+    sendControl({ t: 'ku', k: e.key, c: e.code, kc: e.keyCode });
   });
 }
 
 function sendSpecialKey(type) {
-  if (!isConnected || !inputChannel || inputChannel.readyState !== 'open') return;
+  if (!isConnected) return;
 
   if (type === 'ctrl_alt_del') {
-    inputChannel.send(JSON.stringify({ t: 'kd', k: 'Control', c: 'ControlLeft', kc: 17 }));
-    inputChannel.send(JSON.stringify({ t: 'kd', k: 'Alt', c: 'AltLeft', kc: 18 }));
-    inputChannel.send(JSON.stringify({ t: 'kd', k: 'Delete', c: 'Delete', kc: 46 }));
+    sendControl({ t: 'kd', k: 'Control', c: 'ControlLeft', kc: 17 });
+    sendControl({ t: 'kd', k: 'Alt', c: 'AltLeft', kc: 18 });
+    sendControl({ t: 'kd', k: 'Delete', c: 'Delete', kc: 46 });
     setTimeout(() => {
-      inputChannel.send(JSON.stringify({ t: 'ku', k: 'Delete', c: 'Delete', kc: 46 }));
-      inputChannel.send(JSON.stringify({ t: 'ku', k: 'Alt', c: 'AltLeft', kc: 18 }));
-      inputChannel.send(JSON.stringify({ t: 'ku', k: 'Control', c: 'ControlLeft', kc: 17 }));
+      sendControl({ t: 'ku', k: 'Delete', c: 'Delete', kc: 46 });
+      sendControl({ t: 'ku', k: 'Alt', c: 'AltLeft', kc: 18 });
+      sendControl({ t: 'ku', k: 'Control', c: 'ControlLeft', kc: 17 });
     }, 100);
   } else if (type === 'win_d') {
-    inputChannel.send(JSON.stringify({ t: 'kd', k: 'Meta', c: 'MetaLeft', kc: 91 }));
-    inputChannel.send(JSON.stringify({ t: 'kd', k: 'd', c: 'KeyD', kc: 68 }));
+    sendControl({ t: 'kd', k: 'Meta', c: 'MetaLeft', kc: 91 });
+    sendControl({ t: 'kd', k: 'd', c: 'KeyD', kc: 68 });
     setTimeout(() => {
-      inputChannel.send(JSON.stringify({ t: 'ku', k: 'd', c: 'KeyD', kc: 68 }));
-      inputChannel.send(JSON.stringify({ t: 'ku', k: 'Meta', c: 'MetaLeft', kc: 91 }));
+      sendControl({ t: 'ku', k: 'd', c: 'KeyD', kc: 68 });
+      sendControl({ t: 'ku', k: 'Meta', c: 'MetaLeft', kc: 91 });
     }, 100);
   } else if (type === 'alt_tab') {
-    inputChannel.send(JSON.stringify({ t: 'kd', k: 'Alt', c: 'AltLeft', kc: 18 }));
-    inputChannel.send(JSON.stringify({ t: 'kd', k: 'Tab', c: 'Tab', kc: 9 }));
+    sendControl({ t: 'kd', k: 'Alt', c: 'AltLeft', kc: 18 });
+    sendControl({ t: 'kd', k: 'Tab', c: 'Tab', kc: 9 });
     setTimeout(() => {
-      inputChannel.send(JSON.stringify({ t: 'ku', k: 'Tab', c: 'Tab', kc: 9 }));
-      inputChannel.send(JSON.stringify({ t: 'ku', k: 'Alt', c: 'AltLeft', kc: 18 }));
+      sendControl({ t: 'ku', k: 'Tab', c: 'Tab', kc: 9 });
+      sendControl({ t: 'ku', k: 'Alt', c: 'AltLeft', kc: 18 });
     }, 100);
   }
 }
 
-// Recent Connections Storage
 function loadRecentConnections() {
   const raw = localStorage.getItem('ra_recent_connections');
   const list = raw ? JSON.parse(raw) : [];

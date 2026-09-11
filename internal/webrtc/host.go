@@ -1,6 +1,7 @@
 package webrtc
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -37,6 +38,7 @@ type HostSession struct {
 	Quality      int
 	OnStatus     func(status string, msg string)
 	SendSignal   func(msg protocol.SignalingMessage)
+	OnRelayFrame func(jpegBase64 string)
 }
 
 func NewHostSession(fps int, quality int, sendSignal func(protocol.SignalingMessage)) (*HostSession, error) {
@@ -78,9 +80,6 @@ func (h *HostSession) HandleRemoteOffer(targetID string, sdpStr string) error {
 		if h.OnStatus != nil {
 			h.OnStatus("ice_state", state.String())
 		}
-		if state == pion.ICEConnectionStateDisconnected || state == pion.ICEConnectionStateFailed || state == pion.ICEConnectionStateClosed {
-			h.StopStreaming()
-		}
 	})
 
 	pc.OnICECandidate(func(c *pion.ICECandidate) {
@@ -100,25 +99,16 @@ func (h *HostSession) HandleRemoteOffer(targetID string, sdpStr string) error {
 		}
 	})
 
-	// Handle DataChannels created by the Client
 	pc.OnDataChannel(func(dc *pion.DataChannel) {
-		log.Printf("[Host] DataChannel received: %s", dc.Label())
+		log.Printf("[Host] WebRTC DataChannel recebido: %s", dc.Label())
 
 		if dc.Label() == "input" {
 			h.inputChannel = dc
 			dc.OnMessage(func(msg pion.DataChannelMessage) {
-				h.handleControlMessage(msg.Data)
+				h.HandleControlData(msg.Data)
 			})
 		} else if dc.Label() == "video" {
 			h.videoChannel = dc
-			dc.OnOpen(func() {
-				log.Println("[Host] Video DataChannel opened, starting screen stream...")
-				h.StartStreaming()
-			})
-			dc.OnClose(func() {
-				log.Println("[Host] Video DataChannel closed, stopping screen stream...")
-				h.StopStreaming()
-			})
 		}
 	})
 
@@ -170,7 +160,7 @@ func (h *HostSession) AddICECandidate(candidateJSON []byte) error {
 	return pc.AddICECandidate(init)
 }
 
-func (h *HostSession) handleControlMessage(data []byte) {
+func (h *HostSession) HandleControlData(data []byte) {
 	var ctrl protocol.ControlMessage
 	if err := json.Unmarshal(data, &ctrl); err != nil {
 		return
@@ -197,7 +187,7 @@ func (h *HostSession) handleControlMessage(data []byte) {
 			h.FPS = ctrl.FPS
 		}
 	case protocol.TypePing:
-		if h.inputChannel != nil {
+		if h.inputChannel != nil && h.inputChannel.ReadyState() == pion.DataChannelStateOpen {
 			resp, _ := json.Marshal(protocol.ControlMessage{
 				Type: protocol.TypePong,
 				Time: ctrl.Time,
@@ -209,7 +199,7 @@ func (h *HostSession) handleControlMessage(data []byte) {
 
 func (h *HostSession) StartStreaming() {
 	if !atomic.CompareAndSwapInt32(&h.running, 0, 1) {
-		return // Already running
+		return
 	}
 
 	go func() {
@@ -222,20 +212,27 @@ func (h *HostSession) StartStreaming() {
 			case <-h.stopCapture:
 				return
 			case <-ticker.C:
-				if h.videoChannel == nil || h.videoChannel.ReadyState() != pion.DataChannelStateOpen {
-					continue
-				}
-
 				frameData, err := h.capturer.CaptureFrame()
 				if err != nil {
 					continue
 				}
 
-				// Send frame over WebRTC Video DataChannel
-				// If frame exceeds chunk size, send chunked or send whole binary payload
-				err = h.videoChannel.Send(frameData)
-				if err != nil {
-					log.Printf("[Host] Send frame error: %v", err)
+				webrtcSent := false
+				h.mu.Lock()
+				vChan := h.videoChannel
+				h.mu.Unlock()
+
+				// 1. Try sending via WebRTC P2P DataChannel if connected
+				if vChan != nil && vChan.ReadyState() == pion.DataChannelStateOpen {
+					if err := vChan.Send(frameData); err == nil {
+						webrtcSent = true
+					}
+				}
+
+				// 2. If WebRTC is not active, relay frame via WebSocket over port 443!
+				if !webrtcSent && h.OnRelayFrame != nil {
+					b64 := base64.StdEncoding.EncodeToString(frameData)
+					h.OnRelayFrame(b64)
 				}
 			}
 		}

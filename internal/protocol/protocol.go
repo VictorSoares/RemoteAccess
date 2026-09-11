@@ -9,6 +9,7 @@ const (
 	ActionOffer     = "offer"
 	ActionAnswer    = "answer"
 	ActionCandidate = "candidate"
+	ActionData      = "data"
 	ActionStatus    = "status"
 	ActionError     = "error"
 	ActionClose     = "close"
@@ -22,11 +23,12 @@ type SignalingMessage struct {
 	Password  string          `json:"password,omitempty"`
 	SDP       string          `json:"sdp,omitempty"`
 	Candidate json.RawMessage `json:"candidate,omitempty"`
+	Payload   string          `json:"payload,omitempty"` // For WebSocket Relay fallback
 	Status    string          `json:"status,omitempty"`
 	Message   string          `json:"message,omitempty"`
 }
 
-// Control Packet Types for WebRTC DataChannel
+// Control Packet Types
 const (
 	TypeMouseMove = "m"
 	TypeMouseDown = "md"
