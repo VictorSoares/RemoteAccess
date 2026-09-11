@@ -16,19 +16,38 @@ import (
 	"remoteaccess/internal/server"
 )
 
-const version = "1.1.0"
+const version = "1.2.0"
 
-func openBrowser(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", url)
-	case "darwin":
-		cmd = exec.Command("open", url)
-	default:
-		cmd = exec.Command("xdg-open", url)
+// openNativeAppWindow opens the application as a standalone desktop window (like AnyDesk) without browser UI
+func openNativeAppWindow(url string) {
+	if runtime.GOOS == "windows" {
+		edgePaths := []string{
+			os.Getenv("ProgramFiles(x86)") + `\Microsoft\Edge\Application\msedge.exe`,
+			os.Getenv("ProgramFiles") + `\Microsoft\Edge\Application\msedge.exe`,
+			os.Getenv("LocalAppData") + `\Microsoft\Edge\Application\msedge.exe`,
+			`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
+			`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
+		}
+
+		for _, edgePath := range edgePaths {
+			if _, err := os.Stat(edgePath); err == nil {
+				cmd := exec.Command(edgePath, fmt.Sprintf("--app=%s", url), "--window-size=960,720", "--app-id=RemoteAccessPortable")
+				if err := cmd.Start(); err == nil {
+					return
+				}
+			}
+		}
+
+		// Fallback: standard default browser
+		_ = exec.Command("cmd", "/c", "start", url).Start()
+		return
 	}
-	_ = cmd.Start()
+
+	if runtime.GOOS == "darwin" {
+		_ = exec.Command("open", url).Start()
+	} else {
+		_ = exec.Command("xdg-open", url).Start()
+	}
 }
 
 func findAvailablePort(startPort int) int {
@@ -44,11 +63,16 @@ func findAvailablePort(startPort int) int {
 
 func main() {
 	portFlag := flag.Int("port", 8080, "Porta local para o painel de controle")
-	noBrowser := flag.Bool("no-browser", false, "Não abrir o navegador automaticamente (Modo background)")
+	noBrowser := flag.Bool("no-browser", false, "Modo silencioso de segundo plano (para inicializacao com Windows)")
 	autostart := flag.Bool("autostart", false, "Ativar inicialização automática com o Windows")
+	defaultPwd := flag.String("password", "", "Definir senha padrao")
 	flag.Parse()
 
 	cfg := config.LoadConfig()
+
+	if *defaultPwd != "" {
+		_ = cfg.SetPassword(*defaultPwd)
+	}
 
 	if *autostart {
 		_ = cfg.SetAutoStart(true)
@@ -60,26 +84,25 @@ func main() {
 	url := fmt.Sprintf("http://localhost:%d", port)
 
 	fmt.Println("================================================================")
-	fmt.Printf("   ⚡ RemoteAccess Portable v%s - Acesso Remoto Bidirecional\n", version)
-	fmt.Println("   Sem Instalacao | ID e Senha Fixos | Inicializacao com Windows")
+	fmt.Printf("   ⚡ RemoteAccess Portable v%s - Janela Nativa Desktop\n", version)
+	fmt.Println("   Sem Instalacao | Janela Propria | Senha Salva Automatica")
 	fmt.Println("================================================================")
 	fmt.Printf("   [+] Seu ID Fixo       : %s\n", cfg.Data.ID)
 	fmt.Printf("   [+] Sua Senha Fixa    : %s\n", cfg.Data.Password)
 	fmt.Printf("   [+] Auto-start Windows: %v\n", cfg.Data.AutoStart)
-	fmt.Printf("   [+] Painel de Controle: %s\n", url)
+	fmt.Printf("   [+] Servidor Nuvem    : %s\n", cfg.Data.SignalingURL)
 	fmt.Println("================================================================")
 	fmt.Println("   Pressione Ctrl+C para encerrar o programa a qualquer momento.")
 	fmt.Println()
 
-	// Launch browser after server starts (unless in silent / background mode)
+	// Launch as Standalone Desktop Window (unless in silent autostart background mode)
 	if !*noBrowser {
 		go func() {
-			time.Sleep(600 * time.Millisecond)
-			openBrowser(url)
+			time.Sleep(500 * time.Millisecond)
+			openNativeAppWindow(url)
 		}()
 	}
 
-	// Handle graceful shutdown
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 

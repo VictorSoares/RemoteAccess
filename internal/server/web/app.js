@@ -125,7 +125,7 @@ async function openCustomPasswordModal() {
     if (data.status === 'ok') {
       myHostInfo.rawPwd = data.password;
       updatePasswordDisplay();
-      alert('Senha fixa salva com sucesso!');
+      alert('Senha fixa salva com sucesso! Ela nunca mais mudará.');
     }
   } catch (err) {
     alert('Erro ao salvar nova senha.');
@@ -257,7 +257,6 @@ function connectSignaling() {
           break;
 
         case 'data':
-          // Received frame from WebSocket Relay
           renderBase64Frame(msg.payload);
           break;
 
@@ -277,7 +276,7 @@ function connectSignaling() {
 
 // Client: Connect to Remote Host
 async function connectToRemote(e) {
-  e.preventDefault();
+  if (e) e.preventDefault();
   const rawTargetId = document.getElementById('target-id').value.replace(/\D/g, '');
   const targetPwd = document.getElementById('target-pwd').value;
 
@@ -291,7 +290,8 @@ async function connectToRemote(e) {
   btn.disabled = true;
   btn.innerHTML = '<span>⏳ Conectando...</span>';
 
-  saveRecentConnection(rawTargetId);
+  // Save ID and Password in saved connections
+  saveRecentConnection(rawTargetId, targetPwd);
   currentClientSessionId = 'c_' + Math.random().toString(36).substring(2, 9);
 
   if (!signalingWS || signalingWS.readyState !== WebSocket.OPEN) {
@@ -299,7 +299,7 @@ async function connectToRemote(e) {
     await new Promise(r => setTimeout(r, 800));
   }
 
-  // 1. Send authentication / connect request
+  // 1. Send authentication request
   if (signalingWS && signalingWS.readyState === WebSocket.OPEN) {
     signalingWS.send(JSON.stringify({
       action: 'connect',
@@ -309,7 +309,7 @@ async function connectToRemote(e) {
     }));
   }
 
-  // 2. Setup WebRTC Peer Connection with public STUN
+  // 2. Setup WebRTC Peer Connection
   const config = {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -349,7 +349,7 @@ async function connectToRemote(e) {
       }));
     }
   } catch (err) {
-    console.warn('WebRTC offer failed, using WebSocket Relay fallback:', err);
+    console.warn('WebRTC offer fallback to Relay:', err);
   }
 }
 
@@ -432,13 +432,11 @@ function renderRawBlob(blobData) {
 function sendControl(ctrlObj) {
   if (!isConnected) return;
 
-  // 1. Try sending via WebRTC DataChannel
   if (inputChannel && inputChannel.readyState === 'open') {
     inputChannel.send(JSON.stringify(ctrlObj));
     return;
   }
 
-  // 2. Fallback: Send via WebSocket Relay
   if (signalingWS && signalingWS.readyState === WebSocket.OPEN && currentTargetId) {
     signalingWS.send(JSON.stringify({
       action: 'data',
@@ -549,7 +547,7 @@ function sendSpecialKey(type) {
     setTimeout(() => {
       sendControl({ t: 'ku', k: 'Delete', c: 'Delete', kc: 46 });
       sendControl({ t: 'ku', k: 'Alt', c: 'AltLeft', kc: 18 });
-      sendControl({ t: 'ku', k: 'Control', c: 'ControlLeft', kc: 17 });
+      sendControl({ t: 'ku', k: 'Control', c: 'ControlLeft', kc: 17 }));
     }, 100);
   } else if (type === 'win_d') {
     sendControl({ t: 'kd', k: 'Meta', c: 'MetaLeft', kc: 91 });
@@ -568,32 +566,34 @@ function sendSpecialKey(type) {
   }
 }
 
+// Saved Connections with Passwords (1-Click Reconnect)
 function loadRecentConnections() {
-  const raw = localStorage.getItem('ra_recent_connections');
+  const raw = localStorage.getItem('ra_saved_devices');
   const list = raw ? JSON.parse(raw) : [];
   const container = document.getElementById('recent-list');
 
   if (list.length === 0) {
-    container.innerHTML = '<span style="font-size: 0.85rem; color: var(--text-muted);">Nenhuma conexão recente ainda.</span>';
+    container.innerHTML = '<span style="font-size: 0.85rem; color: var(--text-muted);">Nenhum computador salvo ainda.</span>';
     return;
   }
 
   container.innerHTML = '';
-  list.forEach((id) => {
+  list.forEach((item) => {
     const chip = document.createElement('div');
     chip.className = 'recent-chip';
-    chip.innerHTML = `💻 <span>${formatID(id)}</span>`;
+    chip.innerHTML = `💻 <strong>${formatID(item.id)}</strong> <span style="font-size: 0.75rem; background: rgba(59,130,246,0.3); padding: 0.15rem 0.4rem; border-radius: 4px; margin-left: 0.3rem;">⚡ Conectar</span>`;
     chip.onclick = () => {
-      document.getElementById('target-id').value = formatID(id);
-      document.getElementById('target-pwd').focus();
+      document.getElementById('target-id').value = formatID(item.id);
+      document.getElementById('target-pwd').value = item.password || '';
+      connectToRemote();
     };
     container.appendChild(chip);
   });
 }
 
-function saveRecentConnection(id) {
-  let list = JSON.parse(localStorage.getItem('ra_recent_connections') || '[]');
-  list = [id, ...list.filter((x) => x !== id)].slice(0, 5);
-  localStorage.setItem('ra_recent_connections', JSON.stringify(list));
+function saveRecentConnection(id, password) {
+  let list = JSON.parse(localStorage.getItem('ra_saved_devices') || '[]');
+  list = [{ id: id, password: password }, ...list.filter((x) => x.id !== id)].slice(0, 5);
+  localStorage.setItem('ra_saved_devices', JSON.stringify(list));
   loadRecentConnections();
 }
