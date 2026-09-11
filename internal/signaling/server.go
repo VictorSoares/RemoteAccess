@@ -1,8 +1,11 @@
 package signaling
 
 import (
+	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"log"
+	"math/big"
 	"net/http"
 	"sync"
 
@@ -16,22 +19,28 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
-type Session struct {
+type Peer struct {
 	ID       string
+	IsHost   bool
 	Password string
-	HostConn *websocket.Conn
+	Conn     *websocket.Conn
 	mu       sync.Mutex
 }
 
 type Server struct {
-	mu       sync.RWMutex
-	sessions map[string]*Session // ID -> Session
+	mu    sync.RWMutex
+	peers map[string]*Peer // ID -> Peer (Both Hosts and Clients)
 }
 
 func NewServer() *Server {
 	return &Server{
-		sessions: make(map[string]*Session),
+		peers: make(map[string]*Peer),
 	}
+}
+
+func generatePeerID() string {
+	n, _ := rand.Int(rand.Reader, big.NewInt(900000))
+	return fmt.Sprintf("c_%06d", n.Int64()+100000)
 }
 
 func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
@@ -42,16 +51,36 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	var currentSessionID string
-	var isHost bool
+	peerID := generatePeerID()
+	peer := &Peer{
+		ID:     peerID,
+		IsHost: false,
+		Conn:   conn,
+	}
+
+	s.mu.Lock()
+	s.peers[peerID] = peer
+	s.mu.Unlock()
+
+	log.Printf("[Signaling] Peer conectado: %s (Total online: %d)", peerID, len(s.peers))
+
+	// Send assigned client ID to the peer
+	_ = conn.WriteJSON(protocol.SignalingMessage{
+		Action:  protocol.ActionStatus,
+		Status:  "connected",
+		Message: "Conectado ao servidor de sinalização",
+		ID:      peerID,
+	})
 
 	defer func() {
 		s.mu.Lock()
-		if isHost && currentSessionID != "" {
-			delete(s.sessions, currentSessionID)
-			log.Printf("[Signaling] Host session %s unregistered", currentSessionID)
+		delete(s.peers, peer.ID)
+		if peer.ID != peerID {
+			delete(s.peers, peerID)
 		}
+		total := len(s.peers)
 		s.mu.Unlock()
+		log.Printf("[Signaling] Peer desconectado: %s (Total online: %d)", peer.ID, total)
 	}()
 
 	for {
@@ -62,95 +91,76 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 		var msg protocol.SignalingMessage
 		if err := json.Unmarshal(message, &msg); err != nil {
-			log.Printf("[Signaling] JSON decode error: %v", err)
 			continue
 		}
 
 		switch msg.Action {
 		case protocol.ActionRegister:
+			// Host registers its fixed ID
 			s.mu.Lock()
-			currentSessionID = msg.ID
-			isHost = true
-			s.sessions[msg.ID] = &Session{
-				ID:       msg.ID,
-				Password: msg.Password,
-				HostConn: conn,
-			}
+			// Remove previous peerID entry and map to host ID
+			delete(s.peers, peer.ID)
+			peer.ID = msg.ID
+			peer.IsHost = true
+			peer.Password = msg.Password
+			s.peers[msg.ID] = peer
 			s.mu.Unlock()
 
-			log.Printf("[Signaling] Host registered ID: %s", msg.ID)
-			conn.WriteJSON(protocol.SignalingMessage{
+			log.Printf("[Signaling] Host registrado com ID fixo: %s", msg.ID)
+			_ = conn.WriteJSON(protocol.SignalingMessage{
 				Action:  protocol.ActionStatus,
 				Status:  "registered",
-				Message: "Registered successfully as host",
+				Message: "Host registrado com sucesso no Relay",
 				ID:      msg.ID,
 			})
 
-		case protocol.ActionConnect:
-			// Client requests to connect to a Host ID
+		case protocol.ActionOffer:
+			// Client wants to send WebRTC Offer to Host
 			s.mu.RLock()
-			sess, exists := s.sessions[msg.TargetID]
+			targetPeer, exists := s.peers[msg.TargetID]
 			s.mu.RUnlock()
 
 			if !exists {
-				conn.WriteJSON(protocol.SignalingMessage{
+				_ = conn.WriteJSON(protocol.SignalingMessage{
 					Action:  protocol.ActionError,
 					Message: "ID não encontrado ou máquina remota está offline.",
 				})
 				continue
 			}
 
-			if sess.Password != "" && sess.Password != msg.Password {
-				conn.WriteJSON(protocol.SignalingMessage{
+			if targetPeer.Password != "" && targetPeer.Password != msg.Password {
+				_ = conn.WriteJSON(protocol.SignalingMessage{
 					Action:  protocol.ActionError,
 					Message: "Senha incorreta.",
 				})
 				continue
 			}
 
-			// Forward connect request to Host
-			sess.mu.Lock()
-			err = sess.HostConn.WriteJSON(protocol.SignalingMessage{
-				Action:   protocol.ActionConnect,
-				TargetID: msg.ID, // Client's ephemeral ID
-			})
-			sess.mu.Unlock()
-
-			if err != nil {
-				conn.WriteJSON(protocol.SignalingMessage{
-					Action:  protocol.ActionError,
-					Message: "Falha ao comunicar com a máquina remota.",
-				})
-				continue
+			// Ensure message has sender ID
+			if msg.ID == "" {
+				msg.ID = peer.ID
 			}
 
-			conn.WriteJSON(protocol.SignalingMessage{
-				Action:  protocol.ActionStatus,
-				Status:  "connected",
-				Message: "Conectado ao host, iniciando negociação WebRTC...",
-			})
+			// Forward Offer to Target Host
+			targetPeer.mu.Lock()
+			_ = targetPeer.Conn.WriteJSON(msg)
+			targetPeer.mu.Unlock()
+			log.Printf("[Signaling] Offer roteada: %s -> %s", peer.ID, msg.TargetID)
 
-		case protocol.ActionOffer, protocol.ActionAnswer, protocol.ActionCandidate:
-			// Relay WebRTC signaling packets to the target peer
+		case protocol.ActionAnswer, protocol.ActionCandidate, protocol.ActionClose:
+			// Relay packet directly to TargetID (Host -> Client or Client -> Host)
 			s.mu.RLock()
-			sess, exists := s.sessions[msg.TargetID]
+			targetPeer, exists := s.peers[msg.TargetID]
 			s.mu.RUnlock()
 
 			if exists {
-				sess.mu.Lock()
-				_ = sess.HostConn.WriteJSON(msg)
-				sess.mu.Unlock()
-			}
-
-		case protocol.ActionClose:
-			// Peer wants to disconnect
-			s.mu.RLock()
-			sess, exists := s.sessions[msg.TargetID]
-			s.mu.RUnlock()
-			if exists {
-				sess.mu.Lock()
-				_ = sess.HostConn.WriteJSON(msg)
-				sess.mu.Unlock()
+				if msg.ID == "" {
+					msg.ID = peer.ID
+				}
+				targetPeer.mu.Lock()
+				_ = targetPeer.Conn.WriteJSON(msg)
+				targetPeer.mu.Unlock()
+				log.Printf("[Signaling] %s roteada: %s -> %s", msg.Action, peer.ID, msg.TargetID)
 			}
 		}
 	}

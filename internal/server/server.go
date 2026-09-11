@@ -22,14 +22,14 @@ import (
 var webFS embed.FS
 
 type LocalServer struct {
-	mu           sync.RWMutex
-	Config       *config.ConfigManager
-	Signaling    *signaling.Server
-	hostSession  *webrtcmod.HostSession
-	upgrader     websocket.Upgrader
-	cloudWS      *websocket.Conn
-	cloudStatus  string
-	stopCloud    chan struct{}
+	mu          sync.RWMutex
+	Config      *config.ConfigManager
+	Signaling   *signaling.Server
+	hostSession *webrtcmod.HostSession
+	upgrader    websocket.Upgrader
+	cloudWS     *websocket.Conn
+	cloudStatus string
+	stopCloud   chan struct{}
 }
 
 func normalizeWSURL(rawURL string) string {
@@ -44,7 +44,7 @@ func normalizeWSURL(rawURL string) string {
 	} else if !strings.HasPrefix(rawURL, "ws://") && !strings.HasPrefix(rawURL, "wss://") {
 		rawURL = "wss://" + rawURL
 	}
-	rawURL = strings.TrimSuffix(rawURL, "/")
+	rawURL = strings.TrimRight(rawURL, "/")
 	if !strings.HasSuffix(rawURL, "/ws") {
 		rawURL = rawURL + "/ws"
 	}
@@ -149,7 +149,6 @@ func (s *LocalServer) handleSetPassword(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Re-register with cloud if connected
 	s.mu.RLock()
 	cws := s.cloudWS
 	hostID := s.Config.Data.ID
@@ -205,7 +204,6 @@ func (s *LocalServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// cloudSignalingLoop connects the Go host daemon to the Render/Cloud signaling server
 func (s *LocalServer) cloudSignalingLoop() {
 	for {
 		s.mu.RLock()
@@ -219,6 +217,8 @@ func (s *LocalServer) cloudSignalingLoop() {
 			time.Sleep(2 * time.Second)
 			continue
 		}
+
+		targetURL = normalizeWSURL(targetURL)
 
 		s.mu.Lock()
 		s.cloudStatus = "connecting"
@@ -244,7 +244,7 @@ func (s *LocalServer) cloudSignalingLoop() {
 
 		log.Printf("[Cloud Signaling] Conectado com sucesso! Registrando Host ID: %s", hostID)
 
-		// Register host ID on Render signaling server
+		// Register host ID
 		err = conn.WriteJSON(protocol.SignalingMessage{
 			Action:   protocol.ActionRegister,
 			ID:       hostID,
@@ -255,7 +255,6 @@ func (s *LocalServer) cloudSignalingLoop() {
 			continue
 		}
 
-		// Listen for connection requests from remote clients across the internet
 		for {
 			var msg protocol.SignalingMessage
 			err := conn.ReadJSON(&msg)
@@ -283,10 +282,14 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 		log.Printf("[Signaling] Cliente remoto solicitou conexao: %s", msg.TargetID)
 
 	case protocol.ActionOffer:
-		log.Printf("[Signaling] Recebida oferta WebRTC de cliente remoto")
+		senderID := msg.ID
+		if senderID == "" {
+			senderID = msg.TargetID
+		}
+		log.Printf("[Signaling] Recebida oferta WebRTC de cliente remoto: %s", senderID)
 
-		// Create WebRTC Host Session
 		hostSess, err := webrtcmod.NewHostSession(s.Config.Data.FPS, s.Config.Data.Quality, func(outMsg protocol.SignalingMessage) {
+			outMsg.ID = s.Config.Data.ID
 			_ = conn.WriteJSON(outMsg)
 		})
 		if err != nil {
@@ -301,7 +304,7 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 		s.hostSession = hostSess
 		s.mu.Unlock()
 
-		err = hostSess.HandleRemoteOffer(msg.TargetID, msg.SDP)
+		err = hostSess.HandleRemoteOffer(senderID, msg.SDP)
 		if err != nil {
 			log.Printf("[Signaling] Erro ao responder oferta WebRTC: %v", err)
 		}
@@ -325,7 +328,6 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 	}
 }
 
-// handleWS handles local dashboard WebSocket connections
 func (s *LocalServer) handleWS(w http.ResponseWriter, r *http.Request) {
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -339,16 +341,13 @@ func (s *LocalServer) handleWS(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		// If this is a local client request, forward or handle
 		s.mu.RLock()
 		cloudConn := s.cloudWS
 		s.mu.RUnlock()
 
 		if cloudConn != nil {
-			// Forward to Cloud Relay
 			_ = cloudConn.WriteJSON(msg)
 		} else {
-			// Local handling fallback
 			s.handleSignalingMessage(conn, msg)
 		}
 	}

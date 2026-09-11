@@ -16,6 +16,7 @@ let videoChannel = null;
 let isConnected = false;
 let currentTab = 'host';
 let pwdVisible = false;
+let currentClientSessionId = 'c_' + Math.random().toString(36).substring(2, 9);
 
 // Performance counters
 let frameCount = 0;
@@ -201,7 +202,6 @@ function connectSignaling() {
     try { signalingWS.close(); } catch(e) {}
   }
 
-  // Use the cloud signaling URL if set, otherwise local /ws
   let wsUrl = '';
   if (myHostInfo.signalingURL && myHostInfo.signalingURL.trim() !== '') {
     wsUrl = myHostInfo.signalingURL.trim();
@@ -229,6 +229,8 @@ function connectSignaling() {
   signalingWS.onmessage = async (event) => {
     try {
       const msg = JSON.parse(event.data);
+      console.log('[Signaling RX]', msg.action, msg);
+
       switch (msg.action) {
         case 'status':
           console.log('[Signaling Status]', msg.message);
@@ -241,6 +243,7 @@ function connectSignaling() {
 
         case 'answer':
           if (peerConnection) {
+            console.log('[WebRTC] Recebida SDP Answer do Host Remoto!');
             await peerConnection.setRemoteDescription(new RTCSessionDescription({
               type: 'answer',
               sdp: msg.sdp
@@ -281,14 +284,15 @@ async function connectToRemote(e) {
 
   const btn = document.getElementById('btn-connect');
   btn.disabled = true;
-  btn.innerHTML = '<span>⏳ Conectando...</span>';
+  btn.innerHTML = '<span>⏳ Negociando conexão...</span>';
 
   saveRecentConnection(rawTargetId);
+  currentClientSessionId = 'c_' + Math.random().toString(36).substring(2, 9);
 
   // Reconnect signaling if needed
   if (!signalingWS || signalingWS.readyState !== WebSocket.OPEN) {
     connectSignaling();
-    await new Promise(r => setTimeout(r, 800));
+    await new Promise(r => setTimeout(r, 1000));
   }
 
   // Setup WebRTC Peer Connection
@@ -313,6 +317,7 @@ async function connectToRemote(e) {
     if (event.candidate && signalingWS && signalingWS.readyState === WebSocket.OPEN) {
       signalingWS.send(JSON.stringify({
         action: 'candidate',
+        id: currentClientSessionId,
         targetId: rawTargetId,
         candidate: event.candidate.toJSON()
       }));
@@ -325,21 +330,23 @@ async function connectToRemote(e) {
 
   // Send Offer through Signaling Server
   if (signalingWS && signalingWS.readyState === WebSocket.OPEN) {
+    console.log('[WebRTC] Enviando Offer para o Host:', rawTargetId);
     signalingWS.send(JSON.stringify({
       action: 'offer',
+      id: currentClientSessionId,
       targetId: rawTargetId,
       password: targetPwd,
       sdp: offer.sdp
     }));
   } else {
-    alert('Não foi possível conectar ao servidor de sinalização. Verifique se o servidor está online.');
+    alert('Não foi possível conectar ao servidor de sinalização. Verifique sua conexão com a internet.');
     resetConnectButton();
   }
 }
 
 function setupDataChannels(targetId) {
   inputChannel.onopen = () => {
-    console.log('[Client] Input DataChannel open');
+    console.log('[Client] Input DataChannel Aberto com Sucesso!');
     openViewer();
     startPingLoop();
   };
@@ -355,7 +362,7 @@ function setupDataChannels(targetId) {
   };
 
   videoChannel.onopen = () => {
-    console.log('[Client] Video DataChannel open');
+    console.log('[Client] Video DataChannel Aberto com Sucesso!');
   };
 
   videoChannel.onmessage = async (event) => {
