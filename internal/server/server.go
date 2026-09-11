@@ -297,36 +297,40 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 		}
 		log.Printf("[Conexão] Cliente remoto conectado: %s (iniciando captura de tela)", senderID)
 
-		hostSess, err := webrtcmod.NewHostSession(s.Config.Data.FPS, s.Config.Data.Quality, func(outMsg protocol.SignalingMessage) {
-			outMsg.ID = s.Config.Data.ID
-			_ = conn.WriteJSON(outMsg)
-		})
-		if err != nil {
-			log.Printf("[Conexão] Erro ao criar sessão host: %v", err)
-			return
-		}
-
-		hostSess.OnRelayFrame = func(jpegBase64 string) {
-			_ = conn.WriteJSON(protocol.SignalingMessage{
-				Action:   protocol.ActionData,
-				ID:       s.Config.Data.ID,
-				TargetID: senderID,
-				Payload:  jpegBase64,
-			})
-		}
-
 		s.mu.Lock()
-		if s.hostSession != nil {
-			s.hostSession.Close()
+		sess := s.hostSession
+		if sess == nil {
+			var err error
+			sess, err = webrtcmod.NewHostSession(s.Config.Data.FPS, s.Config.Data.Quality, func(outMsg protocol.SignalingMessage) {
+				outMsg.ID = s.Config.Data.ID
+				if outMsg.TargetID == "" {
+					outMsg.TargetID = senderID
+				}
+				_ = conn.WriteJSON(outMsg)
+			})
+			if err != nil {
+				s.mu.Unlock()
+				log.Printf("[Conexão] Erro ao criar sessão host: %v", err)
+				return
+			}
+
+			sess.OnRelayFrame = func(jpegBase64 string) {
+				_ = conn.WriteJSON(protocol.SignalingMessage{
+					Action:   protocol.ActionData,
+					ID:       s.Config.Data.ID,
+					TargetID: senderID,
+					Payload:  jpegBase64,
+				})
+			}
+
+			s.hostSession = sess
+			sess.StartStreaming()
 		}
-		s.hostSession = hostSess
 		s.mu.Unlock()
 
 		if msg.SDP != "" {
-			_ = hostSess.HandleRemoteOffer(senderID, msg.SDP)
+			_ = sess.HandleRemoteOffer(senderID, msg.SDP)
 		}
-
-		hostSess.StartStreaming()
 
 	case protocol.ActionData:
 		s.mu.RLock()

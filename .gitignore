@@ -7,6 +7,7 @@
 
 # Local machine configs and credentials
 config.json
+*.log
 
 # OS and Editor files
 .DS_Store

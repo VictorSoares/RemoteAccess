@@ -286,7 +286,17 @@ function connectSignaling() {
           break;
 
         case 'data':
-          renderBase64Frame(msg.payload);
+          if (typeof msg.payload === 'string' && msg.payload.startsWith('{')) {
+            try {
+              const ctrl = JSON.parse(msg.payload);
+              if (ctrl.t === 'pong') {
+                const rtt = Math.round(performance.now() - ctrl.ts);
+                document.getElementById('stat-latency').innerText = `🌐 ${rtt} ms (Nuvem)`;
+              }
+            } catch(e) {}
+          } else {
+            renderBase64Frame(msg.payload);
+          }
           break;
 
         case 'close':
@@ -350,6 +360,13 @@ async function connectToRemote(e) {
   inputChannel = peerConnection.createDataChannel('input', { ordered: true });
   videoChannel = peerConnection.createDataChannel('video', { maxRetransmits: 0, ordered: false });
 
+  peerConnection.oniceconnectionstatechange = () => {
+    console.log('[WebRTC] ICE Connection State:', peerConnection.iceConnectionState);
+    if (peerConnection.iceConnectionState === 'connected') {
+      document.getElementById('stat-latency').innerText = `⚡ P2P Ativo`;
+    }
+  };
+
   setupDataChannels(rawTargetId);
 
   peerConnection.onicecandidate = (event) => {
@@ -409,7 +426,7 @@ function renderBase64Frame(b64) {
   frameCount++;
   const now = performance.now();
   if (now - lastFpsTime >= 1000) {
-    document.getElementById('stat-fps').innerText = `🎥 ${frameCount} fps`;
+    document.getElementById('stat-fps').innerText = `🎥 ${frameCount} fps (Nuvem)`;
     frameCount = 0;
     lastFpsTime = now;
   }

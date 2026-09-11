@@ -93,6 +93,15 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		// If client sent an ID and it's different from current peer.ID, update registration map
+		if msg.ID != "" && msg.ID != peer.ID {
+			s.mu.Lock()
+			delete(s.peers, peer.ID)
+			peer.ID = msg.ID
+			s.peers[msg.ID] = peer
+			s.mu.Unlock()
+		}
+
 		switch msg.Action {
 		case protocol.ActionRegister:
 			s.mu.Lock()

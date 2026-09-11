@@ -76,10 +76,7 @@ func (h *HostSession) HandleRemoteOffer(targetID string, sdpStr string) error {
 	h.peerConn = pc
 
 	pc.OnICEConnectionStateChange(func(state pion.ICEConnectionState) {
-		log.Printf("[Host] ICE Connection State: %s", state.String())
-		if h.OnStatus != nil {
-			h.OnStatus("ice_state", state.String())
-		}
+		log.Printf("[Host] ICE P2P State: %s (Relay WSS ativo em paralelo)", state.String())
 	})
 
 	pc.OnICECandidate(func(c *pion.ICECandidate) {
@@ -100,7 +97,7 @@ func (h *HostSession) HandleRemoteOffer(targetID string, sdpStr string) error {
 	})
 
 	pc.OnDataChannel(func(dc *pion.DataChannel) {
-		log.Printf("[Host] WebRTC DataChannel recebido: %s", dc.Label())
+		log.Printf("[Host] WebRTC DataChannel conectado: %s", dc.Label())
 
 		if dc.Label() == "input" {
 			h.inputChannel = dc
@@ -187,12 +184,17 @@ func (h *HostSession) HandleControlData(data []byte) {
 			h.FPS = ctrl.FPS
 		}
 	case protocol.TypePing:
+		pongData, _ := json.Marshal(protocol.ControlMessage{
+			Type: protocol.TypePong,
+			Time: ctrl.Time,
+		})
 		if h.inputChannel != nil && h.inputChannel.ReadyState() == pion.DataChannelStateOpen {
-			resp, _ := json.Marshal(protocol.ControlMessage{
-				Type: protocol.TypePong,
-				Time: ctrl.Time,
+			_ = h.inputChannel.Send(pongData)
+		} else if h.SendSignal != nil {
+			h.SendSignal(protocol.SignalingMessage{
+				Action:  protocol.ActionData,
+				Payload: string(pongData),
 			})
-			_ = h.inputChannel.Send(resp)
 		}
 	}
 }
@@ -217,20 +219,17 @@ func (h *HostSession) StartStreaming() {
 					continue
 				}
 
-				webrtcSent := false
 				h.mu.Lock()
 				vChan := h.videoChannel
 				h.mu.Unlock()
 
-				// 1. Try sending via WebRTC P2P DataChannel if connected
+				// 1. If WebRTC DataChannel is connected and open, send via P2P
 				if vChan != nil && vChan.ReadyState() == pion.DataChannelStateOpen {
-					if err := vChan.Send(frameData); err == nil {
-						webrtcSent = true
-					}
+					_ = vChan.Send(frameData)
 				}
 
-				// 2. If WebRTC is not active, relay frame via WebSocket over port 443!
-				if !webrtcSent && h.OnRelayFrame != nil {
+				// 2. ALWAYS also send frame via WebSocket Relay to guarantee instant visual delivery on any firewall!
+				if h.OnRelayFrame != nil {
 					b64 := base64.StdEncoding.EncodeToString(frameData)
 					h.OnRelayFrame(b64)
 				}
