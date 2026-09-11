@@ -1,6 +1,6 @@
 module remoteaccess
 
-go 1.27.0
+go 1.22
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect

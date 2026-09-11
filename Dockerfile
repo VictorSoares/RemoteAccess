@@ -1,5 +1,5 @@
 # Build Stage
-FROM golang:1.22-alpine AS builder
+FROM golang:alpine AS builder
 
 WORKDIR /app
 
@@ -14,7 +14,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /signaling ./cmd/signaling
 
 # Final Minimal Stage
-FROM alpine:3.19
+FROM alpine:latest
 
 RUN apk --no-cache add ca-certificates
 
