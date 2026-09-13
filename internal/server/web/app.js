@@ -241,6 +241,56 @@ async function fetchSessionStatus() {
   } catch (err) {}
 }
 
+function playChatChime() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.35);
+  } catch(e) {}
+}
+
+let toastTimer = null;
+function showChatToast(sender, text) {
+  const toast = document.getElementById('chat-toast-popup');
+  if (!toast) return;
+  document.getElementById('chat-toast-title').innerText = `💬 Mensagem de ${sender}`;
+  document.getElementById('chat-toast-text').innerText = text;
+  toast.style.display = 'flex';
+  playChatChime();
+
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    hideChatToast();
+  }, 7000);
+}
+
+function hideChatToast() {
+  const toast = document.getElementById('chat-toast-popup');
+  if (toast) toast.style.display = 'none';
+}
+
+function handleToastClick() {
+  hideChatToast();
+  if (isConnected) {
+    const drawer = document.getElementById('chat-drawer');
+    if (drawer) drawer.style.display = 'flex';
+  } else {
+    hostChatOpen = true;
+    const chatSec = document.getElementById('host-chat-container');
+    if (chatSec) chatSec.style.display = 'flex';
+    document.getElementById('host-chat-badge').style.display = 'none';
+  }
+}
+
 async function refreshHostChat() {
   try {
     const res = await fetch('/api/chat-messages');
@@ -248,6 +298,10 @@ async function refreshHostChat() {
     if (data.messages) {
       const container = document.getElementById('host-chat-messages');
       if (data.messages.length !== lastHostMsgCount) {
+        const isInitial = lastHostMsgCount === 0;
+        const previousCount = lastHostMsgCount;
+        lastHostMsgCount = data.messages.length;
+
         container.innerHTML = '';
         data.messages.forEach(msg => {
           const isMe = msg.sender.includes('Host') || msg.sender.includes('Você');
@@ -258,12 +312,18 @@ async function refreshHostChat() {
         });
         container.scrollTop = container.scrollHeight;
 
-        if (!hostChatOpen && data.messages.length > lastHostMsgCount) {
-          const badge = document.getElementById('host-chat-badge');
-          badge.style.display = 'inline-block';
-          badge.innerText = data.messages.length;
+        if (!isInitial && data.messages.length > previousCount) {
+          const latestMsg = data.messages[data.messages.length - 1];
+          const isMe = latestMsg.sender.includes('Host') || latestMsg.sender.includes('Você');
+          if (!isMe) {
+            showChatToast(latestMsg.sender, latestMsg.text);
+            // Auto expand chat section so user sees it right away
+            hostChatOpen = true;
+            const chatSec = document.getElementById('host-chat-container');
+            if (chatSec) chatSec.style.display = 'flex';
+            document.getElementById('host-chat-badge').style.display = 'none';
+          }
         }
-        lastHostMsgCount = data.messages.length;
       }
     }
   } catch (err) {}
@@ -867,6 +927,10 @@ function appendChatMessage(sender, text) {
   const drawer = document.getElementById('chat-drawer');
   if (drawer.style.display === 'none') {
     drawer.style.display = 'flex';
+  }
+
+  if (!isMe) {
+    showChatToast(sender, text);
   }
 }
 

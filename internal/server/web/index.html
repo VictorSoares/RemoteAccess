@@ -359,6 +359,16 @@
     </div>
   </div>
 
+  <!-- Floating In-Session Toast Notification -->
+  <div id="chat-toast-popup" class="chat-toast-popup" style="display: none;" onclick="handleToastClick()">
+    <div class="chat-toast-icon">💬</div>
+    <div class="chat-toast-content">
+      <div id="chat-toast-title" class="chat-toast-title">Nova Mensagem</div>
+      <div id="chat-toast-text" class="chat-toast-text">...</div>
+    </div>
+    <button class="chat-toast-close" onclick="event.stopPropagation(); hideChatToast()">✕</button>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

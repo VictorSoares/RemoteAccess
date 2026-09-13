@@ -411,6 +411,152 @@
       cursor: crosshair;
       display: block;
     }
+    .chat-drawer {
+      position: absolute;
+      right: 20px;
+      bottom: 20px;
+      width: 320px;
+      height: 400px;
+      background: rgba(19, 27, 46, 0.95);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      z-index: 100005;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7);
+    }
+    .chat-header {
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .chat-title {
+      font-size: 0.85rem;
+      font-weight: 700;
+    }
+    .btn-close-chat {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    .chat-body {
+      flex: 1;
+      padding: 0.85rem;
+      overflow-y: auto;
+      font-size: 0.82rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .chat-intro {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      text-align: center;
+      margin-bottom: 0.5rem;
+    }
+    .chat-footer {
+      display: flex;
+      padding: 0.6rem;
+      gap: 0.5rem;
+      border-top: 1px solid var(--border);
+    }
+    .chat-input {
+      flex: 1;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--border);
+      color: #fff;
+      padding: 0.45rem 0.75rem;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      outline: none;
+    }
+    .chat-input:focus {
+      border-color: var(--accent);
+    }
+    .btn-send-chat {
+      background: var(--accent);
+      color: white;
+      border: none;
+      padding: 0.45rem 0.85rem;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .chat-badge {
+      background: #ef4444;
+      color: #fff;
+      font-size: 0.68rem;
+      font-weight: 800;
+      padding: 0.1rem 0.4rem;
+      border-radius: 999px;
+    }
+    .chat-toast-popup {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: rgba(15, 23, 42, 0.95);
+      backdrop-filter: blur(16px);
+      border: 1px solid #38bdf8;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6), 0 0 16px rgba(56, 189, 248, 0.35);
+      border-radius: 12px;
+      padding: 0.85rem 1.1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+      z-index: 100000;
+      cursor: pointer;
+      max-width: 380px;
+      animation: slide-in-toast 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+      transition: all 0.2s;
+    }
+    .chat-toast-popup:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 16px 42px rgba(0, 0, 0, 0.7), 0 0 24px rgba(56, 189, 248, 0.5);
+    }
+    @keyframes slide-in-toast {
+      from { opacity: 0; transform: translateY(30px) scale(0.95); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .chat-toast-icon {
+      font-size: 1.5rem;
+    }
+    .chat-toast-content {
+      flex: 1;
+      min-width: 0;
+    }
+    .chat-toast-title {
+      font-size: 0.82rem;
+      font-weight: 800;
+      color: #38bdf8;
+      letter-spacing: 0.02em;
+    }
+    .chat-toast-text {
+      font-size: 0.85rem;
+      color: #f1f5f9;
+      margin-top: 0.2rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-weight: 500;
+    }
+    .chat-toast-close {
+      background: transparent;
+      border: none;
+      color: #94a3b8;
+      font-size: 0.95rem;
+      cursor: pointer;
+      padding: 0.2rem;
+      border-radius: 4px;
+    }
+    .chat-toast-close:hover {
+      color: #fff;
+    }
   </style>
 </head>
 <body>
@@ -423,7 +569,7 @@
         Informe a chave de segurança do cluster para acessar o painel e os computadores.
       </p>
       <form onsubmit="submitAuth(event)">
-        <input type="password" id="auth-key-input" class="auth-input" placeholder="Digite a chave (Padrão: remote2026)" required autocomplete="current-password">
+        <input type="password" id="auth-key-input" class="auth-input" placeholder="Digite a chave mestra de acesso" required autocomplete="current-password">
         <button type="submit" class="btn-action btn-connect-direct" style="width: 100%; justify-content: center; padding: 0.85rem;">
           🔓 Desbloquear Cluster
         </button>
@@ -578,12 +724,38 @@
       <button class="btn-action" onclick="sendViewerSys('desktop')" style="background: rgba(255,255,255,0.1); color: #fff;">🪟 Win+D</button>
       <button class="btn-action" onclick="sendViewerSys('taskmgr')" style="background: rgba(255,255,255,0.1); color: #fff;">⚡ Tarefas</button>
       <button class="btn-action" onclick="sendViewerSys('lock')" style="background: rgba(255,255,255,0.1); color: #fff;">🔒 Bloquear</button>
+      <button class="btn-action" onclick="toggleViewerChat()" style="background: rgba(255,255,255,0.1); color: #fff;">💬 Chat <span id="viewer-chat-badge" class="chat-badge" style="display: none;">0</span></button>
       <button class="btn-action" onclick="toggleViewerFullscreen()" style="background: rgba(255,255,255,0.1); color: #fff;">⛶ Tela Cheia</button>
       <button class="btn-action btn-kill" onclick="closeWebViewer()">🛑 Encerrar Acesso</button>
     </div>
 
     <div style="flex: 1; display: flex; align-items: center; justify-content: center; position: relative; width: 100%; height: 100%; overflow: hidden; background: #000;">
       <canvas id="viewer-canvas" tabindex="0"></canvas>
+
+      <!-- Floating In-Session Chat Drawer -->
+      <div id="viewer-chat-drawer" class="chat-drawer" style="display: none;">
+        <div class="chat-header">
+          <span class="chat-title">💬 Bate-Papo com o Computador Remoto</span>
+          <button class="btn-close-chat" onclick="toggleViewerChat()">✕</button>
+        </div>
+        <div id="viewer-chat-messages" class="chat-body">
+          <div class="chat-intro">Sessão de chat conectada com a máquina remota</div>
+        </div>
+        <form onsubmit="sendViewerChat(event)" class="chat-footer">
+          <input type="text" id="viewer-chat-input" class="chat-input" placeholder="Digite uma mensagem..." required autocomplete="off">
+          <button type="submit" class="btn-send-chat">Enviar</button>
+        </form>
+      </div>
+
+      <!-- Floating Chat Toast -->
+      <div id="viewer-chat-toast" class="chat-toast-popup" style="display: none;" onclick="toggleViewerChat()">
+        <div class="chat-toast-icon">💬</div>
+        <div class="chat-toast-content">
+          <div id="viewer-toast-title" class="chat-toast-title">Nova Mensagem</div>
+          <div id="viewer-toast-text" class="chat-toast-text">...</div>
+        </div>
+        <button class="chat-toast-close" onclick="event.stopPropagation(); hideViewerToast()">✕</button>
+      </div>
     </div>
   </div>
 
@@ -888,6 +1060,8 @@
                 const ctrl = JSON.parse(msg.payload);
                 if (ctrl.t === 'init_info' && ctrl.mon) {
                   updateWebViewerMonitors(ctrl.mon);
+                } else if (ctrl.t === 'chat') {
+                  appendViewerChat('Host', ctrl.text);
                 }
               } catch(e) {}
               return;
@@ -925,6 +1099,96 @@
           closeWebViewer();
         }
       };
+    }
+
+    let viewerChatOpen = false;
+    let viewerToastTimer = null;
+
+    function playViewerChime() {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12);
+        gain.gain.setValueAtTime(0.2, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.35);
+      } catch(e) {}
+    }
+
+    function showViewerToast(sender, text) {
+      const toast = document.getElementById('viewer-chat-toast');
+      if (!toast) return;
+      document.getElementById('viewer-toast-title').innerText = `💬 Mensagem de ${sender}`;
+      document.getElementById('viewer-toast-text').innerText = text;
+      toast.style.display = 'flex';
+      playViewerChime();
+
+      if (viewerToastTimer) clearTimeout(viewerToastTimer);
+      viewerToastTimer = setTimeout(() => {
+        hideViewerToast();
+      }, 7000);
+    }
+
+    function hideViewerToast() {
+      const toast = document.getElementById('viewer-chat-toast');
+      if (toast) toast.style.display = 'none';
+    }
+
+    function toggleViewerChat() {
+      viewerChatOpen = !viewerChatOpen;
+      const drawer = document.getElementById('viewer-chat-drawer');
+      if (drawer) {
+        drawer.style.display = viewerChatOpen ? 'flex' : 'none';
+      }
+      if (viewerChatOpen) {
+        hideViewerToast();
+        const badge = document.getElementById('viewer-chat-badge');
+        if (badge) badge.style.display = 'none';
+      }
+    }
+
+    function sendViewerChat(e) {
+      if (e) e.preventDefault();
+      const input = document.getElementById('viewer-chat-input');
+      const text = input.value.trim();
+      if (!text) return;
+      input.value = '';
+
+      sendViewerCtrl({ t: 'chat', text: text });
+      appendViewerChat('Você', text);
+    }
+
+    function appendViewerChat(sender, text) {
+      const container = document.getElementById('viewer-chat-messages');
+      if (!container) return;
+      const isMe = sender === 'Você';
+      const msgEl = document.createElement('div');
+      msgEl.style.alignSelf = isMe ? 'flex-end' : 'flex-start';
+      msgEl.style.background = isMe ? 'rgba(59, 130, 246, 0.4)' : 'rgba(255, 255, 255, 0.1)';
+      msgEl.style.padding = '0.4rem 0.75rem';
+      msgEl.style.borderRadius = '8px';
+      msgEl.style.maxWidth = '85%';
+      msgEl.innerHTML = `<strong style="color: ${isMe ? '#93c5fd' : '#86efac'}; font-size: 0.75rem;">${sender}</strong><div style="margin-top: 0.15rem;">${text}</div>`;
+      container.appendChild(msgEl);
+      container.scrollTop = container.scrollHeight;
+
+      if (!isMe) {
+        showViewerToast(sender, text);
+        const drawer = document.getElementById('viewer-chat-drawer');
+        if (drawer && drawer.style.display === 'none') {
+          const badge = document.getElementById('viewer-chat-badge');
+          if (badge) {
+            badge.style.display = 'inline-block';
+            badge.innerText = parseInt(badge.innerText || 0) + 1;
+          }
+        }
+      }
     }
 
     function closeWebViewer() {

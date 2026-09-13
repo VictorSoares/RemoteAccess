@@ -4,15 +4,16 @@ package input
 
 import (
 	"image"
-	"os/exec"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+	"unsafe"
 )
 
 var (
 	user32                       = syscall.NewLazyDLL("user32.dll")
+	shell32                      = syscall.NewLazyDLL("shell32.dll")
 	sasDll                       = syscall.NewLazyDLL("sas.dll")
 	procSetCursorPos             = user32.NewProc("SetCursorPos")
 	procMouseEvent               = user32.NewProc("mouse_event")
@@ -23,6 +24,7 @@ var (
 	procSetProcessDpiAwarenessCtx = user32.NewProc("SetProcessDpiAwarenessContext")
 	procSetProcessDPIAware       = user32.NewProc("SetProcessDPIAware")
 	procSendSAS                  = sasDll.NewProc("SendSAS")
+	procShellExecute             = shell32.NewProc("ShellExecuteW")
 
 	activeBoundsMu sync.RWMutex
 	activeBounds   image.Rectangle
@@ -75,9 +77,21 @@ func LockWorkstation() {
 	procLockWorkStation.Call()
 }
 
-// OpenTaskManager launches Windows Task Manager directly
+// OpenTaskManager launches Windows Task Manager directly without any console flashes
 func OpenTaskManager() {
-	_ = exec.Command("taskmgr.exe").Start()
+	// 1. Synthesize Ctrl + Shift + Esc (the native Windows shortcut for Task Manager)
+	procKeybdEvent.Call(0x11, 0, 0, 0) // Ctrl down
+	procKeybdEvent.Call(0x10, 0, 0, 0) // Shift down
+	procKeybdEvent.Call(0x1B, 0, 0, 0) // Esc down
+	time.Sleep(30 * time.Millisecond)
+	procKeybdEvent.Call(0x1B, 0, keyeventfKeyup, 0) // Esc up
+	procKeybdEvent.Call(0x10, 0, keyeventfKeyup, 0) // Shift up
+	procKeybdEvent.Call(0x11, 0, keyeventfKeyup, 0) // Ctrl up
+
+	// 2. Also invoke ShellExecute for taskmgr.exe
+	verb, _ := syscall.UTF16PtrFromString("open")
+	file, _ := syscall.UTF16PtrFromString("taskmgr.exe")
+	procShellExecute.Call(0, uintptr(unsafe.Pointer(verb)), uintptr(unsafe.Pointer(file)), 0, 0, 1)
 }
 
 // SendCtrlAltDel sends the Secure Attention Sequence (SAS) or launches Task Manager / Security options
@@ -88,23 +102,18 @@ func SendCtrlAltDel() {
 			return
 		}
 	}
-	// Fallback when not running as a system service with SAS privilege: launch Task Manager directly
-	_ = exec.Command("taskmgr.exe").Start()
+	// Fallback when not running as a system service with SAS privilege: open Task Manager directly
+	OpenTaskManager()
 }
 
-// ShowDesktop minimizes or restores all windows using both Shell COM and Win+D key simulation
+// ShowDesktop minimizes or restores all windows cleanly with zero console windows
 func ShowDesktop() {
-	// 1. Synthesize Win + D keyboard sequence
+	// Pure Windows Win + D key simulation (zero processes, zero CMD flashes)
 	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey, 0) // Win key down
 	procKeybdEvent.Call(0x44, 0, 0, 0)                    // 'D' key down
 	time.Sleep(35 * time.Millisecond)
 	procKeybdEvent.Call(0x44, 0, keyeventfKeyup, 0)       // 'D' key up
 	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey|keyeventfKeyup, 0) // Win key up
-
-	// 2. Also trigger Shell COM ToggleDesktop for guaranteed desktop minimize
-	go func() {
-		_ = exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", "(New-Object -ComObject Shell.Application).ToggleDesktop()").Run()
-	}()
 }
 
 // MoveMouseAbsolute sets the cursor to an absolute ratio [0.0, 1.0] across the active screen monitor
