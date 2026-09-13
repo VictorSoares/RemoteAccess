@@ -40,7 +40,7 @@ var (
 	procGlobalUnlock        = kernel32.NewProc("GlobalUnlock")
 
 	procShellNotifyIconW = shell32.NewProc("Shell_NotifyIconW")
-	procExtractIconW     = shell32.NewProc("ExtractIconW")
+	procExtractIconExW   = shell32.NewProc("ExtractIconExW")
 	procGetModuleHandleW = kernel32.NewProc("GetModuleHandleW")
 )
 
@@ -235,11 +235,30 @@ func StartTray(hostID string, isAdmin bool, onOpen func(), onAdmin func(), onExi
 		hInst, _, _ := procGetModuleHandleW.Call(0)
 		className, _ := syscall.UTF16PtrFromString("RemoteAccessTrayClass")
 
+		// Extract native crisp icons from executable resources
+		exePath, _ := os.Executable()
+		exeUtf16, _ := syscall.UTF16PtrFromString(exePath)
+		var hIconLarge, hIconSmall uintptr
+		procExtractIconExW.Call(
+			uintptr(unsafe.Pointer(exeUtf16)),
+			0,
+			uintptr(unsafe.Pointer(&hIconLarge)),
+			uintptr(unsafe.Pointer(&hIconSmall)),
+			1,
+		)
+
+		hTrayIcon := hIconSmall
+		if hTrayIcon == 0 {
+			hTrayIcon = hIconLarge
+		}
+
 		wc := wndClassExW{
 			cbSize:        uint32(unsafe.Sizeof(wndClassExW{})),
 			lpfnWndProc:   syscall.NewCallback(trayWndProc),
 			hInstance:     hInst,
 			lpszClassName: className,
+			hIcon:         hIconLarge,
+			hIconSm:       hIconSmall,
 		}
 		procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
 
@@ -254,11 +273,6 @@ func StartTray(hostID string, isAdmin bool, onOpen func(), onAdmin func(), onExi
 		)
 		tm.hwnd = hwnd
 
-		// Extract exe icon
-		exePath, _ := os.Executable()
-		exeUtf16, _ := syscall.UTF16PtrFromString(exePath)
-		hIcon, _, _ := procExtractIconW.Call(hInst, uintptr(unsafe.Pointer(exeUtf16)), 0)
-
 		tipText := fmt.Sprintf("RemoteAccess Portable Pro (ID: %s) - Online", hostID)
 		tipUtf16, _ := syscall.UTF16FromString(tipText)
 
@@ -268,7 +282,7 @@ func StartTray(hostID string, isAdmin bool, onOpen func(), onAdmin func(), onExi
 			uID:              1,
 			uFlags:           nifMessage | nifIcon | nifTip,
 			uCallbackMessage: wmAppTray,
-			hIcon:            hIcon,
+			hIcon:            hTrayIcon,
 		}
 		copy(nid.szTip[:], tipUtf16)
 
