@@ -910,6 +910,9 @@
               vCtx.drawImage(img, 0, 0);
             };
             img.src = 'data:image/jpeg;base64,' + msg.payload;
+          } else if (msg.action === 'close') {
+            alert('A sessão remota foi encerrada pelo computador remoto.');
+            closeWebViewer();
           } else if (msg.action === 'error') {
             alert(msg.message || 'Erro de conexão.');
             closeWebViewer();
@@ -962,18 +965,7 @@
     }
 
     function sendViewerSys(cmd) {
-      if (cmd === 'cad') {
-        sendViewerCtrl({ t: 'kd', k: 'Control', c: 'ControlLeft', kc: 17 });
-        sendViewerCtrl({ t: 'kd', k: 'Alt', c: 'AltLeft', kc: 18 });
-        sendViewerCtrl({ t: 'kd', k: 'Delete', c: 'Delete', kc: 46 });
-        setTimeout(() => {
-          sendViewerCtrl({ t: 'ku', k: 'Delete', c: 'Delete', kc: 46 });
-          sendViewerCtrl({ t: 'ku', k: 'Alt', c: 'AltLeft', kc: 18 });
-          sendViewerCtrl({ t: 'ku', k: 'Control', c: 'ControlLeft', kc: 17 });
-        }, 120);
-      } else {
-        sendViewerCtrl({ t: 'sys_cmd', cmd: cmd });
-      }
+      sendViewerCtrl({ t: 'sys_cmd', cmd: cmd });
     }
 
     function getVCoords(e) {

@@ -3,13 +3,17 @@
 package input
 
 import (
+	"image"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 )
 
 var (
 	user32                       = syscall.NewLazyDLL("user32.dll")
+	sasDll                       = syscall.NewLazyDLL("sas.dll")
 	procSetCursorPos             = user32.NewProc("SetCursorPos")
 	procMouseEvent               = user32.NewProc("mouse_event")
 	procKeybdEvent               = user32.NewProc("keybd_event")
@@ -18,6 +22,10 @@ var (
 	procLockWorkStation          = user32.NewProc("LockWorkStation")
 	procSetProcessDpiAwarenessCtx = user32.NewProc("SetProcessDpiAwarenessContext")
 	procSetProcessDPIAware       = user32.NewProc("SetProcessDPIAware")
+	procSendSAS                  = sasDll.NewProc("SendSAS")
+
+	activeBoundsMu sync.RWMutex
+	activeBounds   image.Rectangle
 )
 
 func init() {
@@ -45,6 +53,13 @@ const (
 	keyeventfUnicode     = 0x0004
 )
 
+// SetActiveMonitorBounds updates the active monitor's bounding box for multi-monitor cursor placement
+func SetActiveMonitorBounds(b image.Rectangle) {
+	activeBoundsMu.Lock()
+	activeBounds = b
+	activeBoundsMu.Unlock()
+}
+
 // BlockLocalInput blocks or unblocks physical mouse and keyboard inputs on the local machine
 func BlockLocalInput(block bool) error {
 	val := uintptr(0)
@@ -65,15 +80,34 @@ func OpenTaskManager() {
 	_ = exec.Command("taskmgr.exe").Start()
 }
 
-// ShowDesktop minimizes or restores all windows
-func ShowDesktop() {
-	_ = KeyDown("Meta", "MetaLeft", 91)
-	_ = KeyDown("d", "KeyD", 68)
-	_ = KeyUp("d", "KeyD", 68)
-	_ = KeyUp("Meta", "MetaLeft", 91)
+// SendCtrlAltDel sends the Secure Attention Sequence (SAS) or launches Task Manager / Security options
+func SendCtrlAltDel() {
+	if procSendSAS.Find() == nil {
+		ret, _, _ := procSendSAS.Call(0)
+		if ret != 0 {
+			return
+		}
+	}
+	// Fallback when not running as a system service with SAS privilege: launch Task Manager directly
+	_ = exec.Command("taskmgr.exe").Start()
 }
 
-// MoveMouseAbsolute sets the cursor to an absolute ratio [0.0, 1.0] across the primary screen
+// ShowDesktop minimizes or restores all windows using both Shell COM and Win+D key simulation
+func ShowDesktop() {
+	// 1. Synthesize Win + D keyboard sequence
+	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey, 0) // Win key down
+	procKeybdEvent.Call(0x44, 0, 0, 0)                    // 'D' key down
+	time.Sleep(35 * time.Millisecond)
+	procKeybdEvent.Call(0x44, 0, keyeventfKeyup, 0)       // 'D' key up
+	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey|keyeventfKeyup, 0) // Win key up
+
+	// 2. Also trigger Shell COM ToggleDesktop for guaranteed desktop minimize
+	go func() {
+		_ = exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", "(New-Object -ComObject Shell.Application).ToggleDesktop()").Run()
+	}()
+}
+
+// MoveMouseAbsolute sets the cursor to an absolute ratio [0.0, 1.0] across the active screen monitor
 func MoveMouseAbsolute(ratioX, ratioY float64) error {
 	if ratioX < 0 {
 		ratioX = 0
@@ -86,17 +120,31 @@ func MoveMouseAbsolute(ratioX, ratioY float64) error {
 		ratioY = 1
 	}
 
-	w, _, _ := procGetSystemMetrics.Call(0) // SM_CXSCREEN
-	h, _, _ := procGetSystemMetrics.Call(1) // SM_CYSCREEN
-	if w == 0 {
-		w = 1920
-	}
-	if h == 0 {
-		h = 1080
+	activeBoundsMu.RLock()
+	b := activeBounds
+	activeBoundsMu.RUnlock()
+
+	var originX, originY, w, h int32
+	if b.Dx() > 0 && b.Dy() > 0 {
+		originX = int32(b.Min.X)
+		originY = int32(b.Min.Y)
+		w = int32(b.Dx())
+		h = int32(b.Dy())
+	} else {
+		sw, _, _ := procGetSystemMetrics.Call(0) // SM_CXSCREEN
+		sh, _, _ := procGetSystemMetrics.Call(1) // SM_CYSCREEN
+		w = int32(sw)
+		h = int32(sh)
+		if w == 0 {
+			w = 1920
+		}
+		if h == 0 {
+			h = 1080
+		}
 	}
 
-	targetX := int32(ratioX * float64(w))
-	targetY := int32(ratioY * float64(h))
+	targetX := originX + int32(ratioX*float64(w))
+	targetY := originY + int32(ratioY*float64(h))
 
 	procSetCursorPos.Call(uintptr(targetX), uintptr(targetY))
 	return nil

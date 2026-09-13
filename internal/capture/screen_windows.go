@@ -113,6 +113,13 @@ func (sc *ScreenCapturer) GetResolution() (int, int) {
 	return sc.Bounds.Dx(), sc.Bounds.Dy()
 }
 
+// GetBounds returns the image.Rectangle bounds of the active display
+func (sc *ScreenCapturer) GetBounds() image.Rectangle {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	return sc.Bounds
+}
+
 // SetQuality updates JPEG compression quality
 func (sc *ScreenCapturer) SetQuality(q int) {
 	sc.mu.Lock()

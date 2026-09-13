@@ -65,21 +65,39 @@
     <!-- HOST VIEW (Servidor / Permitir Controle) -->
     <section id="host-view" class="view-panel">
       <!-- Live Active Session Alert (Visible when controlled) -->
-      <div id="active-session-box" class="active-session-banner" style="display: none;">
-        <div class="session-alert-left">
-          <div class="pulse-ring"></div>
-          <div>
-            <div class="session-title">SESSÃO REMOTA EM ANDAMENTO</div>
-            <div class="session-details">
-              Controlador: <span id="host-session-client-id" class="highlight-client">---</span> &bull; 
-              Tempo ativo: <span id="host-session-duration" class="highlight-timer">00:00</span> &bull;
-              Modo: <span id="host-session-mode" class="highlight-mode">WebRTC Direct</span>
+      <div id="active-session-box" class="active-session-card" style="display: none;">
+        <div class="session-card-header">
+          <div class="session-alert-left">
+            <div class="pulse-ring"></div>
+            <div>
+              <div class="session-title">SESSÃO REMOTA EM ANDAMENTO</div>
+              <div class="session-details">
+                Controlador: <span id="host-session-client-id" class="highlight-client">---</span> &bull; 
+                Tempo ativo: <span id="host-session-duration" class="highlight-timer">00:00</span> &bull;
+                Modo: <span id="host-session-mode" class="highlight-mode">WebRTC Direct</span>
+              </div>
             </div>
           </div>
+          <div class="session-card-actions">
+            <button class="btn-chat-toggle" onclick="toggleHostChat()">
+              💬 Bate-Papo <span id="host-chat-badge" class="chat-badge" style="display: none;">0</span>
+            </button>
+            <button class="btn-kill-session" onclick="kickActiveSession()">
+              🛑 Encerrar Acesso
+            </button>
+          </div>
         </div>
-        <button class="btn-kill-session" onclick="kickActiveSession()">
-          🛑 Forçar Desconexão
-        </button>
+
+        <!-- In-Session Host Chat Body -->
+        <div id="host-chat-container" class="host-chat-section" style="display: none;">
+          <div id="host-chat-messages" class="host-chat-box">
+            <div class="chat-intro">💬 Bate-papo em tempo real com o operador remoto.</div>
+          </div>
+          <form onsubmit="sendHostChatMessage(event)" class="host-chat-form">
+            <input type="text" id="host-chat-input" class="chat-input" placeholder="Digite uma mensagem para o operador..." autocomplete="off">
+            <button type="submit" class="btn-send-chat">Enviar</button>
+          </form>
+        </div>
       </div>
 
       <div class="grid-layout">

@@ -219,20 +219,81 @@ async function fetchSystemInfo() {
   } catch (err) {}
 }
 
+let hostChatOpen = false;
+let lastHostMsgCount = 0;
+
 async function fetchSessionStatus() {
   try {
     const res = await fetch('/api/session-status');
     const data = await res.json();
     const box = document.getElementById('active-session-box');
     if (data.active) {
-      box.style.display = 'block';
+      box.style.display = 'flex';
       document.getElementById('host-session-client-id').innerText = data.client_id || 'Cliente';
       const m = Math.floor(data.duration / 60).toString().padStart(2, '0');
       const s = (data.duration % 60).toString().padStart(2, '0');
       document.getElementById('host-session-duration').innerText = `${m}:${s}`;
+      await refreshHostChat();
     } else {
       box.style.display = 'none';
+      lastHostMsgCount = 0;
     }
+  } catch (err) {}
+}
+
+async function refreshHostChat() {
+  try {
+    const res = await fetch('/api/chat-messages');
+    const data = await res.json();
+    if (data.messages) {
+      const container = document.getElementById('host-chat-messages');
+      if (data.messages.length !== lastHostMsgCount) {
+        container.innerHTML = '';
+        data.messages.forEach(msg => {
+          const isMe = msg.sender.includes('Host') || msg.sender.includes('Você');
+          const bubble = document.createElement('div');
+          bubble.className = `msg-bubble ${isMe ? 'msg-mine' : 'msg-other'}`;
+          bubble.innerHTML = `<strong style="font-size: 0.72rem; opacity: 0.85;">${msg.sender}</strong><div>${msg.text}</div><div class="msg-meta">${msg.time}</div>`;
+          container.appendChild(bubble);
+        });
+        container.scrollTop = container.scrollHeight;
+
+        if (!hostChatOpen && data.messages.length > lastHostMsgCount) {
+          const badge = document.getElementById('host-chat-badge');
+          badge.style.display = 'inline-block';
+          badge.innerText = data.messages.length;
+        }
+        lastHostMsgCount = data.messages.length;
+      }
+    }
+  } catch (err) {}
+}
+
+function toggleHostChat() {
+  hostChatOpen = !hostChatOpen;
+  const chatSec = document.getElementById('host-chat-container');
+  chatSec.style.display = hostChatOpen ? 'flex' : 'none';
+  if (hostChatOpen) {
+    document.getElementById('host-chat-badge').style.display = 'none';
+    const container = document.getElementById('host-chat-messages');
+    container.scrollTop = container.scrollHeight;
+  }
+}
+
+async function sendHostChatMessage(e) {
+  if (e) e.preventDefault();
+  const input = document.getElementById('host-chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+
+  try {
+    await fetch('/api/send-chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text })
+    });
+    await refreshHostChat();
   } catch (err) {}
 }
 
@@ -241,6 +302,10 @@ async function kickActiveSession() {
     await fetch('/api/kick-session', { method: 'POST' });
     document.getElementById('active-session-box').style.display = 'none';
   } catch (err) {}
+}
+
+function sendSystemAction(action) {
+  sendControl({ t: 'sys_cmd', cmd: action });
 }
 
 function updateNetworkBadge(status, url) {
@@ -488,6 +553,7 @@ function connectSignaling() {
           break;
 
         case 'close':
+          alert('A sessão remota foi encerrada pelo computador remoto.');
           closeViewer();
           break;
       }

@@ -62,6 +62,8 @@ func NewHostSession(clientID string, fps int, quality int, sendSignal func(proto
 
 	ctx, cancel := context.WithCancel(context.Background())
 
+	input.SetActiveMonitorBounds(capturer.GetBounds())
+
 	return &HostSession{
 		ClientID:    clientID,
 		ConnectedAt: time.Now(),
@@ -191,6 +193,7 @@ func (h *HostSession) HandleControlData(data []byte) {
 		_ = input.KeyUp(ctrl.Key, ctrl.Code, ctrl.KeyCode)
 	case protocol.TypeMonitorSwitch:
 		_ = h.capturer.SetDisplayIndex(ctrl.Monitor)
+		input.SetActiveMonitorBounds(h.capturer.GetBounds())
 	case protocol.TypeConfig:
 		if ctrl.Quality > 0 {
 			h.capturer.SetQuality(ctrl.Quality)
@@ -206,6 +209,8 @@ func (h *HostSession) HandleControlData(data []byte) {
 			input.OpenTaskManager()
 		case "desktop", "win_d":
 			input.ShowDesktop()
+		case "cad", "ctrl_alt_del":
+			input.SendCtrlAltDel()
 		case "run", "win_r":
 			_ = input.KeyDown("Meta", "MetaLeft", 91)
 			_ = input.KeyDown("r", "KeyR", 82)
@@ -238,6 +243,22 @@ func (h *HostSession) HandleControlData(data []byte) {
 				Payload: string(pongData),
 			})
 		}
+	}
+}
+
+// SendControl sends a control packet (such as chat, pong, or status) to the remote client
+func (h *HostSession) SendControl(ctrl protocol.ControlMessage) {
+	data, err := json.Marshal(ctrl)
+	if err != nil {
+		return
+	}
+	if h.inputChannel != nil && h.inputChannel.ReadyState() == pion.DataChannelStateOpen {
+		_ = h.inputChannel.Send(data)
+	} else if h.SendSignal != nil {
+		h.SendSignal(protocol.SignalingMessage{
+			Action:  protocol.ActionData,
+			Payload: string(data),
+		})
 	}
 }
 

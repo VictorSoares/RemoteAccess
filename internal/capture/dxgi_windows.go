@@ -3,6 +3,7 @@
 package capture
 
 import (
+	"image"
 	"sync"
 	"syscall"
 	"time"
@@ -80,5 +81,14 @@ func (c *DXGICapturer) GetResolution() (int, int) {
 		return c.gdiFallback.GetResolution()
 	}
 	return 1920, 1080
+}
+
+func (c *DXGICapturer) GetBounds() image.Rectangle {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.gdiFallback != nil {
+		return c.gdiFallback.GetBounds()
+	}
+	return image.Rect(0, 0, 1920, 1080)
 }
 

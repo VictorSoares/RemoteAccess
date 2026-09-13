@@ -25,6 +25,12 @@ import (
 //go:embed web/*
 var webFS embed.FS
 
+type ChatMessage struct {
+	Sender string `json:"sender"`
+	Text   string `json:"text"`
+	Time   string `json:"time"`
+}
+
 type LocalServer struct {
 	mu          sync.RWMutex
 	Config      *config.ConfigManager
@@ -34,6 +40,8 @@ type LocalServer struct {
 	cloudWS     *websocket.Conn
 	cloudStatus string
 	stopCloud   chan struct{}
+	chatMsgs    []ChatMessage
+	chatMu      sync.Mutex
 }
 
 func normalizeWSURL(rawURL string) string {
@@ -91,6 +99,8 @@ func (s *LocalServer) Start(port int) error {
 	mux.HandleFunc("/api/set-log-file", s.handleSetLogFile)
 	mux.HandleFunc("/api/session-status", s.handleSessionStatus)
 	mux.HandleFunc("/api/kick-session", s.handleKickSession)
+	mux.HandleFunc("/api/chat-messages", s.handleGetChatMessages)
+	mux.HandleFunc("/api/send-chat", s.handleSendChatMessage)
 	mux.HandleFunc("/api/system-info", s.handleSystemInfo)
 
 	mux.HandleFunc("/ws", s.handleWS)
@@ -98,6 +108,60 @@ func (s *LocalServer) Start(port int) error {
 	addr := fmt.Sprintf(":%d", port)
 	log.Printf("[RemoteAccess] Painel Web iniciado em http://localhost:%d", port)
 	return http.ListenAndServe(addr, mux)
+}
+
+func (s *LocalServer) addChatMessage(sender, text string) {
+	s.chatMu.Lock()
+	defer s.chatMu.Unlock()
+	s.chatMsgs = append(s.chatMsgs, ChatMessage{
+		Sender: sender,
+		Text:   text,
+		Time:   time.Now().Format("15:04:05"),
+	})
+	if len(s.chatMsgs) > 100 {
+		s.chatMsgs = s.chatMsgs[len(s.chatMsgs)-100:]
+	}
+}
+
+func (s *LocalServer) handleGetChatMessages(w http.ResponseWriter, r *http.Request) {
+	s.chatMu.Lock()
+	msgs := make([]ChatMessage, len(s.chatMsgs))
+	copy(msgs, s.chatMsgs)
+	s.chatMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"messages": msgs,
+	})
+}
+
+func (s *LocalServer) handleSendChatMessage(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Text string `json:"text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Text) == "" {
+		http.Error(w, "Mensagem vazia", http.StatusBadRequest)
+		return
+	}
+
+	cleanText := strings.TrimSpace(req.Text)
+	s.addChatMessage("Você (Host)", cleanText)
+
+	s.mu.RLock()
+	sess := s.hostSession
+	s.mu.RUnlock()
+
+	if sess != nil {
+		sess.SendControl(protocol.ControlMessage{
+			Type: protocol.TypeChat,
+			Text: cleanText,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status": "ok",
+	})
 }
 
 func (s *LocalServer) handleSetLogFile(w http.ResponseWriter, r *http.Request) {
@@ -141,10 +205,24 @@ func (s *LocalServer) handleSessionStatus(w http.ResponseWriter, r *http.Request
 func (s *LocalServer) handleKickSession(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	if s.hostSession != nil {
+		clientID := s.hostSession.ClientID
+		cws := s.cloudWS
+		hostID := s.Config.Data.ID
+		if cws != nil && clientID != "" {
+			_ = cws.WriteJSON(protocol.SignalingMessage{
+				Action:   protocol.ActionClose,
+				ID:       hostID,
+				TargetID: clientID,
+			})
+		}
 		s.hostSession.Close()
 		s.hostSession = nil
 	}
 	s.mu.Unlock()
+
+	s.chatMu.Lock()
+	s.chatMsgs = nil
+	s.chatMu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{
@@ -441,6 +519,10 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 					TargetID: senderID,
 					Payload:  jpegBase64,
 				})
+			}
+
+			sess.OnChat = func(sender string, text string) {
+				s.addChatMessage("Controlador", text)
 			}
 
 			s.hostSession = sess
