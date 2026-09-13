@@ -271,18 +271,20 @@
 
   <!-- FULLSCREEN REMOTE DESKTOP VIEWER -->
   <div id="viewer-container">
-    <!-- Permanent Stats HUD (Top-Left Fixed Pill - Always Visible, Zero Clipping) -->
-    <div id="hud-stats" class="hud-pill">
-      <span class="hud-item" id="hud-status-badge"><span class="hud-dot"></span> P2P</span>
-      <span class="hud-sep">|</span>
-      <span class="hud-item" id="stat-latency">⚡ 0 ms</span>
-      <span class="hud-sep">|</span>
-      <span class="hud-item" id="stat-fps">🎥 0 fps</span>
-    </div>
-
-    <!-- Floating Action Toolbar (Centered Top Pill Dock) -->
+    <!-- Floating Action Toolbar (Centered Top Pill Dock with Integrated Stats) -->
     <div id="viewer-toolbar" class="viewer-dock">
       <div class="dock-content">
+        <!-- Integrated Connection HUD Stats (Zero Overlap, Real-time Latency & FPS) -->
+        <div class="dock-stats-group">
+          <span class="hud-item" id="hud-status-badge"><span class="hud-dot"></span> P2P Direct</span>
+          <span class="hud-sep">|</span>
+          <span class="hud-item" id="stat-latency">⚡ 0 ms</span>
+          <span class="hud-sep">|</span>
+          <span class="hud-item" id="stat-fps">🎥 0 FPS</span>
+        </div>
+
+        <div class="dock-divider"></div>
+
         <!-- Monitor Switcher -->
         <div class="dock-select-wrap" title="Alternar Monitor">
           <select id="viewer-monitor-select" class="dock-select" onchange="switchRemoteMonitor(this.value)">

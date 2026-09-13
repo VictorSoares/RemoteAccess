@@ -16,6 +16,7 @@ var (
 	user32                       = syscall.NewLazyDLL("user32.dll")
 	shell32                      = syscall.NewLazyDLL("shell32.dll")
 	sasDll                       = syscall.NewLazyDLL("sas.dll")
+	kernel32                     = syscall.NewLazyDLL("kernel32.dll")
 	powrprof                     = syscall.NewLazyDLL("powrprof.dll")
 	procSetCursorPos             = user32.NewProc("SetCursorPos")
 	procMouseEvent               = user32.NewProc("mouse_event")
@@ -28,10 +29,68 @@ var (
 	procSendSAS                  = sasDll.NewProc("SendSAS")
 	procShellExecute             = shell32.NewProc("ShellExecuteW")
 	procSetSuspendState          = powrprof.NewProc("SetSuspendState")
+	procSetWindowsHookExW        = user32.NewProc("SetWindowsHookExW")
+	procUnhookWindowsHookEx      = user32.NewProc("UnhookWindowsHookEx")
+	procCallNextHookEx           = user32.NewProc("CallNextHookEx")
+	procGetMessageW              = user32.NewProc("GetMessageW")
+	procPostThreadMessageW       = user32.NewProc("PostThreadMessageW")
+	procGetCurrentThreadId       = kernel32.NewProc("GetCurrentThreadId")
 
 	activeBoundsMu sync.RWMutex
 	activeBounds   image.Rectangle
+
+	hookMu         sync.Mutex
+	isHooked       bool
+	kbdHook        uintptr
+	mouseHook      uintptr
+	hookThreadId   uint32
 )
+
+const (
+	whKeyboardLL = 13
+	whMouseLL    = 14
+	wmQuit       = 0x0012
+)
+
+type kbdLLHookStruct struct {
+	VkCode      uint32
+	ScanCode    uint32
+	Flags       uint32
+	Time        uint32
+	DwExtraInfo uintptr
+}
+
+type msLLHookStruct struct {
+	Pt          struct{ X, Y int32 }
+	MouseData   uint32
+	Flags       uint32
+	Time        uint32
+	DwExtraInfo uintptr
+}
+
+func keyboardHookCallback(nCode int, wParam uintptr, lParam uintptr) uintptr {
+	if nCode >= 0 {
+		kbd := (*kbdLLHookStruct)(unsafe.Pointer(lParam))
+		// If event is physical (not injected from remote controller), block it!
+		if kbd.Flags&0x01 == 0 {
+			return 1
+		}
+	}
+	ret, _, _ := procCallNextHookEx.Call(0, uintptr(nCode), wParam, lParam)
+	return ret
+}
+
+func mouseHookCallback(nCode int, wParam uintptr, lParam uintptr) uintptr {
+	if nCode >= 0 {
+		ms := (*msLLHookStruct)(unsafe.Pointer(lParam))
+		// If event is physical (not injected from remote controller), block it!
+		if ms.Flags&0x01 == 0 {
+			return 1
+		}
+	}
+	ret, _, _ := procCallNextHookEx.Call(0, uintptr(nCode), wParam, lParam)
+	return ret
+}
 
 func init() {
 	// Enable Per-Monitor DPI Awareness V2 (-4) so Windows gives us exact physical pixel coordinates
@@ -67,11 +126,75 @@ func SetActiveMonitorBounds(b image.Rectangle) {
 
 // BlockLocalInput blocks or unblocks physical mouse and keyboard inputs on the local machine
 func BlockLocalInput(block bool) error {
+	hookMu.Lock()
+	defer hookMu.Unlock()
+
+	// 1. Also invoke OS BlockInput (effective if running with elevated privileges)
 	val := uintptr(0)
 	if block {
 		val = 1
 	}
 	procBlockInput.Call(val)
+
+	// 2. Install/Uninstall user-mode Low-Level Hooks (effective even as standard non-elevated user)
+	if block && !isHooked {
+		isHooked = true
+		startedChan := make(chan struct{})
+		go func() {
+			tid, _, _ := procGetCurrentThreadId.Call()
+			hookThreadId = uint32(tid)
+
+			cbKbd := syscall.NewCallback(keyboardHookCallback)
+			cbMouse := syscall.NewCallback(mouseHookCallback)
+
+			hKbd, _, _ := procSetWindowsHookExW.Call(whKeyboardLL, cbKbd, 0, 0)
+			hMouse, _, _ := procSetWindowsHookExW.Call(whMouseLL, cbMouse, 0, 0)
+			kbdHook = hKbd
+			mouseHook = hMouse
+
+			close(startedChan)
+
+			var msg struct {
+				Hwnd    uintptr
+				Message uint32
+				WParam  uintptr
+				LParam  uintptr
+				Time    uint32
+				Pt      struct{ X, Y int32 }
+			}
+			for {
+				ret, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
+				if int32(ret) <= 0 || msg.Message == wmQuit {
+					break
+				}
+			}
+
+			if kbdHook != 0 {
+				procUnhookWindowsHookEx.Call(kbdHook)
+				kbdHook = 0
+			}
+			if mouseHook != 0 {
+				procUnhookWindowsHookEx.Call(mouseHook)
+				mouseHook = 0
+			}
+		}()
+		<-startedChan
+	} else if !block && isHooked {
+		isHooked = false
+		if hookThreadId != 0 {
+			procPostThreadMessageW.Call(uintptr(hookThreadId), wmQuit, 0, 0)
+			hookThreadId = 0
+		}
+		if kbdHook != 0 {
+			procUnhookWindowsHookEx.Call(kbdHook)
+			kbdHook = 0
+		}
+		if mouseHook != 0 {
+			procUnhookWindowsHookEx.Call(mouseHook)
+			mouseHook = 0
+		}
+	}
+
 	return nil
 }
 
@@ -133,13 +256,23 @@ func OpenTaskManager() {
 
 // SendCtrlAltDel sends the Secure Attention Sequence (SAS) or launches Task Manager / Security options
 func SendCtrlAltDel() {
+	// 1. Attempt software SAS
 	if procSendSAS.Find() == nil {
 		ret, _, _ := procSendSAS.Call(0)
 		if ret != 0 {
 			return
 		}
 	}
-	// Fallback when not running as a system service with SAS privilege: open Task Manager directly
+	// 2. Synthesize Ctrl + Alt + Del keystrokes
+	procKeybdEvent.Call(0x11, 0, 0, 0) // Ctrl down
+	procKeybdEvent.Call(0x12, 0, 0, 0) // Alt down
+	procKeybdEvent.Call(0x2E, 0, 0, 0) // Del down
+	time.Sleep(50 * time.Millisecond)
+	procKeybdEvent.Call(0x2E, 0, keyeventfKeyup, 0) // Del up
+	procKeybdEvent.Call(0x12, 0, keyeventfKeyup, 0) // Alt up
+	procKeybdEvent.Call(0x11, 0, keyeventfKeyup, 0) // Ctrl up
+
+	// 3. Fallback when not running as a system service: open Task Manager directly
 	OpenTaskManager()
 }
 

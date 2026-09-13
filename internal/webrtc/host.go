@@ -260,10 +260,12 @@ func (h *HostSession) SendControl(ctrl protocol.ControlMessage) {
 	}
 	if h.inputChannel != nil && h.inputChannel.ReadyState() == pion.DataChannelStateOpen {
 		_ = h.inputChannel.Send(data)
-	} else if h.SendSignal != nil {
+	}
+	if h.SendSignal != nil {
 		h.SendSignal(protocol.SignalingMessage{
-			Action:  protocol.ActionData,
-			Payload: string(data),
+			Action:   protocol.ActionData,
+			TargetID: h.ClientID,
+			Payload:  string(data),
 		})
 	}
 }

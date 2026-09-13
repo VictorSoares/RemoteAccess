@@ -704,15 +704,20 @@
 
   <!-- Embedded Web Viewer (1-Click Remote Access straight from Browser) -->
   <div id="web-viewer-container">
-    <div class="web-viewer-hud">
-      <span style="color: #4ade80;">● Online</span>
-      <span>|</span>
-      <span id="web-stat-fps">🎥 0 FPS</span>
-      <span>|</span>
-      <span id="web-stat-target">Host: ---</span>
-    </div>
-
     <div class="web-viewer-dock">
+      <!-- Integrated Stats Group -->
+      <div style="display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 0.76rem; padding: 0 6px; flex-shrink: 0;">
+        <span style="color: #4ade80;">● Online</span>
+        <span style="opacity: 0.3;">|</span>
+        <span id="web-stat-lat" style="color: #38bdf8;">⚡ 0 ms</span>
+        <span style="opacity: 0.3;">|</span>
+        <span id="web-stat-fps">🎥 0 FPS</span>
+        <span style="opacity: 0.3;">|</span>
+        <span id="web-stat-target" style="color: #cbd5e1;">Host: ---</span>
+      </div>
+
+      <div style="width: 1px; height: 18px; background: rgba(255,255,255,0.18); margin: 0 2px; flex-shrink: 0;"></div>
+
       <!-- Remote Monitor Switcher -->
       <div class="dock-select-wrap" title="Alternar Monitor Remoto">
         <select id="web-viewer-mon-select" class="dock-select" onchange="switchWebViewerMonitor(this.value)">
@@ -1049,6 +1054,7 @@
         try { viewerWS.close(); } catch(e) {}
       }
 
+      let vPingTimer = null;
       viewerWS = new WebSocket(wsUrl);
       viewerWS.onopen = () => {
         viewerWS.send(JSON.stringify({
@@ -1057,6 +1063,10 @@
           targetId: targetId,
           password: targetPwd
         }));
+        if (vPingTimer) clearInterval(vPingTimer);
+        vPingTimer = setInterval(() => {
+          sendViewerCtrl({ t: 'ping', ts: performance.now() });
+        }, 1200);
       };
 
       viewerWS.onmessage = (event) => {
@@ -1068,6 +1078,10 @@
                 const ctrl = JSON.parse(msg.payload);
                 if (ctrl.t === 'init_info' && ctrl.mon) {
                   updateWebViewerMonitors(ctrl.mon);
+                } else if (ctrl.t === 'pong') {
+                  const rtt = Math.max(1, Math.round(performance.now() - ctrl.ts));
+                  const latEl = document.getElementById('web-stat-lat');
+                  if (latEl) latEl.innerText = '⚡ ' + rtt + ' ms';
                 } else if (ctrl.t === 'chat') {
                   appendViewerChat('Host', ctrl.text);
                 }

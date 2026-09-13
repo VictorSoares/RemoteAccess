@@ -621,7 +621,7 @@ function connectSignaling() {
             try {
               const ctrl = JSON.parse(msg.payload);
               if (ctrl.t === 'pong') {
-                const rtt = Math.round(performance.now() - ctrl.ts);
+                const rtt = Math.max(1, Math.round(performance.now() - ctrl.ts));
                 const latEl = document.getElementById('stat-latency');
                 if (latEl) latEl.innerText = `⚡ ${rtt} ms`;
                 const badgeEl = document.getElementById('hud-status-badge');
@@ -636,7 +636,8 @@ function connectSignaling() {
           break;
 
         case 'close':
-          alert('A sessão remota foi encerrada pelo computador remoto.');
+          const closeReason = msg.message || 'A sessão remota foi encerrada.';
+          alert(closeReason);
           closeViewer();
           break;
       }
@@ -750,7 +751,7 @@ function setupDataChannels(targetId) {
     try {
       const msg = JSON.parse(event.data);
       if (msg.t === 'pong') {
-        const rtt = Math.round(performance.now() - msg.ts);
+        const rtt = Math.max(1, Math.round(performance.now() - msg.ts));
         const latEl = document.getElementById('stat-latency');
         if (latEl) latEl.innerText = `⚡ ${rtt} ms`;
         const badgeEl = document.getElementById('hud-status-badge');
@@ -825,11 +826,15 @@ function renderRawBlob(blobData) {
 function sendControl(ctrlObj) {
   if (!isConnected) return;
 
+  // Send over WebRTC DataChannel if open
   if (inputChannel && inputChannel.readyState === 'open') {
     inputChannel.send(JSON.stringify(ctrlObj));
-    return;
+    if (ctrlObj.t !== 'chat' && ctrlObj.t !== 'ping') {
+      return;
+    }
   }
 
+  // Always send chat, config, and relay controls over WebSocket as guaranteed channel
   if (signalingWS && signalingWS.readyState === WebSocket.OPEN && currentTargetId) {
     signalingWS.send(JSON.stringify({
       action: 'data',
@@ -845,7 +850,7 @@ function startPingLoop() {
   pingIntervalTimer = setInterval(() => {
     lastPingTime = performance.now();
     sendControl({ t: 'ping', ts: lastPingTime });
-  }, 2000);
+  }, 1200);
 }
 
 function openViewer() {

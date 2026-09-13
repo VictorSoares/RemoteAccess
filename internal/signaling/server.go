@@ -547,13 +547,27 @@ func (s *Server) HandleKick(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	peer, exists := s.peers[req.ID]
 	if exists {
+		// If peer was in an active session, notify the other peer and end session!
+		if peer.ActiveTargetID != "" {
+			if targetPeer, ok := s.peers[peer.ActiveTargetID]; ok {
+				targetPeer.ActiveTargetID = ""
+				targetPeer.mu.Lock()
+				_ = targetPeer.Conn.WriteJSON(protocol.SignalingMessage{
+					Action:  protocol.ActionClose,
+					Message: "A sessão foi encerrada pelo administrador do servidor.",
+				})
+				targetPeer.mu.Unlock()
+			}
+			peer.ActiveTargetID = ""
+		}
+
 		_ = peer.Conn.WriteJSON(protocol.SignalingMessage{
-			Action:  protocol.ActionError,
-			Message: "Conexão encerrada pelo administrador do servidor.",
+			Action:  protocol.ActionClose,
+			Message: "Conexão e sessão encerradas pelo administrador do servidor.",
 		})
 		_ = peer.Conn.Close()
 		delete(s.peers, req.ID)
-		s.addLog("Dispositivo %s foi desconectado pelo painel administrativo", req.ID)
+		s.addLog("Dispositivo %s teve sua conexão e sessão encerradas pelo painel administrativo", req.ID)
 	}
 	s.mu.Unlock()
 
