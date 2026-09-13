@@ -32,7 +32,7 @@ func NewFastCapturer(displayIndex int) (*DXGICapturer, error) {
 
 	cap := &DXGICapturer{
 		displayIndex: displayIndex,
-		quality:      65,
+		quality:      55,
 		gdiFallback:  gdi,
 		useDXGI:      false,
 	}

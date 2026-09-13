@@ -534,7 +534,10 @@ function toggleHostFloatingChat(forceOpen) {
     const container = document.getElementById('host-floating-chat-messages');
     if (container) container.scrollTop = container.scrollHeight;
     const input = document.getElementById('host-floating-chat-input');
-    if (input) setTimeout(() => input.focus(), 60);
+    if (input) {
+      setTimeout(() => { input.focus(); input.select(); }, 50);
+      setTimeout(() => { input.focus(); }, 150);
+    }
   }
 }
 
@@ -590,18 +593,10 @@ async function refreshHostChat() {
 
 function toggleHostChat() {
   toggleHostFloatingChat();
-  const chatSec = document.getElementById('host-chat-container');
-  if (chatSec) chatSec.style.display = hostChatOpen ? 'flex' : 'none';
-  if (hostChatOpen) {
-    const badge = document.getElementById('host-chat-badge');
-    if (badge) {
-      badge.innerText = '0';
-      badge.style.display = 'none';
-    }
-    const container = document.getElementById('host-chat-messages');
-    if (container) container.scrollTop = container.scrollHeight;
-    const input = document.getElementById('host-chat-input');
-    if (input) setTimeout(() => input.focus(), 60);
+  const input = document.getElementById('host-floating-chat-input') || document.getElementById('host-chat-input');
+  if (input && hostChatOpen) {
+    setTimeout(() => { input.focus(); input.select(); }, 50);
+    setTimeout(() => { input.focus(); }, 150);
   }
 }
 
@@ -1025,7 +1020,7 @@ async function connectToRemote(e) {
 
   peerConnection = new RTCPeerConnection(config);
   inputChannel = peerConnection.createDataChannel('input', { ordered: true });
-  videoChannel = peerConnection.createDataChannel('video', { maxRetransmits: 0, ordered: false });
+  videoChannel = peerConnection.createDataChannel('video', { ordered: false, maxPacketLifeTime: 300 });
 
   peerConnection.oniceconnectionstatechange = () => {
     console.log('[WebRTC] ICE Connection State:', peerConnection.iceConnectionState);
@@ -1119,7 +1114,7 @@ let isRenderingFrame = false;
 let pendingBlob = null;
 
 function renderBase64Frame(b64) {
-  if (!isConnected) openViewer();
+  if (!isConnected) return;
 
   frameCount++;
   const now = performance.now();
@@ -1132,6 +1127,7 @@ function renderBase64Frame(b64) {
 
   const img = new Image();
   img.onload = () => {
+    if (!isConnected) return;
     if (canvas.width !== img.width || canvas.height !== img.height) {
       canvas.width = img.width;
       canvas.height = img.height;
@@ -1144,6 +1140,8 @@ function renderBase64Frame(b64) {
 let frameSafetyTimer = null;
 
 function renderRawBlob(blobData) {
+  if (!isConnected) return;
+
   frameCount++;
   const now = performance.now();
   if (now - lastFpsTime >= 1000) {
@@ -1336,9 +1334,9 @@ function setViewerQuality(mode) {
   if (mode === 'speed') {
     sendControl({ t: 'cfg', q: 45, fps: 60 });
   } else if (mode === 'balanced') {
-    sendControl({ t: 'cfg', q: 65, fps: 30 });
+    sendControl({ t: 'cfg', q: 55, fps: 30 });
   } else if (mode === 'hd') {
-    sendControl({ t: 'cfg', q: 85, fps: 30 });
+    sendControl({ t: 'cfg', q: 70, fps: 30 });
   }
 }
 

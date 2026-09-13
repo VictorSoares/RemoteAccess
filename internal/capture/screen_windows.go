@@ -125,7 +125,7 @@ func NewScreenCapturer(displayIndex int) (*ScreenCapturer, error) {
 	return &ScreenCapturer{
 		DisplayIndex: displayIndex,
 		Bounds:       bounds,
-		Quality:      65,
+		Quality:      55,
 	}, nil
 }
 

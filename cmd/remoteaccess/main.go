@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 	"unsafe"
@@ -63,6 +64,78 @@ func findRunningLocalPort() int {
 	return 8080
 }
 
+// startWindowSizeGuard enforces a rigid native minimum window size (540x580)
+// on the application window so the user physically cannot shrink it below the threshold.
+func startWindowSizeGuard() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	user32 := syscall.NewLazyDLL("user32.dll")
+	procGetWindowRect := user32.NewProc("GetWindowRect")
+	procSetWindowPos := user32.NewProc("SetWindowPos")
+	procGetWindowTextW := user32.NewProc("GetWindowTextW")
+	procEnumWindows := user32.NewProc("EnumWindows")
+	procIsWindowVisible := user32.NewProc("IsWindowVisible")
+
+	type rect struct {
+		left, top, right, bottom int32
+	}
+
+	go func() {
+		ticker := time.NewTicker(35 * time.Millisecond) // ~30Hz smooth physical clamp
+		defer ticker.Stop()
+
+		isVis := func(h uintptr) bool {
+			r, _, _ := procIsWindowVisible.Call(h)
+			return r != 0
+		}
+
+		var targetHWND uintptr
+		for range ticker.C {
+			if targetHWND == 0 || !isVis(targetHWND) {
+				cb := syscall.NewCallback(func(hwnd uintptr, lParam uintptr) uintptr {
+					if !isVis(hwnd) {
+						return 1
+					}
+					var buf [256]uint16
+					procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), 256)
+					title := syscall.UTF16ToString(buf[:])
+					if title != "" && strings.Contains(title, "RemoteAccess") && !strings.Contains(title, "Tray") {
+						targetHWND = hwnd
+						return 0
+					}
+					return 1
+				})
+				procEnumWindows.Call(cb, 0)
+			}
+
+			if targetHWND != 0 {
+				var r rect
+				ret, _, _ := procGetWindowRect.Call(targetHWND, uintptr(unsafe.Pointer(&r)))
+				if ret != 0 {
+					w := r.right - r.left
+					h := r.bottom - r.top
+					needFix := false
+					newW := w
+					newH := h
+					if w < 540 {
+						newW = 540
+						needFix = true
+					}
+					if h < 580 {
+						newH = 580
+						needFix = true
+					}
+					if needFix {
+						// SWP_NOMOVE (0x0002) | SWP_NOZORDER (0x0004) | SWP_NOACTIVATE (0x0010)
+						procSetWindowPos.Call(targetHWND, 0, 0, 0, uintptr(newW), uintptr(newH), 0x0002|0x0004|0x0010)
+					}
+				}
+			}
+		}
+	}()
+}
+
 // runNativeAppWindow opens the standalone desktop app window (Edge App mode or browser fallback)
 func runNativeAppWindow(url string) {
 	if runtime.GOOS == "windows" {
@@ -89,6 +162,7 @@ func runNativeAppWindow(url string) {
 				)
 				if err := cmd.Start(); err == nil {
 					log.Printf("[Janela] Janela desktop nativa iniciada via Edge (%s)", edgePath)
+					startWindowSizeGuard()
 					return
 				}
 			}
@@ -97,6 +171,7 @@ func runNativeAppWindow(url string) {
 		// Fallback: standard browser
 		log.Println("[Janela] Edge não encontrado diretamente, abrindo navegador padrão...")
 		_ = exec.Command("cmd", "/c", "start", url).Start()
+		startWindowSizeGuard()
 		return
 	}
 
