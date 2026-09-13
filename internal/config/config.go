@@ -15,6 +15,7 @@ import (
 
 type AppConfig struct {
 	ID           string `json:"id"`
+	Alias        string `json:"alias"`
 	Password     string `json:"password"`
 	Quality      int    `json:"quality"`
 	FPS          int    `json:"fps"`
@@ -77,11 +78,16 @@ const DefaultSignalingURL = "https://remoteaccess-ltwx.onrender.com"
 func LoadConfig() *ConfigManager {
 	configPath := getConfigPath()
 	exePath, _ := os.Executable()
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "Meu PC"
+	}
 
 	cm := &ConfigManager{
 		filePath:   configPath,
 		executable: exePath,
 		Data: AppConfig{
+			Alias:        hostname,
 			Quality:      65,
 			FPS:          30,
 			SignalingURL: DefaultSignalingURL,
@@ -91,6 +97,10 @@ func LoadConfig() *ConfigManager {
 	data, err := os.ReadFile(configPath)
 	if err == nil {
 		if err := json.Unmarshal(data, &cm.Data); err == nil && cm.Data.ID != "" {
+			if cm.Data.Alias == "" {
+				cm.Data.Alias = hostname
+				_ = cm.Save()
+			}
 			if cm.Data.SignalingURL == "" {
 				cm.Data.SignalingURL = DefaultSignalingURL
 				_ = cm.Save()
@@ -101,6 +111,7 @@ func LoadConfig() *ConfigManager {
 
 	// Generate new fixed ID and initial Password
 	cm.Data.ID = generateRandomID()
+	cm.Data.Alias = hostname
 	cm.Data.Password = generateRandomPassword()
 	cm.Data.SignalingURL = DefaultSignalingURL
 	_ = cm.Save()
@@ -121,6 +132,13 @@ func (cm *ConfigManager) Save() error {
 func (cm *ConfigManager) SetPassword(newPwd string) error {
 	cm.mu.Lock()
 	cm.Data.Password = newPwd
+	cm.mu.Unlock()
+	return cm.Save()
+}
+
+func (cm *ConfigManager) SetAlias(alias string) error {
+	cm.mu.Lock()
+	cm.Data.Alias = alias
 	cm.mu.Unlock()
 	return cm.Save()
 }

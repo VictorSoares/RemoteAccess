@@ -29,13 +29,26 @@ var upgrader = websocket.Upgrader{
 
 type Peer struct {
 	ID             string          `json:"id"`
+	Alias          string          `json:"alias"`
 	IsHost         bool            `json:"is_host"`
 	Password       string          `json:"password,omitempty"`
 	RemoteAddr     string          `json:"remote_addr"`
 	ConnectedAt    time.Time       `json:"connected_at"`
 	ActiveTargetID string          `json:"active_target_id"`
+	Blocked        bool            `json:"blocked"`
 	Conn           *websocket.Conn `json:"-"`
 	mu             sync.Mutex
+}
+
+type SessionRecord struct {
+	ID          string    `json:"id"`
+	StartedAt   time.Time `json:"started_at"`
+	EndedAt     time.Time `json:"ended_at,omitempty"`
+	DurationSec int       `json:"duration_sec"`
+	HostID      string    `json:"host_id"`
+	HostAlias   string    `json:"host_alias"`
+	ClientID    string    `json:"client_id"`
+	Status      string    `json:"status"` // "completed", "active", "rejected"
 }
 
 type Server struct {
@@ -45,6 +58,8 @@ type Server struct {
 	totalPackets uint64
 	logsMu       sync.RWMutex
 	logs         []string
+	historyMu    sync.RWMutex
+	history      []SessionRecord
 	adminKey     string
 }
 
@@ -58,10 +73,20 @@ func NewServer() *Server {
 		peers:     make(map[string]*Peer),
 		startTime: time.Now(),
 		logs:      make([]string, 0, 200),
+		history:   make([]SessionRecord, 0, 500),
 		adminKey:  strings.TrimSpace(secret),
 	}
 	s.addLog("Servidor Cloud Relay inicializado com sucesso. Chave Admin configurada.")
 	return s
+}
+
+func (s *Server) addHistory(rec SessionRecord) {
+	s.historyMu.Lock()
+	defer s.historyMu.Unlock()
+	s.history = append([]SessionRecord{rec}, s.history...)
+	if len(s.history) > 500 {
+		s.history = s.history[:500]
+	}
 }
 
 func (s *Server) checkAdminAuth(r *http.Request) bool {
@@ -180,17 +205,21 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 			s.mu.Lock()
 			delete(s.peers, peer.ID)
 			peer.ID = msg.ID
+			if msg.Alias != "" {
+				peer.Alias = msg.Alias
+			}
 			peer.IsHost = true
 			peer.Password = msg.Password
 			s.peers[msg.ID] = peer
 			s.mu.Unlock()
 
-			s.addLog("Host registrado com ID fixo: %s (Pronto para conexões)", msg.ID)
+			s.addLog("Host registrado: %s [Nome: %s] (Pronto para conexões)", msg.ID, peer.Alias)
 			_ = conn.WriteJSON(protocol.SignalingMessage{
 				Action:  protocol.ActionStatus,
 				Status:  "registered",
 				Message: "Host registrado com sucesso no Relay",
 				ID:      msg.ID,
+				Alias:   peer.Alias,
 			})
 
 		case protocol.ActionUnregister:
@@ -226,6 +255,15 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
+			if targetPeer.Blocked {
+				s.addLog("Conexão recusada: Host %s está temporariamente bloqueado pelo administrador", msg.TargetID)
+				_ = conn.WriteJSON(protocol.SignalingMessage{
+					Action:  protocol.ActionError,
+					Message: "Este computador está temporariamente bloqueado para novas conexões remotas.",
+				})
+				continue
+			}
+
 			if targetPeer.Password != "" && targetPeer.Password != msg.Password {
 				s.addLog("Autenticação rejeitada para ID %s (senha incorreta)", msg.TargetID)
 				_ = conn.WriteJSON(protocol.SignalingMessage{
@@ -242,7 +280,17 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 			peer.ActiveTargetID = msg.TargetID
 			targetPeer.ActiveTargetID = peer.ID
 
-			s.addLog("Sessão iniciada: %s está controlando o Host %s", peer.ID, msg.TargetID)
+			s.addLog("Sessão iniciada: %s está controlando o Host %s (%s)", peer.ID, msg.TargetID, targetPeer.Alias)
+
+			// Record in session history
+			s.addHistory(SessionRecord{
+				ID:        fmt.Sprintf("sess_%d", time.Now().UnixNano()),
+				StartedAt: time.Now(),
+				HostID:    targetPeer.ID,
+				HostAlias: targetPeer.Alias,
+				ClientID:  peer.ID,
+				Status:    "active",
+			})
 
 			targetPeer.mu.Lock()
 			_ = targetPeer.Conn.WriteJSON(msg)
@@ -253,6 +301,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 				Status:  "auth_ok",
 				Message: "Autenticado com sucesso! Conectando à tela remota...",
 				ID:      msg.TargetID,
+				Alias:   targetPeer.Alias,
 			})
 
 		case protocol.ActionOffer, protocol.ActionAnswer, protocol.ActionCandidate, protocol.ActionData, protocol.ActionClose:
@@ -327,11 +376,13 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 
 	type PeerInfo struct {
 		ID             string `json:"id"`
+		Alias          string `json:"alias"`
 		IsHost         bool   `json:"is_host"`
 		Password       string `json:"password,omitempty"`
 		DurationSec    int    `json:"duration_sec"`
 		RemoteAddr     string `json:"remote_addr"`
 		ActiveTargetID string `json:"active_target_id"`
+		Blocked        bool   `json:"blocked"`
 		Status         string `json:"status"`
 	}
 
@@ -341,13 +392,15 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 	activeSessions := 0
 
 	for _, p := range s.peers {
-		// Only list registered Hosts or clients in active sessions (filter out ephemeral idle connections)
+		// Only list registered Hosts or clients in active sessions
 		if !p.IsHost && p.ActiveTargetID == "" {
 			continue
 		}
 
 		status := "Online / Livre"
-		if p.ActiveTargetID != "" {
+		if p.Blocked {
+			status = "Bloqueado (Admin)"
+		} else if p.ActiveTargetID != "" {
 			status = fmt.Sprintf("Em Sessão com %s", p.ActiveTargetID)
 			activeSessions++
 		}
@@ -360,11 +413,13 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 
 		peerList = append(peerList, PeerInfo{
 			ID:             p.ID,
+			Alias:          p.Alias,
 			IsHost:         p.IsHost,
 			Password:       p.Password,
 			DurationSec:    int(time.Since(p.ConnectedAt).Seconds()),
 			RemoteAddr:     p.RemoteAddr,
 			ActiveTargetID: p.ActiveTargetID,
+			Blocked:        p.Blocked,
 			Status:         status,
 		})
 	}
@@ -379,6 +434,64 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 		"active_sessions": activeSessions / 2, // Host + Client pairs
 		"total_packets":   atomic.LoadUint64(&s.totalPackets),
 		"peers":           peerList,
+	})
+}
+
+func (s *Server) HandleHistory(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAdminAuth(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	s.historyMu.RLock()
+	defer s.historyMu.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"history": s.history,
+	})
+}
+
+func (s *Server) HandleBlockPeer(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAdminAuth(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		ID    string `json:"id"`
+		Block bool   `json:"block"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.ID == "" {
+		http.Error(w, "ID inválido", http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	peer, exists := s.peers[req.ID]
+	if exists {
+		peer.Blocked = req.Block
+		if req.Block && peer.ActiveTargetID != "" {
+			// Terminate active session if blocked
+			if targetPeer, ok := s.peers[peer.ActiveTargetID]; ok {
+				targetPeer.ActiveTargetID = ""
+				_ = targetPeer.Conn.WriteJSON(protocol.SignalingMessage{
+					Action:  protocol.ActionClose,
+					Message: "Sessão encerrada por bloqueio administrativo do Host.",
+				})
+			}
+			peer.ActiveTargetID = ""
+		}
+		s.addLog("Status de bloqueio do Host %s alterado para: %v", req.ID, req.Block)
+	}
+	s.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "ok",
+		"id":      req.ID,
+		"blocked": req.Block,
+		"found":   exists,
 	})
 }
 

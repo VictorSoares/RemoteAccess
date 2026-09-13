@@ -20,6 +20,7 @@ const (
 type SignalingMessage struct {
 	Action    string          `json:"action"`
 	ID        string          `json:"id,omitempty"`
+	Alias     string          `json:"alias,omitempty"`
 	TargetID  string          `json:"targetId,omitempty"`
 	Password  string          `json:"password,omitempty"`
 	SDP       string          `json:"sdp,omitempty"`
@@ -27,6 +28,7 @@ type SignalingMessage struct {
 	Payload   string          `json:"payload,omitempty"` // For WebSocket Relay fallback
 	Status    string          `json:"status,omitempty"`
 	Message   string          `json:"message,omitempty"`
+	Blocked   bool            `json:"blocked,omitempty"`
 }
 
 // Control Packet Types

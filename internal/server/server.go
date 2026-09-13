@@ -82,6 +82,7 @@ func (s *LocalServer) Start(port int) error {
 	mux.Handle("/", http.FileServer(http.FS(webContent)))
 
 	mux.HandleFunc("/api/host-info", s.handleHostInfo)
+	mux.HandleFunc("/api/set-alias", s.handleSetAlias)
 	mux.HandleFunc("/api/set-password", s.handleSetPassword)
 	mux.HandleFunc("/api/set-signaling", s.handleSetSignaling)
 	mux.HandleFunc("/api/autostart", s.handleAutoStart)
@@ -177,6 +178,7 @@ func (s *LocalServer) handleHostInfo(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":            s.Config.Data.ID,
+		"alias":         s.Config.Data.Alias,
 		"password":      s.Config.Data.Password,
 		"quality":       s.Config.Data.Quality,
 		"fps":           s.Config.Data.FPS,
@@ -184,6 +186,45 @@ func (s *LocalServer) handleHostInfo(w http.ResponseWriter, r *http.Request) {
 		"signaling_url": s.Config.Data.SignalingURL,
 		"save_log_file": s.Config.Data.SaveLogFile,
 		"cloud_status":  s.cloudStatus,
+	})
+}
+
+func (s *LocalServer) handleSetAlias(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Alias string `json:"alias"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Alias) == "" {
+		http.Error(w, "Nome/Apelido inválido", http.StatusBadRequest)
+		return
+	}
+
+	cleanAlias := strings.TrimSpace(req.Alias)
+	if err := s.Config.SetAlias(cleanAlias); err != nil {
+		http.Error(w, "Erro ao salvar apelido", http.StatusInternalServerError)
+		return
+	}
+
+	s.mu.RLock()
+	cws := s.cloudWS
+	hostID := s.Config.Data.ID
+	hostPwd := s.Config.Data.Password
+	s.mu.RUnlock()
+
+	if cws != nil {
+		_ = cws.WriteJSON(protocol.SignalingMessage{
+			Action:   protocol.ActionRegister,
+			ID:       hostID,
+			Alias:    cleanAlias,
+			Password: hostPwd,
+		})
+	}
+
+	log.Printf("[Config] Apelido do computador atualizado para: %s", cleanAlias)
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status": "ok",
+		"alias":  cleanAlias,
 	})
 }
 
@@ -232,12 +273,14 @@ func (s *LocalServer) handleSetPassword(w http.ResponseWriter, r *http.Request) 
 	s.mu.RLock()
 	cws := s.cloudWS
 	hostID := s.Config.Data.ID
+	hostAlias := s.Config.Data.Alias
 	s.mu.RUnlock()
 
 	if cws != nil {
 		_ = cws.WriteJSON(protocol.SignalingMessage{
 			Action:   protocol.ActionRegister,
 			ID:       hostID,
+			Alias:    hostAlias,
 			Password: req.Password,
 		})
 	}
@@ -323,14 +366,16 @@ func (s *LocalServer) cloudSignalingLoop() {
 		s.cloudWS = conn
 		s.cloudStatus = "connected"
 		hostID := s.Config.Data.ID
+		hostAlias := s.Config.Data.Alias
 		hostPwd := s.Config.Data.Password
 		s.mu.Unlock()
 
-		log.Printf("[Nuvem] Conectado com sucesso! Registrado Host ID: %s", hostID)
+		log.Printf("[Nuvem] Conectado com sucesso! Registrado Host ID: %s (Alias: %s)", hostID, hostAlias)
 
 		err = conn.WriteJSON(protocol.SignalingMessage{
 			Action:   protocol.ActionRegister,
 			ID:       hostID,
+			Alias:    hostAlias,
 			Password: hostPwd,
 		})
 		if err != nil {

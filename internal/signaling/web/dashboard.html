@@ -436,6 +436,7 @@
           <thead>
             <tr>
               <th>Tipo</th>
+              <th>Nome / Apelido</th>
               <th>Identificador (ID)</th>
               <th>Senha Fixa</th>
               <th>Status</th>
@@ -446,7 +447,39 @@
           </thead>
           <tbody id="peers-table-body">
             <tr>
-              <td colspan="7" class="empty-row">Carregando computadores online...</td>
+              <td colspan="8" class="empty-row">Carregando computadores online...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Session History / Audit Log Table -->
+    <div class="panel">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">📜 Auditoria & Histórico Recente de Sessões</h2>
+          <span style="font-size: 0.82rem; color: var(--text-muted);">Registro em tempo real de todas as conexões iniciadas e encerradas na frota.</span>
+        </div>
+        <button onclick="refreshHistory()" class="btn-action" style="background: rgba(255,255,255,0.08); color: #fff;">
+          🔄 Atualizar Histórico
+        </button>
+      </div>
+
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Data / Horário</th>
+              <th>Computador Acessado</th>
+              <th>ID do Host</th>
+              <th>ID do Controlador</th>
+              <th>Status da Sessão</th>
+            </tr>
+          </thead>
+          <tbody id="history-table-body">
+            <tr>
+              <td colspan="5" class="empty-row">Nenhuma sessão registrada recentemente.</td>
             </tr>
           </tbody>
         </table>
@@ -456,7 +489,7 @@
     <!-- Live Event Logs -->
     <div class="panel">
       <div class="panel-header">
-        <h2 class="panel-title">📜 Console de Eventos em Tempo Real</h2>
+        <h2 class="panel-title">📋 Console de Eventos em Tempo Real</h2>
       </div>
       <div id="logs-terminal" class="terminal">
         Aguardando eventos do cluster...
@@ -569,7 +602,7 @@
 
         const tbody = document.getElementById('peers-table-body');
         if (!data.peers || data.peers.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="7" class="empty-row">Nenhum computador registrado online no momento.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="8" class="empty-row">Nenhum computador registrado online no momento.</td></tr>';
         } else {
           tbody.innerHTML = '';
           data.peers.forEach(p => {
@@ -578,19 +611,29 @@
               ? '<span class="badge-type badge-host">🖥️ HOST</span>' 
               : '<span class="badge-type badge-client">🚀 CLIENTE</span>';
 
-            const statusHtml = p.active_target_id 
-              ? '<span style="color: #f87171; font-weight: 700;">🔴 Em Sessão com ' + p.active_target_id + '</span>'
-              : '<span style="color: #4ade80; font-weight: 700;">🟢 Disponível</span>';
+            let statusHtml = '<span style="color: #4ade80; font-weight: 700;">🟢 Disponível</span>';
+            if (p.blocked) {
+              statusHtml = '<span style="color: #f87171; font-weight: 700;">🚫 Bloqueado</span>';
+            } else if (p.active_target_id) {
+              statusHtml = '<span style="color: #f87171; font-weight: 700;">🔴 Em Sessão com ' + p.active_target_id + '</span>';
+            }
 
             const pwdDisplay = p.password ? '<span class="pwd-tag">' + p.password + '</span>' : '<span style="color: var(--text-muted);">---</span>';
+            const aliasDisplay = p.alias ? '<strong style="color: #60a5fa;">' + p.alias + '</strong>' : '<span style="color: var(--text-muted); font-style: italic;">Não definido</span>';
 
             let actionsHtml = '';
             if (p.is_host) {
-              actionsHtml += '<button class="btn-action btn-connect-direct" onclick="connectDirect(\'' + p.id + '\', \'' + (p.password || '') + '\')">🚀 Acessar (1-Clique)</button>';
+              actionsHtml += '<button class="btn-action btn-connect-direct" onclick="connectDirect(\'' + p.id + '\', \'' + (p.password || '') + '\')">🚀 Acessar</button>';
+              if (p.blocked) {
+                actionsHtml += '<button class="btn-action" style="background: rgba(16,185,129,0.2); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.4);" onclick="toggleBlockPeer(\'' + p.id + '\', false)">🔓 Desbloquear</button>';
+              } else {
+                actionsHtml += '<button class="btn-action" style="background: rgba(245,158,11,0.2); color: #fcd34d; border: 1px solid rgba(245,158,11,0.4);" onclick="toggleBlockPeer(\'' + p.id + '\', true)">🔒 Bloquear</button>';
+              }
             }
             actionsHtml += '<button class="btn-action btn-kill" onclick="kickPeer(\'' + p.id + '\')">🛑 Kill</button>';
 
             tr.innerHTML = '<td>' + typeBadge + '</td>' +
+              '<td>' + aliasDisplay + '</td>' +
               '<td><span class="id-tag">' + formatID(p.id) + '</span></td>' +
               '<td>' + pwdDisplay + '</td>' +
               '<td>' + statusHtml + '</td>' +
@@ -601,6 +644,8 @@
           });
         }
       } catch (err) {}
+
+      await refreshHistory();
 
       try {
         const resLogs = await fetch('/api/logs?key=' + encodeURIComponent(adminKey));
@@ -613,6 +658,48 @@
           }
         }
       } catch (err) {}
+    }
+
+    async function refreshHistory() {
+      try {
+        const resHist = await fetch('/api/history?key=' + encodeURIComponent(adminKey));
+        if (resHist.status === 200) {
+          const histData = await resHist.json();
+          const hBody = document.getElementById('history-table-body');
+          if (!histData.history || histData.history.length === 0) {
+            hBody.innerHTML = '<tr><td colspan="5" class="empty-row">Nenhuma sessão registrada recentemente.</td></tr>';
+          } else {
+            hBody.innerHTML = '';
+            histData.history.forEach(item => {
+              const tr = document.createElement('tr');
+              const dateStr = new Date(item.started_at).toLocaleString('pt-BR');
+              const statusTag = item.status === 'active' 
+                ? '<span style="color: #38bdf8; font-weight: 700;">● Em Andamento</span>'
+                : '<span style="color: #4ade80; font-weight: 700;">✓ Concluída (' + formatDuration(item.duration_sec) + ')</span>';
+
+              tr.innerHTML = '<td>' + dateStr + '</td>' +
+                '<td><strong style="color: #60a5fa;">' + (item.host_alias || 'Host') + '</strong></td>' +
+                '<td><span class="id-tag" style="font-size: 0.9rem;">' + formatID(item.host_id) + '</span></td>' +
+                '<td><span style="font-family: var(--font-mono); color: #d8b4fe;">' + item.client_id + '</span></td>' +
+                '<td>' + statusTag + '</td>';
+              hBody.appendChild(tr);
+            });
+          }
+        }
+      } catch (err) {}
+    }
+
+    async function toggleBlockPeer(id, shouldBlock) {
+      try {
+        await fetch('/api/block?key=' + encodeURIComponent(adminKey), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: id, block: shouldBlock })
+        });
+        refreshData();
+      } catch (err) {
+        alert('Erro ao alterar status de bloqueio.');
+      }
     }
 
     async function kickPeer(id) {

@@ -94,6 +94,18 @@
           </div>
 
           <div class="credential-grid">
+            <!-- Computer Alias Box -->
+            <div class="cred-box alias-box" style="grid-column: 1 / -1; background: rgba(59, 130, 246, 0.08); border-color: rgba(59, 130, 246, 0.25);">
+              <div class="cred-header">
+                <span class="cred-tag">🏷️ APELIDO / NOME DESTA MÁQUINA</span>
+                <button class="btn-copy-mini btn-edit" onclick="openCustomAliasModal()" title="Alterar Nome Amigável">✏️ Alterar Nome</button>
+              </div>
+              <div class="cred-main">
+                <div id="my-alias" class="id-number" style="font-size: 1.25rem; color: #60a5fa;">Detectando...</div>
+              </div>
+              <div class="cred-hint">Identificação amigável visível no painel do servidor e nos computadores remotos.</div>
+            </div>
+
             <!-- Fixed ID Box -->
             <div class="cred-box id-box">
               <div class="cred-header">
@@ -125,7 +137,7 @@
           <!-- System Hardware Specs -->
           <div class="sys-info-strip">
             <div class="info-pill">
-              <span class="pill-label">💻 Computador:</span>
+              <span class="pill-label">💻 Hostname:</span>
               <span id="sys-hostname" class="pill-val">Detectando...</span>
             </div>
             <div class="info-pill">
@@ -274,6 +286,12 @@
         </button>
         <button class="dock-btn" onclick="sendSystemAction('taskmgr')" title="Abrir Gerenciador de Tarefas">
           ⚡ <span class="dock-label">Tarefas</span>
+        </button>
+        <button class="dock-btn" onclick="sendSystemAction('win_r')" title="Executar (Win+R)">
+          🚀 <span class="dock-label">Win+R</span>
+        </button>
+        <button class="dock-btn" onclick="sendSystemAction('alt_tab')" title="Alternar Janelas (Alt+Tab)">
+          🗂️ <span class="dock-label">Alt+Tab</span>
         </button>
         <button class="dock-btn" onclick="sendSystemAction('desktop')" title="Mostrar Área de Trabalho (Win+D)">
           🪟 <span class="dock-label">Win+D</span>

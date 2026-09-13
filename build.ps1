@@ -1,6 +1,8 @@
 # Build Script for RemoteAccess Portable (Windows)
 param (
-    [string]$Mode = "release"
+    [string]$Mode = "release",
+    [switch]$Sign = $true,
+    [switch]$InstallRoot = $false
 )
 
 $env:Path = "C:\Program Files\Go\bin;$env:USERPROFILE\go\bin;" + $env:Path
@@ -18,11 +20,12 @@ if (Test-Path "$env:USERPROFILE\go\bin\go-winres.exe") {
 if ($Mode -eq "release") {
     # -H=windowsgui removes CMD console window
     # -s -w removes debug info and symbol table for smaller binary
-    Write-Host "Gerando executavel de producao otimizado (sem janela CMD)..." -ForegroundColor Yellow
-    go build -ldflags="-H=windowsgui -s -w" -o "RemoteAccess.exe" ./cmd/remoteaccess
+    # -trimpath strips absolute build paths to avoid heuristics detection
+    Write-Host "Gerando executavel de producao otimizado (sem janela CMD, -trimpath)..." -ForegroundColor Yellow
+    go build -trimpath -ldflags="-H=windowsgui -s -w" -o "RemoteAccess.exe" ./cmd/remoteaccess
 } else {
     Write-Host "Gerando executavel de desenvolvimento..." -ForegroundColor Yellow
-    go build -o "RemoteAccess.exe" ./cmd/remoteaccess
+    go build -trimpath -o "RemoteAccess.exe" ./cmd/remoteaccess
 }
 
 if ($LASTEXITCODE -eq 0) {
@@ -33,6 +36,16 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host " [TAMANHO] $sizeMB MB" -ForegroundColor Green
     Write-Host " [MODO] Janela Nativa GUI (Sem CMD)" -ForegroundColor Green
     Write-Host "=============================================" -ForegroundColor Green
+
+    if ($Sign) {
+        if (Test-Path "scripts/sign.ps1") {
+            if ($InstallRoot) {
+                & ./scripts/sign.ps1 -FilePath "RemoteAccess.exe" -InstallRoot
+            } else {
+                & ./scripts/sign.ps1 -FilePath "RemoteAccess.exe"
+            }
+        }
+    }
 } else {
     Write-Host "[ERRO] Falha na compilacao." -ForegroundColor Red
 }

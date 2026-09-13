@@ -22,7 +22,10 @@ var defaultICEServers = []pion.ICEServer{
 			"stun:stun.l.google.com:19302",
 			"stun:stun1.l.google.com:19302",
 			"stun:stun2.l.google.com:19302",
+			"stun:stun3.l.google.com:19302",
+			"stun:stun4.l.google.com:19302",
 			"stun:stun.cloudflare.com:3478",
+			"stun:global.stun.twilio.com:3478",
 		},
 	},
 }
@@ -32,7 +35,7 @@ type HostSession struct {
 	peerConn     *pion.PeerConnection
 	inputChannel *pion.DataChannel
 	videoChannel *pion.DataChannel
-	capturer     *capture.ScreenCapturer
+	capturer     *capture.DXGICapturer
 	ctx          context.Context
 	cancel       context.CancelFunc
 	running      int32
@@ -47,7 +50,7 @@ type HostSession struct {
 }
 
 func NewHostSession(clientID string, fps int, quality int, sendSignal func(protocol.SignalingMessage)) (*HostSession, error) {
-	capturer, err := capture.NewScreenCapturer(0)
+	capturer, err := capture.NewFastCapturer(0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init screen capture: %w", err)
 	}
@@ -197,12 +200,24 @@ func (h *HostSession) HandleControlData(data []byte) {
 		}
 	case protocol.TypeSysCommand:
 		switch ctrl.Command {
-		case "lock":
+		case "lock", "win_l":
 			input.LockWorkstation()
 		case "taskmgr":
 			input.OpenTaskManager()
-		case "desktop":
+		case "desktop", "win_d":
 			input.ShowDesktop()
+		case "run", "win_r":
+			_ = input.KeyDown("Meta", "MetaLeft", 91)
+			_ = input.KeyDown("r", "KeyR", 82)
+			time.Sleep(50 * time.Millisecond)
+			_ = input.KeyUp("r", "KeyR", 82)
+			_ = input.KeyUp("Meta", "MetaLeft", 91)
+		case "alt_tab":
+			_ = input.KeyDown("Alt", "AltLeft", 18)
+			_ = input.KeyDown("Tab", "Tab", 9)
+			time.Sleep(50 * time.Millisecond)
+			_ = input.KeyUp("Tab", "Tab", 9)
+			_ = input.KeyUp("Alt", "AltLeft", 18)
 		case "block_input":
 			_ = input.BlockLocalInput(ctrl.Block)
 		}

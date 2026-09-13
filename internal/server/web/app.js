@@ -2,6 +2,7 @@
 
 let myHostInfo = {
   id: '',
+  alias: '',
   pwd: '',
   rawPwd: '',
   autoStart: false,
@@ -64,12 +65,16 @@ async function fetchHostInfo() {
     const res = await fetch('/api/host-info');
     const data = await res.json();
     myHostInfo.id = data.id;
+    myHostInfo.alias = data.alias || 'Meu PC';
     myHostInfo.rawPwd = data.password;
     myHostInfo.autoStart = data.auto_start;
     myHostInfo.signalingURL = data.signaling_url || '';
     myHostInfo.cloudStatus = data.cloud_status || 'local';
     
     document.getElementById('my-id').innerText = formatID(data.id);
+    const aliasEl = document.getElementById('my-alias');
+    if (aliasEl) aliasEl.innerText = myHostInfo.alias;
+    
     document.getElementById('autostart-toggle').checked = !!data.auto_start;
     const saveLogEl = document.getElementById('savelog-toggle');
     if (saveLogEl) saveLogEl.checked = !!data.save_log_file;
@@ -77,6 +82,29 @@ async function fetchHostInfo() {
     updateNetworkBadge(data.cloud_status, data.signaling_url);
   } catch (err) {
     console.error('Failed to fetch host info:', err);
+  }
+}
+
+async function openCustomAliasModal() {
+  const current = myHostInfo.alias || '';
+  const newAlias = prompt('Digite o novo apelido/nome de identificação para este computador:', current);
+  if (!newAlias || newAlias.trim() === '') return;
+
+  try {
+    const res = await fetch('/api/set-alias', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ alias: newAlias.trim() })
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      myHostInfo.alias = data.alias;
+      const aliasEl = document.getElementById('my-alias');
+      if (aliasEl) aliasEl.innerText = data.alias;
+      alert('Apelido do computador atualizado com sucesso!');
+    }
+  } catch (err) {
+    alert('Erro ao salvar novo apelido.');
   }
 }
 
@@ -113,6 +141,10 @@ function sendSystemAction(action) {
       sendControl({ t: 'ku', k: 'Alt', c: 'AltLeft', kc: 18 });
       sendControl({ t: 'ku', k: 'Control', c: 'ControlLeft', kc: 17 });
     }, 120);
+  } else if (action === 'win_r') {
+    sendControl({ t: 'sys_cmd', cmd: 'win_r' });
+  } else if (action === 'alt_tab') {
+    sendControl({ t: 'sys_cmd', cmd: 'alt_tab' });
   } else {
     sendControl({ t: 'sys_cmd', cmd: action });
   }
@@ -508,7 +540,11 @@ async function connectToRemote(e) {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
-      { urls: 'stun:stun.cloudflare.com:3478' }
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' },
+      { urls: 'stun:stun.cloudflare.com:3478' },
+      { urls: 'stun:global.stun.twilio.com:3478' }
     ]
   };
 
@@ -872,10 +908,24 @@ function loadRecentConnections() {
   }
 
   container.innerHTML = '';
-  list.forEach((item) => {
+  list.forEach((item, idx) => {
     const chip = document.createElement('div');
     chip.className = 'recent-chip';
-    chip.innerHTML = `💻 <strong>${formatID(item.id)}</strong> <span style="font-size: 0.75rem; background: rgba(59,130,246,0.3); padding: 0.15rem 0.4rem; border-radius: 4px; margin-left: 0.3rem;">⚡ Conectar</span>`;
+    const label = item.alias ? `${item.alias} (${formatID(item.id)})` : formatID(item.id);
+    chip.innerHTML = `💻 <strong>${label}</strong> <span style="font-size: 0.75rem; background: rgba(59,130,246,0.3); padding: 0.15rem 0.4rem; border-radius: 4px; margin-left: 0.3rem;">⚡ Conectar</span> <span class="btn-remove-recent" title="Remover" style="margin-left: 0.4rem; opacity: 0.6; cursor: pointer;">✕</span>`;
+    
+    chip.querySelector('strong').onclick = (e) => {
+      e.stopPropagation();
+      document.getElementById('target-id').value = formatID(item.id);
+      document.getElementById('target-pwd').value = item.password || '';
+      connectToRemote();
+    };
+
+    chip.querySelector('.btn-remove-recent').onclick = (e) => {
+      e.stopPropagation();
+      removeRecentConnection(idx);
+    };
+
     chip.onclick = () => {
       document.getElementById('target-id').value = formatID(item.id);
       document.getElementById('target-pwd').value = item.password || '';
@@ -885,9 +935,16 @@ function loadRecentConnections() {
   });
 }
 
-function saveRecentConnection(id, password) {
+function removeRecentConnection(idx) {
   let list = JSON.parse(localStorage.getItem('ra_saved_devices') || '[]');
-  list = [{ id: id, password: password }, ...list.filter((x) => x.id !== id)].slice(0, 5);
+  list.splice(idx, 1);
+  localStorage.setItem('ra_saved_devices', JSON.stringify(list));
+  loadRecentConnections();
+}
+
+function saveRecentConnection(id, password, alias) {
+  let list = JSON.parse(localStorage.getItem('ra_saved_devices') || '[]');
+  list = [{ id: id, password: password, alias: alias || '' }, ...list.filter((x) => x.id !== id)].slice(0, 6);
   localStorage.setItem('ra_saved_devices', JSON.stringify(list));
   loadRecentConnections();
 }
