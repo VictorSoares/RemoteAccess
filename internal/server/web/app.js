@@ -1478,6 +1478,88 @@ function saveRecentConnection(id, password, alias, mac) {
   loadRecentConnections();
 }
 
+async function openClipboardModal() {
+  const text = await showModalPrompt(
+    'Colar Texto Remoto',
+    'Digite ou cole o texto que deseja injetar diretamente no computador remoto:',
+    '',
+    '📋',
+    'Colar Texto',
+    'Cancelar'
+  );
+  if (text) {
+    sendControl({ t: 'clip', text: text });
+    await showModalAlert('Texto Injetado', 'Texto enviado e colado com sucesso no computador remoto!', '✅');
+  }
+}
+
+function triggerFileUpload() {
+  const input = document.getElementById('viewer-file-input');
+  if (input) input.click();
+}
+
+async function handleViewerFileSelect(files) {
+  if (!files || files.length === 0) return;
+  for (const file of files) {
+    await sendFileInChunks(file);
+  }
+  const input = document.getElementById('viewer-file-input');
+  if (input) input.value = '';
+}
+
+async function sendFileInChunks(file) {
+  const chunkSize = 48 * 1024; // 48KB per chunk
+  const totalChunks = Math.ceil(file.size / chunkSize);
+
+  sendControl({ t: 'file_start', file_name: file.name, file_size: file.size });
+
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * chunkSize;
+    const end = Math.min(file.size, start + chunkSize);
+    const slice = file.slice(start, end);
+
+    const base64Chunk = await new Promise((resolve) => {
+      const r = new FileReader();
+      r.onload = () => {
+        const b64 = r.result.split(',')[1];
+        resolve(b64);
+      };
+      r.readAsDataURL(slice);
+    });
+
+    sendControl({
+      t: 'file_chunk',
+      file_name: file.name,
+      chunk: base64Chunk,
+      seq: i + 1
+    });
+
+    await new Promise(r => setTimeout(r, 10));
+  }
+
+  sendControl({ t: 'file_end', file_name: file.name });
+  await showModalAlert('Arquivo Enviado', `Arquivo "${file.name}" transmitido com sucesso para a pasta Downloads\\RemoteAccess_Transfers do computador remoto!`, '📁');
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  const cWrapper = document.getElementById('canvas-wrapper');
+  if (cWrapper) {
+    cWrapper.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    cWrapper.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        for (const file of e.dataTransfer.files) {
+          await sendFileInChunks(file);
+        }
+      }
+    });
+  }
+});
+
 window.addEventListener('beforeunload', () => {
   try {
     navigator.sendBeacon('/api/app-close');

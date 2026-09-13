@@ -52,6 +52,9 @@ const (
 	TypeAuth          = "auth"
 	TypeAuthOK        = "auth_ok"
 	TypeAuthFail      = "auth_fail"
+	TypeFileStart     = "file_start"
+	TypeFileChunk     = "file_chunk"
+	TypeFileEnd       = "file_end"
 )
 
 // ControlMessage represents mouse, keyboard, monitor, clipboard, chat or system action command
@@ -73,4 +76,8 @@ type ControlMessage struct {
 	Monitor  int     `json:"mon,omitempty"`
 	Sender   string  `json:"sender,omitempty"`
 	Password string  `json:"pwd,omitempty"`
+	FileName string  `json:"file_name,omitempty"`
+	FileSize int64   `json:"file_size,omitempty"`
+	Chunk    string  `json:"chunk,omitempty"`
+	Seq      int     `json:"seq,omitempty"`
 }

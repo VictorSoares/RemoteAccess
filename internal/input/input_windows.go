@@ -3,6 +3,8 @@
 package input
 
 import (
+	"encoding/base64"
+	"fmt"
 	"image"
 	"os/exec"
 	"strings"
@@ -555,4 +557,26 @@ func resolveVK(key, code string, keyCode int) uint16 {
 		}
 	}
 	return 0
+}
+
+// SetClipboardTextAndPaste writes text into the Windows clipboard and synthesizes Ctrl+V to paste into active window
+func SetClipboardTextAndPaste(text string) error {
+	if text == "" {
+		return nil
+	}
+	go func() {
+		b64 := base64.StdEncoding.EncodeToString([]byte(text))
+		script := fmt.Sprintf(`[System.Windows.Forms.Clipboard]::SetText([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('%s')))`, b64)
+		cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Add-Type -AssemblyName System.Windows.Forms; "+script)
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
+		_ = cmd.Run()
+
+		time.Sleep(50 * time.Millisecond)
+		procKeybdEvent.Call(0x11, 0, 0, remoteAccessMagicExtraInfo) // Ctrl down
+		procKeybdEvent.Call(0x56, 0, 0, remoteAccessMagicExtraInfo) // 'V' down
+		time.Sleep(30 * time.Millisecond)
+		procKeybdEvent.Call(0x56, 0, keyeventfKeyup, remoteAccessMagicExtraInfo) // 'V' up
+		procKeybdEvent.Call(0x11, 0, keyeventfKeyup, remoteAccessMagicExtraInfo) // Ctrl up
+	}()
+	return nil
 }

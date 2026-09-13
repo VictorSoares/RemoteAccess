@@ -171,7 +171,7 @@
               <span id="sys-monitors" class="pill-val">1 Monitor</span>
             </div>
             <div class="info-pill">
-              <span class="pill-label">🪟 Sistema:</span>
+              <span class="pill-label">💻 Sistema:</span>
               <span id="sys-os" class="pill-val">Windows</span>
             </div>
             <div class="info-pill" title="Endereço MAC da placa de rede física (utilizado para Wake-on-LAN)">
@@ -331,7 +331,7 @@
           ⚡ <span class="dock-label">Tarefas</span>
         </button>
         <button class="dock-btn" onclick="sendSystemAction('desktop')" title="Mostrar Área de Trabalho (Win+D)">
-          🪟 <span class="dock-label">Win+D</span>
+          ❖ <span class="dock-label">Win+D</span>
         </button>
         <button class="dock-btn" id="btn-block-input" onclick="toggleBlockInput()" title="Bloquear Mouse e Teclado Físico do Cliente Acessado">
           🚫 <span class="dock-label">Bloquear Entrada</span>
@@ -339,6 +339,10 @@
         <button class="dock-btn" onclick="openClipboardModal()" title="Colar Texto Remoto">
           📋 <span class="dock-label">Colar</span>
         </button>
+        <button class="dock-btn" onclick="triggerFileUpload()" title="Enviar/Colar Arquivo para o Computador Remoto">
+          📁 <span class="dock-label">Arquivo</span>
+        </button>
+        <input type="file" id="viewer-file-input" style="display: none;" multiple onchange="handleViewerFileSelect(this.files)">
         <button class="dock-btn" onclick="toggleChatDrawer()" title="Chat com o Cliente">
           💬 <span class="dock-label">Chat</span>
         </button>

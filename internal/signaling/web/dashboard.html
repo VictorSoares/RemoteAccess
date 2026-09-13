@@ -862,7 +862,10 @@
       <!-- Quick Actions -->
       <button class="btn-action" onclick="sendViewerSys('cad')" title="Enviar Ctrl+Alt+Del" style="background: rgba(255,255,255,0.08); color: #fff;">⌨️ CAD</button>
       <button class="btn-action" onclick="sendViewerSys('taskmgr')" title="Abrir Gerenciador de Tarefas" style="background: rgba(255,255,255,0.08); color: #fff;">⚡ Tarefas</button>
-      <button class="btn-action" onclick="sendViewerSys('desktop')" title="Mostrar Área de Trabalho" style="background: rgba(255,255,255,0.08); color: #fff;">🪟 Win+D</button>
+      <button class="btn-action" onclick="sendViewerSys('desktop')" title="Mostrar Área de Trabalho" style="background: rgba(255,255,255,0.08); color: #fff;">❖ Win+D</button>
+      <button class="btn-action" onclick="openWebClipboardModal()" title="Colar Texto Remoto" style="background: rgba(255,255,255,0.08); color: #fff;">📋 Colar</button>
+      <button class="btn-action" onclick="triggerWebFileUpload()" title="Enviar/Colar Arquivo" style="background: rgba(255,255,255,0.08); color: #fff;">📁 Arquivo</button>
+      <input type="file" id="web-viewer-file-input" style="display: none;" multiple onchange="handleWebFileSelect(this.files)">
       <button class="btn-action" onclick="toggleViewerChat()" title="Bate-Papo" style="background: rgba(255,255,255,0.08); color: #fff;">💬 Chat <span id="viewer-chat-badge" class="chat-badge" style="display: none;">0</span></button>
       <button class="btn-action" onclick="toggleViewerFullscreen()" title="Alternar Tela Cheia" style="background: rgba(255,255,255,0.08); color: #fff;">⛶ Tela Cheia</button>
       <button class="btn-action btn-kill" onclick="closeWebViewer()" title="Desconectar e Sair">✕ Sair</button>
@@ -1501,6 +1504,69 @@
       sendViewerCtrl({ t: 'sys_cmd', cmd: cmd });
     }
 
+    async function openWebClipboardModal() {
+      const text = await showModalPrompt(
+        'Colar Texto Remoto',
+        'Digite ou cole o texto que deseja injetar diretamente no computador remoto:',
+        '',
+        '📋',
+        'Colar Texto',
+        'Cancelar'
+      );
+      if (text) {
+        sendViewerCtrl({ t: 'clip', text: text });
+        await showModalAlert('Texto Injetado', 'Texto enviado e colado com sucesso no computador remoto!', '✅');
+      }
+    }
+
+    function triggerWebFileUpload() {
+      const input = document.getElementById('web-viewer-file-input');
+      if (input) input.click();
+    }
+
+    async function handleWebFileSelect(files) {
+      if (!files || files.length === 0) return;
+      for (const file of files) {
+        await sendWebFileInChunks(file);
+      }
+      const input = document.getElementById('web-viewer-file-input');
+      if (input) input.value = '';
+    }
+
+    async function sendWebFileInChunks(file) {
+      const chunkSize = 48 * 1024; // 48KB
+      const totalChunks = Math.ceil(file.size / chunkSize);
+
+      sendViewerCtrl({ t: 'file_start', file_name: file.name, file_size: file.size });
+
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * chunkSize;
+        const end = Math.min(file.size, start + chunkSize);
+        const slice = file.slice(start, end);
+
+        const base64Chunk = await new Promise((resolve) => {
+          const r = new FileReader();
+          r.onload = () => {
+            const b64 = r.result.split(',')[1];
+            resolve(b64);
+          };
+          r.readAsDataURL(slice);
+        });
+
+        sendViewerCtrl({
+          t: 'file_chunk',
+          file_name: file.name,
+          chunk: base64Chunk,
+          seq: i + 1
+        });
+
+        await new Promise(r => setTimeout(r, 10));
+      }
+
+      sendViewerCtrl({ t: 'file_end', file_name: file.name });
+      await showModalAlert('Arquivo Enviado', `Arquivo "${file.name}" transmitido com sucesso para a pasta Downloads\\RemoteAccess_Transfers do computador remoto!`, '📁');
+    }
+
     function handleWebViewerPowerDropdown(action) {
       const select = document.getElementById('web-viewer-power-select');
       if (select) select.value = '';
@@ -1615,6 +1681,20 @@
     }
 
     vCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    vCanvas.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    vCanvas.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!viewerConnected) return;
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        for (const file of e.dataTransfer.files) {
+          await sendWebFileInChunks(file);
+        }
+      }
+    });
     vCanvas.addEventListener('mousemove', (e) => {
       if (!viewerConnected) return;
       const c = getVCoords(e);

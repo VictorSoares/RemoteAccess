@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,6 +46,7 @@ type HostSession struct {
 	ClientID     string
 	ClientAlias  string
 	ConnectedAt  time.Time
+	activeFiles  map[string]*os.File
 	OnStatus     func(status string, msg string)
 	SendSignal   func(msg protocol.SignalingMessage)
 	OnRelayFrame func(jpegBase64 string)
@@ -75,6 +78,7 @@ func NewHostSession(clientID string, clientAlias string, fps int, quality int, s
 		Quality:     quality,
 		ctx:         ctx,
 		cancel:      cancel,
+		activeFiles: make(map[string]*os.File),
 		SendSignal:  sendSignal,
 	}, nil
 }
@@ -239,6 +243,58 @@ func (h *HostSession) HandleControlData(data []byte) {
 		case "suspend", "sleep":
 			input.SuspendMachine()
 		}
+	case protocol.TypeClipboard:
+		if ctrl.Text != "" {
+			_ = input.SetClipboardTextAndPaste(ctrl.Text)
+		}
+	case protocol.TypeFileStart:
+		if ctrl.FileName != "" {
+			cleanName := filepath.Base(ctrl.FileName)
+			userProfile := os.Getenv("USERPROFILE")
+			if userProfile == "" {
+				userProfile = "."
+			}
+			destDir := filepath.Join(userProfile, "Downloads", "RemoteAccess_Transfers")
+			_ = os.MkdirAll(destDir, 0755)
+			destPath := filepath.Join(destDir, cleanName)
+
+			f, err := os.Create(destPath)
+			if err == nil {
+				h.mu.Lock()
+				if oldF, exists := h.activeFiles[cleanName]; exists {
+					_ = oldF.Close()
+				}
+				h.activeFiles[cleanName] = f
+				h.mu.Unlock()
+			}
+		}
+	case protocol.TypeFileChunk:
+		if ctrl.FileName != "" && ctrl.Chunk != "" {
+			cleanName := filepath.Base(ctrl.FileName)
+			h.mu.Lock()
+			f, exists := h.activeFiles[cleanName]
+			h.mu.Unlock()
+			if exists && f != nil {
+				data, err := base64.StdEncoding.DecodeString(ctrl.Chunk)
+				if err == nil {
+					_, _ = f.Write(data)
+				}
+			}
+		}
+	case protocol.TypeFileEnd:
+		if ctrl.FileName != "" {
+			cleanName := filepath.Base(ctrl.FileName)
+			h.mu.Lock()
+			f, exists := h.activeFiles[cleanName]
+			delete(h.activeFiles, cleanName)
+			h.mu.Unlock()
+			if exists && f != nil {
+				_ = f.Close()
+				if h.OnChat != nil {
+					h.OnChat("Sistema", fmt.Sprintf("📁 Arquivo recebido: %s (Salvo em Downloads\\RemoteAccess_Transfers)", cleanName))
+				}
+			}
+		}
 	case protocol.TypeChat:
 		if h.OnChat != nil {
 			h.OnChat(h.ClientID, ctrl.Text)
@@ -326,6 +382,12 @@ func (h *HostSession) Close() {
 	_ = input.BlockLocalInput(false)
 	h.cancel()
 	h.mu.Lock()
+	for _, f := range h.activeFiles {
+		if f != nil {
+			_ = f.Close()
+		}
+	}
+	h.activeFiles = make(map[string]*os.File)
 	if h.peerConn != nil {
 		_ = h.peerConn.Close()
 		h.peerConn = nil
