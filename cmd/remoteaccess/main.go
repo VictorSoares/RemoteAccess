@@ -17,6 +17,7 @@ import (
 	"remoteaccess/internal/config"
 	"remoteaccess/internal/logger"
 	"remoteaccess/internal/server"
+	"remoteaccess/internal/tray"
 )
 
 const version = "1.2.0"
@@ -24,19 +25,41 @@ const version = "1.2.0"
 var (
 	kernel32        = syscall.NewLazyDLL("kernel32.dll")
 	procCreateMutex = kernel32.NewProc("CreateMutexW")
+	procCloseHandle = kernel32.NewProc("CloseHandle")
+	appMutex        uintptr
 )
 
-func acquireSingleInstanceLock() uintptr {
+func acquireSingleInstanceLock(maxWait time.Duration) bool {
 	if runtime.GOOS != "windows" {
-		return 0
+		return true
 	}
 	name, _ := syscall.UTF16PtrFromString("Local\\RemoteAccess_SingleInstance_Mutex")
-	hMutex, _, _ := procCreateMutex.Call(0, 1, uintptr(unsafe.Pointer(name)))
-	if hMutex != 0 && syscall.GetLastError() == syscall.ERROR_ALREADY_EXISTS {
-		log.Println("[Aviso] Outra instância do RemoteAccess já está em execução.")
-		os.Exit(0)
+	deadline := time.Now().Add(maxWait)
+	for {
+		hMutex, _, _ := procCreateMutex.Call(0, 1, uintptr(unsafe.Pointer(name)))
+		if hMutex != 0 && syscall.GetLastError() != syscall.ERROR_ALREADY_EXISTS {
+			appMutex = hMutex
+			return true
+		}
+		if time.Now().After(deadline) {
+			if hMutex != 0 {
+				procCloseHandle.Call(hMutex)
+			}
+			return false
+		}
+		time.Sleep(150 * time.Millisecond)
 	}
-	return hMutex
+}
+
+func findRunningLocalPort() int {
+	for port := 8080; port < 8095; port++ {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 80*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			return port
+		}
+	}
+	return 8080
 }
 
 // runNativeAppWindow opens the standalone desktop app window (Edge App mode or browser fallback)
@@ -105,6 +128,7 @@ func main() {
 	defaultPwd := flag.String("password", "", "Definir senha padrao")
 	flag.Parse()
 
+	// 1. If running as installer
 	if *installFlag {
 		cfg := config.LoadConfig()
 		if err := cfg.InstallAsAdmin(); err != nil {
@@ -122,6 +146,7 @@ func main() {
 		os.Exit(0)
 	}
 
+	// 2. If running as elevate request
 	if *elevateFlag {
 		if !config.IsAdmin() {
 			_ = config.ElevateSelf("")
@@ -129,7 +154,20 @@ func main() {
 		}
 	}
 
-	_ = acquireSingleInstanceLock()
+	// 3. Acquire single-instance lock with retry for smooth transitions during elevation
+	maxWait := 300 * time.Millisecond
+	if *elevateFlag || config.IsAdmin() {
+		maxWait = 3 * time.Second
+	}
+
+	if !acquireSingleInstanceLock(maxWait) {
+		log.Println("[Aviso] Outra instância do RemoteAccess já está em execução.")
+		if !*noBrowser {
+			runningPort := findRunningLocalPort()
+			runNativeAppWindow(fmt.Sprintf("http://127.0.0.1:%d", runningPort))
+		}
+		os.Exit(0)
+	}
 
 	cfg := config.LoadConfig()
 
@@ -177,6 +215,20 @@ func main() {
 		time.Sleep(30 * time.Millisecond)
 	}
 
+	// Initialize Windows System Tray Icon with native context menu
+	trayMgr := tray.StartTray(cfg.Data.ID, config.IsAdmin(), func() {
+		runNativeAppWindow(url)
+	}, func() {
+		srv.Shutdown()
+		_ = config.ElevateSelf("")
+		os.Exit(0)
+	}, func() {
+		srv.Shutdown()
+		time.Sleep(100 * time.Millisecond)
+		os.Exit(0)
+	})
+	defer trayMgr.Remove()
+
 	// Launch as Standalone Desktop Window (unless in silent autostart background mode)
 	if !*noBrowser {
 		go func() {
@@ -191,4 +243,3 @@ func main() {
 	time.Sleep(200 * time.Millisecond)
 	os.Exit(0)
 }
-

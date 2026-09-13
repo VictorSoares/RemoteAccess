@@ -1138,15 +1138,13 @@ function renderRawBlob(blobData) {
 function sendControl(ctrlObj) {
   if (!isConnected) return;
 
-  // Send over WebRTC DataChannel if open
+  // Send over WebRTC DataChannel if open (Direct, 0 Server Load, Ultra-low Latency)
   if (inputChannel && inputChannel.readyState === 'open') {
     inputChannel.send(JSON.stringify(ctrlObj));
-    if (ctrlObj.t !== 'chat' && ctrlObj.t !== 'ping') {
-      return;
-    }
+    return;
   }
 
-  // Always send chat, config, and relay controls over WebSocket as guaranteed channel
+  // Fallback: Send over WebSocket Relay if WebRTC DataChannel is not open
   if (signalingWS && signalingWS.readyState === WebSocket.OPEN && currentTargetId) {
     signalingWS.send(JSON.stringify({
       action: 'data',

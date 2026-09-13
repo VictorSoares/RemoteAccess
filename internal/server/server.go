@@ -307,26 +307,36 @@ func (s *LocalServer) handleElevate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := config.ElevateSelf("")
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Erro ao solicitar elevação: %v", err), http.StatusInternalServerError)
-		return
-	}
-
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  "ok",
-		"message": "Solicitação de elevação UAC disparada com sucesso.",
+		"message": "Solicitando elevação de privilégios UAC...",
 	})
 
 	go func() {
-		time.Sleep(1500 * time.Millisecond)
+		time.Sleep(300 * time.Millisecond)
 		s.Shutdown()
+		_ = config.ElevateSelf("")
 		os.Exit(0)
 	}()
 }
 
 func (s *LocalServer) handleInstall(w http.ResponseWriter, r *http.Request) {
+	if !config.IsAdmin() {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "ok",
+			"message": "Solicitando privilégios de Administrador para instalar...",
+		})
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			s.Shutdown()
+			_ = config.ElevateSelf("-install")
+			os.Exit(0)
+		}()
+		return
+	}
+
 	err := s.Config.InstallAsAdmin()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Erro ao instalar: %v", err), http.StatusInternalServerError)

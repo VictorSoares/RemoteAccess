@@ -383,13 +383,11 @@ func (h *HostSession) StartStreaming() {
 				vChan := h.videoChannel
 				h.mu.Unlock()
 
-				// 1. If WebRTC DataChannel is connected and open, send via P2P
+				// 1. If WebRTC DataChannel is connected and open, send via Direct P2P (Ultra-low latency, zero server bandwidth)
 				if vChan != nil && vChan.ReadyState() == pion.DataChannelStateOpen {
 					_ = vChan.Send(frameData)
-				}
-
-				// 2. ALWAYS also send frame via WebSocket Relay to guarantee instant visual delivery on any firewall!
-				if h.OnRelayFrame != nil {
+				} else if h.OnRelayFrame != nil {
+					// 2. Fallback to WebSocket Relay only when WebRTC P2P DataChannel is not yet connected
 					b64 := base64.StdEncoding.EncodeToString(frameData)
 					h.OnRelayFrame(b64)
 				}
