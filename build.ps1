@@ -13,6 +13,9 @@ Write-Host "=============================================" -ForegroundColor Cyan
 
 # Generate embedded Windows resources (Icon, Version, DPI Manifest)
 if (Test-Path "$env:USERPROFILE\go\bin\go-winres.exe") {
+    if (-not (Test-Path "winres/icon_16.png") -and (Test-Path "scripts/gen_icons.ps1")) {
+        & powershell -ExecutionPolicy Bypass -File ./scripts/gen_icons.ps1
+    }
     Write-Host "Embutindo icone de alta definicao e manifesto Windows..." -ForegroundColor DarkCyan
     & "$env:USERPROFILE\go\bin\go-winres.exe" make --in winres/winres.json --out ./cmd/remoteaccess/rsrc
 }
