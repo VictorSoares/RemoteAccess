@@ -16,7 +16,7 @@
         },
         "description": "RemoteAccess Portable Desktop Engine",
         "minimum-os": "win7",
-        "execution-level": "require administrator",
+        "execution-level": "as invoker",
         "ui-access": false,
         "auto-elevate": false,
         "dpi-awareness": "per monitor v2",

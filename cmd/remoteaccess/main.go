@@ -30,7 +30,7 @@ func acquireSingleInstanceLock() uintptr {
 	if runtime.GOOS != "windows" {
 		return 0
 	}
-	name, _ := syscall.UTF16PtrFromString("Global\\RemoteAccess_SingleInstance_Mutex")
+	name, _ := syscall.UTF16PtrFromString("Local\\RemoteAccess_SingleInstance_Mutex")
 	hMutex, _, _ := procCreateMutex.Call(0, 1, uintptr(unsafe.Pointer(name)))
 	if hMutex != 0 && syscall.GetLastError() == syscall.ERROR_ALREADY_EXISTS {
 		log.Println("[Aviso] Outra instância do RemoteAccess já está em execução.")
@@ -126,7 +126,7 @@ func main() {
 	port := findAvailablePort(*portFlag)
 	srv := server.NewLocalServer(cfg)
 
-	url := fmt.Sprintf("http://localhost:%d", port)
+	url := fmt.Sprintf("http://127.0.0.1:%d", port)
 
 	log.Printf("[Início] RemoteAccess v%s iniciado na porta :%d", version, port)
 	log.Printf("[Início] Seu ID: %s | AutoStart: %v", cfg.Data.ID, cfg.Data.AutoStart)
