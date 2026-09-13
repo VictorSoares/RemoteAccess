@@ -255,6 +255,40 @@
       gap: 0.35rem;
       transition: all 0.2s;
     }
+    select, .dock-select {
+      appearance: none;
+      -webkit-appearance: none;
+      -moz-appearance: none;
+      background-color: rgba(15, 23, 42, 0.85);
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%2394a3b8' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14L2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #f1f5f9;
+      padding: 0.35rem 1.6rem 0.35rem 0.65rem;
+      border-radius: 8px;
+      font-size: 0.76rem;
+      font-weight: 600;
+      cursor: pointer;
+      outline: none;
+      transition: all 0.2s ease;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+    }
+    select:hover, .dock-select:hover {
+      border-color: #38bdf8;
+      background-color: rgba(30, 41, 59, 0.95);
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+    }
+    select:focus, .dock-select:focus {
+      border-color: #38bdf8;
+      background-color: #0f172a;
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
+    }
+    select option, .dock-select option {
+      background-color: #0f172a;
+      color: #f8fafc;
+      padding: 8px 12px;
+    }
     .btn-connect-direct {
       background: linear-gradient(135deg, #10b981 0%, #059669 100%);
       color: white;
@@ -894,6 +928,8 @@
             let statusHtml = '<span style="color: #4ade80; font-weight: 700;">🟢 Disponível</span>';
             if (p.blocked) {
               statusHtml = '<span style="color: #f87171; font-weight: 700;">🚫 Bloqueado</span>';
+            } else if (p.status && p.status.includes('Em Sessão')) {
+              statusHtml = '<span style="color: #f87171; font-weight: 700;">🔴 ' + p.status + '</span>';
             } else if (p.active_target_id) {
               statusHtml = '<span style="color: #f87171; font-weight: 700;">🔴 Em Sessão com ' + p.active_target_id + '</span>';
             }

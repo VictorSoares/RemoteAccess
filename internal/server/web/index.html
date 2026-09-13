@@ -356,32 +356,42 @@
     <div id="canvas-wrapper">
       <canvas id="screen-canvas" tabindex="0"></canvas>
 
-      <!-- In-Session Floating Chat -->
-      <div id="chat-drawer" class="chat-drawer" style="display: none;">
-        <div class="chat-header">
-          <span class="chat-title">💬 Bate-Papo da Sessão</span>
-          <button class="btn-close-chat" onclick="toggleChatDrawer()">✕</button>
+        <!-- In-Session Floating Chat -->
+        <div id="chat-drawer" class="chat-drawer" style="display: none;">
+          <div class="chat-header">
+            <span class="chat-title">💬 Bate-Papo da Sessão</span>
+            <button class="btn-close-chat" onclick="toggleChatDrawer()">✕</button>
+          </div>
+          <div id="chat-messages" class="chat-body">
+            <div class="chat-intro">Sessão de chat conectada com a máquina remota</div>
+          </div>
+          <form onsubmit="sendChatMessage(event)" class="chat-footer">
+            <input type="text" id="chat-input" class="chat-input" placeholder="Digite uma mensagem..." required autocomplete="off">
+            <button type="submit" class="btn-send-chat">Enviar</button>
+          </form>
         </div>
-        <div id="chat-messages" class="chat-body">
-          <div class="chat-intro">Sessão de chat conectada com a máquina remota</div>
+
+        <!-- Floating In-Session Toast Notification for Viewer -->
+        <div id="chat-toast-popup" class="chat-toast-popup" style="display: none;" onclick="handleToastClick()">
+          <div class="chat-toast-icon">💬</div>
+          <div class="chat-toast-content">
+            <div id="chat-toast-title" class="chat-toast-title">Nova Mensagem</div>
+            <div id="chat-toast-text" class="chat-toast-text">...</div>
+          </div>
+          <button class="chat-toast-close" onclick="event.stopPropagation(); hideChatToast()">✕</button>
         </div>
-        <form onsubmit="sendChatMessage(event)" class="chat-footer">
-          <input type="text" id="chat-input" class="chat-input" placeholder="Digite uma mensagem..." required autocomplete="off">
-          <button type="submit" class="btn-send-chat">Enviar</button>
-        </form>
       </div>
     </div>
-  </div>
 
-  <!-- Floating In-Session Toast Notification -->
-  <div id="chat-toast-popup" class="chat-toast-popup" style="display: none;" onclick="handleToastClick()">
-    <div class="chat-toast-icon">💬</div>
-    <div class="chat-toast-content">
-      <div id="chat-toast-title" class="chat-toast-title">Nova Mensagem</div>
-      <div id="chat-toast-text" class="chat-toast-text">...</div>
+    <!-- Floating Toast Notification for Host View -->
+    <div id="host-toast-popup" class="chat-toast-popup" style="display: none;" onclick="handleHostToastClick()">
+      <div class="chat-toast-icon">💬</div>
+      <div class="chat-toast-content">
+        <div id="host-toast-title" class="chat-toast-title">Nova Mensagem do Operador</div>
+        <div id="host-toast-text" class="chat-toast-text">...</div>
+      </div>
+      <button class="chat-toast-close" onclick="event.stopPropagation(); hideHostToast()">✕</button>
     </div>
-    <button class="chat-toast-close" onclick="event.stopPropagation(); hideChatToast()">✕</button>
-  </div>
 
   <!-- Custom In-App Glassmorphic Dialog Modal (Alert, Confirm, Prompt) -->
   <div id="app-dialog-modal" class="modal-backdrop" style="display: none; z-index: 200000;">

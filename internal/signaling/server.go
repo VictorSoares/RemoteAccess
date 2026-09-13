@@ -290,6 +290,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 			if msg.Alias != "" {
 				peer.Alias = msg.Alias
 			}
+			peer.IsHost = false
 
 			peer.ActiveTargetID = msg.TargetID
 			targetPeer.ActiveTargetID = peer.ID
@@ -321,6 +322,16 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 		case protocol.ActionOffer, protocol.ActionAnswer, protocol.ActionCandidate, protocol.ActionData, protocol.ActionClose:
 			s.mu.RLock()
 			targetPeer, exists := s.peers[msg.TargetID]
+			if !exists {
+				// Try matching by cleaned ID
+				for _, p := range s.peers {
+					if cleanID(p.ID) == cleanID(msg.TargetID) {
+						targetPeer = p
+						exists = true
+						break
+					}
+				}
+			}
 			s.mu.RUnlock()
 
 			if exists {
@@ -418,8 +429,15 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 			status = "Bloqueado (Admin)"
 		} else if p.ActiveTargetID != "" {
 			partnerLabel := p.ActiveTargetID
-			if targetPeer, ok := s.peers[p.ActiveTargetID]; ok && targetPeer.Alias != "" {
-				partnerLabel = fmt.Sprintf("%s (%s)", targetPeer.Alias, targetPeer.ID)
+			for _, other := range s.peers {
+				if other.ID == p.ActiveTargetID || cleanID(other.ID) == cleanID(p.ActiveTargetID) {
+					if other.Alias != "" && other.Alias != "Não definido" {
+						partnerLabel = fmt.Sprintf("%s (%s)", other.Alias, formatID(other.ID))
+					} else {
+						partnerLabel = formatID(other.ID)
+					}
+					break
+				}
 			}
 			status = fmt.Sprintf("Em Sessão com %s", partnerLabel)
 			activeSessions++
@@ -626,6 +644,27 @@ func (s *Server) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(dashboardHTML)
+}
+
+func cleanID(id string) string {
+	var b strings.Builder
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func formatID(id string) string {
+	if id == "" {
+		return "--- ---"
+	}
+	clean := cleanID(id)
+	if len(clean) == 6 {
+		return clean[:3] + " " + clean[3:]
+	}
+	return id
 }
 
 

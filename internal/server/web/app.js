@@ -352,17 +352,24 @@ function playChatChime() {
 
 let toastTimer = null;
 function showChatToast(sender, text) {
-  const toast = document.getElementById('chat-toast-popup');
+  const isViewer = isConnected;
+  const toastId = isViewer ? 'chat-toast-popup' : 'host-toast-popup';
+  const toast = document.getElementById(toastId) || document.getElementById('chat-toast-popup');
   if (!toast) return;
-  document.getElementById('chat-toast-title').innerText = `💬 Mensagem de ${sender}`;
-  document.getElementById('chat-toast-text').innerText = text;
+
+  const titleEl = toast.querySelector('.chat-toast-title');
+  const textEl = toast.querySelector('.chat-toast-text');
+  if (titleEl) titleEl.innerText = `💬 Mensagem de ${sender}`;
+  if (textEl) textEl.innerText = text;
+
   toast.style.display = 'flex';
   playChatChime();
 
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
     hideChatToast();
-  }, 7000);
+    hideHostToast();
+  }, 8000);
 }
 
 function hideChatToast() {
@@ -370,17 +377,32 @@ function hideChatToast() {
   if (toast) toast.style.display = 'none';
 }
 
+function hideHostToast() {
+  const toast = document.getElementById('host-toast-popup');
+  if (toast) toast.style.display = 'none';
+}
+
 function handleToastClick() {
   hideChatToast();
-  if (isConnected) {
-    const drawer = document.getElementById('chat-drawer');
-    if (drawer) drawer.style.display = 'flex';
-  } else {
-    hostChatOpen = true;
-    const chatSec = document.getElementById('host-chat-container');
-    if (chatSec) chatSec.style.display = 'flex';
-    document.getElementById('host-chat-badge').style.display = 'none';
+  const drawer = document.getElementById('chat-drawer');
+  if (drawer) {
+    drawer.style.display = 'flex';
+    const input = document.getElementById('chat-input');
+    if (input) setTimeout(() => input.focus(), 60);
   }
+}
+
+function handleHostToastClick() {
+  hideHostToast();
+  hostChatOpen = true;
+  const chatSec = document.getElementById('host-chat-container');
+  if (chatSec) {
+    chatSec.style.display = 'flex';
+    const input = document.getElementById('host-chat-input');
+    if (input) setTimeout(() => input.focus(), 60);
+  }
+  const badge = document.getElementById('host-chat-badge');
+  if (badge) badge.style.display = 'none';
 }
 
 async function refreshHostChat() {
