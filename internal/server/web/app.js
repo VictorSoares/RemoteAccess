@@ -113,6 +113,26 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // Auto-hide top toolbar in viewer mode with top-edge detection
+  window.addEventListener('mousemove', (e) => {
+    if (!isConnected) return;
+    const dock = document.getElementById('viewer-toolbar');
+    if (!dock) return;
+    if (e.clientY <= 55) {
+      dock.classList.add('dock-visible');
+    } else if (e.clientY > 85 && !dock.matches(':hover') && !dock.matches(':focus-within')) {
+      dock.classList.remove('dock-visible');
+    }
+  });
+
+  const tabHandle = document.getElementById('viewer-tab-handle');
+  if (tabHandle) {
+    tabHandle.addEventListener('mouseenter', () => {
+      const dock = document.getElementById('viewer-toolbar');
+      if (dock) dock.classList.add('dock-visible');
+    });
+  }
+
   loadRecentConnections();
   await fetchHostInfo();
   await fetchSystemInfo();
@@ -125,7 +145,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     fetchHostInfo();
     fetchSessionStatus();
     refreshLogs();
-  }, 2000);
+  }, 1000);
 });
 
 function switchTab(tab) {
@@ -153,6 +173,22 @@ async function fetchHostInfo() {
     const aliasEl = document.getElementById('my-alias');
     if (aliasEl) aliasEl.innerText = myHostInfo.alias;
     
+    const adminBadge = document.getElementById('admin-privilege-badge');
+    const btnElevateLabel = document.getElementById('btn-elevate-label');
+    if (data.is_admin) {
+      if (adminBadge) {
+        adminBadge.className = 'badge-fixed badge-admin';
+        adminBadge.innerText = '🛡️ Administrador (Acesso Total UAC)';
+      }
+      if (btnElevateLabel) btnElevateLabel.innerText = 'Admin Ativo';
+    } else {
+      if (adminBadge) {
+        adminBadge.className = 'badge-fixed badge-user';
+        adminBadge.innerText = '🛡️ Usuário Padrão (Portátil)';
+      }
+      if (btnElevateLabel) btnElevateLabel.innerText = 'Modo Admin';
+    }
+
     document.getElementById('autostart-toggle').checked = !!data.auto_start;
     const saveLogEl = document.getElementById('savelog-toggle');
     if (saveLogEl) saveLogEl.checked = !!data.save_log_file;
@@ -160,6 +196,28 @@ async function fetchHostInfo() {
     updateNetworkBadge(data.cloud_status, data.signaling_url);
   } catch (err) {
     console.error('Failed to fetch host info:', err);
+  }
+}
+
+async function handleElevateOrInstall() {
+  const confirmed = await showModalConfirm(
+    'Executar como Administrador',
+    '🛡️ Deseja reiniciar o RemoteAccess com privilégios de Administrador?\n\n' +
+    'Isso permite que o operador remoto consiga controlar janelas elevadas do Windows (UAC, Gerenciador de Tarefas, Regedit e instaladores) sem bloqueio do mouse/teclado.',
+    '🛡️',
+    'Elevar para Admin',
+    'Cancelar'
+  );
+  if (confirmed) {
+    try {
+      const res = await fetch('/api/elevate', { method: 'POST' });
+      const data = await res.json();
+      if (data.status === 'ok') {
+        await showModalAlert('Elevação Solicitada', 'Confirme a janela do Controle de Conta de Usuário (UAC) na tela para reiniciar como Administrador.', '🚀');
+      }
+    } catch (e) {
+      await showModalAlert('Erro', 'Falha ao solicitar elevação de privilégios.', '❌');
+    }
   }
 }
 
@@ -312,7 +370,7 @@ function updateViewerMonitors(count) {
 }
 
 let hostChatOpen = false;
-let lastHostMsgCount = 0;
+let lastSeenHostMsgCount = 0;
 
 async function fetchSessionStatus() {
   try {
@@ -321,14 +379,28 @@ async function fetchSessionStatus() {
     const box = document.getElementById('active-session-box');
     if (data.active) {
       box.style.display = 'flex';
-      document.getElementById('host-session-client-id').innerText = data.client_id || 'Cliente';
+      const clientLabel = data.client_alias ? `${data.client_alias} (${formatID(data.client_id)})` : (data.client_id || 'Controlador');
+      document.getElementById('host-session-client-id').innerText = clientLabel;
       const m = Math.floor(data.duration / 60).toString().padStart(2, '0');
       const s = (data.duration % 60).toString().padStart(2, '0');
       document.getElementById('host-session-duration').innerText = `${m}:${s}`;
       await refreshHostChat();
     } else {
-      box.style.display = 'none';
-      lastHostMsgCount = 0;
+      if (box) box.style.display = 'none';
+      const chatSec = document.getElementById('host-chat-container');
+      if (chatSec) chatSec.style.display = 'none';
+      const badge = document.getElementById('host-chat-badge');
+      if (badge) {
+        badge.innerText = '0';
+        badge.style.display = 'none';
+      }
+      const chatMessages = document.getElementById('host-chat-messages');
+      if (chatMessages && lastSeenHostMsgCount > 0) {
+        chatMessages.innerHTML = '<div class="chat-intro">💬 Bate-papo em tempo real com o operador remoto.</div>';
+      }
+      hostChatOpen = false;
+      lastSeenHostMsgCount = 0;
+      hideHostToast();
     }
   } catch (err) {}
 }
@@ -402,20 +474,24 @@ function handleHostToastClick() {
     if (input) setTimeout(() => input.focus(), 60);
   }
   const badge = document.getElementById('host-chat-badge');
-  if (badge) badge.style.display = 'none';
+  if (badge) {
+    badge.innerText = '0';
+    badge.style.display = 'none';
+  }
 }
 
 async function refreshHostChat() {
   try {
     const res = await fetch('/api/chat-messages');
     const data = await res.json();
-    if (data.messages) {
-      const container = document.getElementById('host-chat-messages');
-      if (data.messages.length !== lastHostMsgCount) {
-        const isInitial = lastHostMsgCount === 0;
-        const previousCount = lastHostMsgCount;
-        lastHostMsgCount = data.messages.length;
+    if (!data.messages) return;
 
+    const container = document.getElementById('host-chat-messages');
+    if (data.messages.length !== lastSeenHostMsgCount) {
+      const prevCount = lastSeenHostMsgCount;
+      lastSeenHostMsgCount = data.messages.length;
+
+      if (container) {
         container.innerHTML = '';
         data.messages.forEach(msg => {
           const isMe = msg.sender.includes('Host') || msg.sender.includes('Você');
@@ -425,18 +501,19 @@ async function refreshHostChat() {
           container.appendChild(bubble);
         });
         container.scrollTop = container.scrollHeight;
+      }
 
-        if (!isInitial && data.messages.length > previousCount) {
-          const latestMsg = data.messages[data.messages.length - 1];
-          const isMe = latestMsg.sender.includes('Host') || latestMsg.sender.includes('Você');
-          if (!isMe) {
-            showChatToast(latestMsg.sender, latestMsg.text);
-            // Auto expand chat section so user sees it right away
-            hostChatOpen = true;
-            const chatSec = document.getElementById('host-chat-container');
-            if (chatSec) chatSec.style.display = 'flex';
-            document.getElementById('host-chat-badge').style.display = 'none';
+      const newSlice = data.messages.slice(prevCount);
+      for (const msg of newSlice) {
+        const isMe = msg.sender.includes('Host') || msg.sender.includes('Você');
+        if (!isMe) {
+          showChatToast(msg.sender, msg.text);
+          const badge = document.getElementById('host-chat-badge');
+          if (badge && !hostChatOpen) {
+            badge.innerText = parseInt(badge.innerText || '0') + 1;
+            badge.style.display = 'inline-flex';
           }
+          break;
         }
       }
     }
@@ -446,17 +523,24 @@ async function refreshHostChat() {
 function toggleHostChat() {
   hostChatOpen = !hostChatOpen;
   const chatSec = document.getElementById('host-chat-container');
-  chatSec.style.display = hostChatOpen ? 'flex' : 'none';
+  if (chatSec) chatSec.style.display = hostChatOpen ? 'flex' : 'none';
   if (hostChatOpen) {
-    document.getElementById('host-chat-badge').style.display = 'none';
+    const badge = document.getElementById('host-chat-badge');
+    if (badge) {
+      badge.innerText = '0';
+      badge.style.display = 'none';
+    }
     const container = document.getElementById('host-chat-messages');
-    container.scrollTop = container.scrollHeight;
+    if (container) container.scrollTop = container.scrollHeight;
+    const input = document.getElementById('host-chat-input');
+    if (input) setTimeout(() => input.focus(), 60);
   }
 }
 
 async function sendHostChatMessage(e) {
   if (e) e.preventDefault();
   const input = document.getElementById('host-chat-input');
+  if (!input) return;
   const text = input.value.trim();
   if (!text) return;
   input.value = '';
@@ -472,14 +556,48 @@ async function sendHostChatMessage(e) {
 }
 
 async function kickActiveSession() {
+  const confirmed = await showModalConfirm(
+    'Encerrar Acesso Remoto',
+    'Deseja realmente desconectar o operador remoto e encerrar a sessão imediatamente?',
+    '🛑',
+    'Encerrar Sessão',
+    'Cancelar'
+  );
+  if (!confirmed) return;
+
   try {
     await fetch('/api/kick-session', { method: 'POST' });
-    document.getElementById('active-session-box').style.display = 'none';
-  } catch (err) {}
+    const box = document.getElementById('active-session-box');
+    if (box) box.style.display = 'none';
+    const chatSec = document.getElementById('host-chat-container');
+    if (chatSec) chatSec.style.display = 'none';
+    const badge = document.getElementById('host-chat-badge');
+    if (badge) {
+      badge.innerText = '0';
+      badge.style.display = 'none';
+    }
+    const chatMessages = document.getElementById('host-chat-messages');
+    if (chatMessages) {
+      chatMessages.innerHTML = '<div class="chat-intro">💬 Bate-papo em tempo real com o operador remoto.</div>';
+    }
+    hostChatOpen = false;
+    lastSeenHostMsgCount = 0;
+    hideHostToast();
+    await showModalAlert('Sessão Encerrada', 'A sessão remota foi desconectada com sucesso.', '✅');
+  } catch (err) {
+    await showModalAlert('Erro', 'Falha ao encerrar a sessão remota.', '❌');
+  }
 }
 
-function sendSystemAction(action) {
-  sendControl({ t: 'sys_cmd', cmd: action });
+function handlePowerDropdown(action) {
+  const select = document.getElementById('viewer-power-select');
+  if (select) select.value = '';
+  if (!action) return;
+  if (action === 'lock') {
+    sendSystemAction('lock');
+  } else if (action === 'reboot' || action === 'shutdown' || action === 'suspend') {
+    sendPowerAction(action);
+  }
 }
 
 async function sendPowerAction(action) {
@@ -977,6 +1095,16 @@ function openViewer() {
   isConnected = true;
   viewerContainer.style.display = 'flex';
   resetConnectButton();
+  startPingLoop();
+  const dock = document.getElementById('viewer-toolbar');
+  if (dock) {
+    dock.classList.add('dock-visible');
+    setTimeout(() => {
+      if (dock && !dock.matches(':hover') && !dock.matches(':focus-within')) {
+        dock.classList.remove('dock-visible');
+      }
+    }, 3500);
+  }
 }
 
 function closeViewer() {

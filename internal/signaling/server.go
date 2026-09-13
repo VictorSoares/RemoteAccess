@@ -51,6 +51,7 @@ type SessionRecord struct {
 	HostID      string    `json:"host_id"`
 	HostAlias   string    `json:"host_alias"`
 	ClientID    string    `json:"client_id"`
+	ClientAlias string    `json:"client_alias"`
 	Status      string    `json:"status"` // "completed", "active", "rejected"
 }
 
@@ -89,6 +90,25 @@ func (s *Server) addHistory(rec SessionRecord) {
 	s.history = append([]SessionRecord{rec}, s.history...)
 	if len(s.history) > 500 {
 		s.history = s.history[:500]
+	}
+}
+
+func (s *Server) endHistorySession(hostID, clientID string) {
+	s.historyMu.Lock()
+	defer s.historyMu.Unlock()
+	cleanHost := cleanID(hostID)
+	cleanClient := cleanID(clientID)
+	now := time.Now()
+	for i := range s.history {
+		if s.history[i].Status == "active" {
+			hID := cleanID(s.history[i].HostID)
+			cID := cleanID(s.history[i].ClientID)
+			if hID == cleanHost || cID == cleanHost || hID == cleanClient || cID == cleanClient {
+				s.history[i].Status = "completed"
+				s.history[i].EndedAt = now
+				s.history[i].DurationSec = int(now.Sub(s.history[i].StartedAt).Seconds())
+			}
+		}
 	}
 }
 
@@ -161,12 +181,13 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 	defer func() {
 		s.mu.Lock()
+		activeTarget := peer.ActiveTargetID
 		delete(s.peers, peer.ID)
 		if peer.ID != peerID {
 			delete(s.peers, peerID)
 		}
-		if peer.ActiveTargetID != "" {
-			if targetPeer, ok := s.peers[peer.ActiveTargetID]; ok {
+		if activeTarget != "" {
+			if targetPeer, ok := s.peers[activeTarget]; ok {
 				targetPeer.ActiveTargetID = ""
 				targetPeer.mu.Lock()
 				_ = targetPeer.Conn.WriteJSON(protocol.SignalingMessage{
@@ -177,6 +198,9 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		s.mu.Unlock()
+		if activeTarget != "" {
+			s.endHistorySession(peer.ID, activeTarget)
+		}
 		if peer.IsHost {
 			s.addLog("Host desconectado: %s", peer.ID)
 		}
@@ -235,10 +259,11 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 		case protocol.ActionUnregister:
 			s.mu.Lock()
+			activeTarget := peer.ActiveTargetID
 			delete(s.peers, peer.ID)
 			delete(s.peers, msg.ID)
-			if peer.ActiveTargetID != "" {
-				if targetPeer, ok := s.peers[peer.ActiveTargetID]; ok {
+			if activeTarget != "" {
+				if targetPeer, ok := s.peers[activeTarget]; ok {
 					targetPeer.ActiveTargetID = ""
 					targetPeer.mu.Lock()
 					_ = targetPeer.Conn.WriteJSON(protocol.SignalingMessage{
@@ -249,6 +274,9 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			s.mu.Unlock()
+			if activeTarget != "" {
+				s.endHistorySession(peer.ID, activeTarget)
+			}
 			s.addLog("Host %s enviou aviso de desligamento (Desconectado)", msg.ID)
 			return
 
@@ -299,12 +327,13 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 			// Record in session history
 			s.addHistory(SessionRecord{
-				ID:        fmt.Sprintf("sess_%d", time.Now().UnixNano()),
-				StartedAt: time.Now(),
-				HostID:    targetPeer.ID,
-				HostAlias: targetPeer.Alias,
-				ClientID:  peer.ID,
-				Status:    "active",
+				ID:          fmt.Sprintf("sess_%d", time.Now().UnixNano()),
+				StartedAt:   time.Now(),
+				HostID:      targetPeer.ID,
+				HostAlias:   targetPeer.Alias,
+				ClientID:    peer.ID,
+				ClientAlias: peer.Alias,
+				Status:      "active",
 			})
 
 			targetPeer.mu.Lock()
@@ -342,6 +371,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 					s.addLog("Sessão finalizada entre %s e %s", peer.ID, msg.TargetID)
 					peer.ActiveTargetID = ""
 					targetPeer.ActiveTargetID = ""
+					s.endHistorySession(peer.ID, msg.TargetID)
 				}
 				targetPeer.mu.Lock()
 				_ = targetPeer.Conn.WriteJSON(msg)
@@ -517,8 +547,9 @@ func (s *Server) HandleBlockPeer(w http.ResponseWriter, r *http.Request) {
 	if exists {
 		peer.Blocked = req.Block
 		if req.Block && peer.ActiveTargetID != "" {
+			activeTarget := peer.ActiveTargetID
 			// Terminate active session if blocked
-			if targetPeer, ok := s.peers[peer.ActiveTargetID]; ok {
+			if targetPeer, ok := s.peers[activeTarget]; ok {
 				targetPeer.ActiveTargetID = ""
 				_ = targetPeer.Conn.WriteJSON(protocol.SignalingMessage{
 					Action:  protocol.ActionClose,
@@ -526,6 +557,7 @@ func (s *Server) HandleBlockPeer(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 			peer.ActiveTargetID = ""
+			s.endHistorySession(peer.ID, activeTarget)
 		}
 		s.addLog("Status de bloqueio do Host %s alterado para: %v", req.ID, req.Block)
 	}
@@ -574,7 +606,8 @@ func (s *Server) HandleKick(w http.ResponseWriter, r *http.Request) {
 	if exists {
 		// If peer was in an active session, notify the other peer and end session!
 		if peer.ActiveTargetID != "" {
-			if targetPeer, ok := s.peers[peer.ActiveTargetID]; ok {
+			activeTarget := peer.ActiveTargetID
+			if targetPeer, ok := s.peers[activeTarget]; ok {
 				targetPeer.ActiveTargetID = ""
 				targetPeer.mu.Lock()
 				_ = targetPeer.Conn.WriteJSON(protocol.SignalingMessage{
@@ -584,6 +617,7 @@ func (s *Server) HandleKick(w http.ResponseWriter, r *http.Request) {
 				targetPeer.mu.Unlock()
 			}
 			peer.ActiveTargetID = ""
+			s.endHistorySession(peer.ID, activeTarget)
 		}
 
 		_ = peer.Conn.WriteJSON(protocol.SignalingMessage{

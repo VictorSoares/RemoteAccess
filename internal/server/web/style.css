@@ -810,51 +810,92 @@ body {
   color: rgba(255, 255, 255, 0.2);
 }
 
-/* FLOATING ACTION TOOLBAR (Top-Center Dock) */
+/* FLOATING ACTION TOOLBAR (Top-Center Dock with Ultra-Smooth Auto-Hide) */
 .viewer-dock {
   position: fixed;
-  top: 12px;
+  top: 10px;
   left: 50%;
-  transform: translateX(-50%);
+  transform: translateX(-50%) translateY(-130%);
   z-index: 10000;
-  transition: opacity 0.2s ease, transform 0.2s ease;
-  opacity: 0.95;
+  transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease;
+  opacity: 0;
+  pointer-events: none;
 }
 
-.viewer-dock:hover {
+.viewer-dock.dock-visible,
+.viewer-dock:hover,
+.viewer-dock:focus-within {
+  transform: translateX(-50%) translateY(0);
   opacity: 1;
+  pointer-events: auto;
+}
+
+/* Subtle Glowing Tab Handle at Top Screen Center */
+.viewer-tab-handle {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 54px;
+  height: 5px;
+  background: rgba(56, 189, 248, 0.75);
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.9);
+  border-bottom-left-radius: 6px;
+  border-bottom-right-radius: 6px;
+  z-index: 9999;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.viewer-tab-handle:hover {
+  height: 8px;
+  background: #38bdf8;
+  box-shadow: 0 0 16px #38bdf8;
+}
+
+.badge-admin {
+  background: rgba(16, 185, 129, 0.15) !important;
+  border-color: rgba(16, 185, 129, 0.5) !important;
+  color: #6ee7b7 !important;
+}
+
+.badge-user {
+  background: rgba(100, 116, 139, 0.2) !important;
+  border-color: rgba(148, 163, 184, 0.35) !important;
+  color: #cbd5e1 !important;
 }
 
 /* Integrated Dock Stats Group */
 .dock-stats-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   font-family: var(--font-mono);
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   color: #e2e8f0;
   padding: 0 4px;
+  white-space: nowrap;
 }
 
 .dock-content {
-  background: rgba(15, 23, 42, 0.92);
-  backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(15, 23, 42, 0.95);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 9999px;
-  padding: 5px 12px;
+  padding: 4px 10px;
   display: flex;
   align-items: center;
-  gap: 6px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6), 0 0 20px rgba(59, 130, 246, 0.15);
-  max-width: 98vw;
-  overflow-x: auto;
+  gap: 5px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7), 0 0 24px rgba(59, 130, 246, 0.18);
+  max-width: 96vw;
+  white-space: nowrap;
 }
 
 .dock-divider {
   width: 1px;
-  height: 18px;
-  background: rgba(255, 255, 255, 0.18);
-  margin: 0 3px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.16);
+  margin: 0 2px;
   flex-shrink: 0;
 }
 

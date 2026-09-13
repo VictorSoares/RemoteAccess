@@ -67,7 +67,7 @@ type ControlMessage struct {
 	Text     string  `json:"text,omitempty"`
 	Command  string  `json:"cmd,omitempty"`
 	Block    bool    `json:"block,omitempty"`
-	Time     int64   `json:"ts,omitempty"`
+	Time     float64 `json:"ts,omitempty"`
 	Quality  int     `json:"q,omitempty"`
 	FPS      int     `json:"fps,omitempty"`
 	Monitor  int     `json:"mon,omitempty"`

@@ -24,6 +24,11 @@
     </div>
     
     <div class="header-actions">
+      <button class="header-btn" id="btn-elevate-header" onclick="handleElevateOrInstall()" title="Instalar / Executar como Administrador para permitir controle total de telas UAC e Gerenciador de Tarefas">
+        <span class="btn-bullet">🛡️</span>
+        <span class="btn-label" id="btn-elevate-label">Modo Admin</span>
+      </button>
+
       <button class="header-btn" onclick="openSignalingModal()" title="Configurar Servidor de Nuvem (Render / VPS)">
         <span class="btn-bullet">🌐</span>
         <span class="btn-label">Servidor Nuvem</span>
@@ -48,7 +53,7 @@
       <button id="tab-host-btn" class="tab-item active" onclick="switchTab('host')">
         <span class="tab-icon">🖥️</span>
         <div class="tab-info">
-          <span class="tab-name">Este Computador</span>
+          <span class="tab-name">Este Computador (Cliente)</span>
           <span class="tab-desc">Permitir acesso remoto</span>
         </div>
       </button>
@@ -56,7 +61,7 @@
       <button id="tab-client-btn" class="tab-item" onclick="switchTab('client')">
         <span class="tab-icon">🚀</span>
         <div class="tab-info">
-          <span class="tab-name">Controlar Remoto</span>
+          <span class="tab-name">Controlar Remoto (Host)</span>
           <span class="tab-desc">Conectar a outra máquina</span>
         </div>
       </button>
@@ -106,9 +111,12 @@
           <div class="card-header">
             <div class="card-title-wrap">
               <h2 class="card-title">Acesso Não Supervisionado</h2>
-              <span class="card-subtitle">Credenciais permanentes desta máquina</span>
+              <span class="card-subtitle">Credenciais permanentes desta máquina (Cliente)</span>
             </div>
-            <div class="badge-fixed">ID & Senha Fixos</div>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <div id="admin-privilege-badge" class="badge-fixed" style="background: rgba(100, 116, 139, 0.2); border-color: rgba(148, 163, 184, 0.35); color: #cbd5e1;">🛡️ Usuário Padrão</div>
+              <div class="badge-fixed">ID & Senha Fixos</div>
+            </div>
           </div>
 
           <div class="credential-grid">
@@ -272,6 +280,7 @@
   <!-- FULLSCREEN REMOTE DESKTOP VIEWER -->
   <div id="viewer-container">
     <!-- Floating Action Toolbar (Centered Top Pill Dock with Integrated Stats) -->
+    <div id="viewer-tab-handle" class="viewer-tab-handle" title="Mova o mouse aqui para abrir os controles"></div>
     <div id="viewer-toolbar" class="viewer-dock">
       <div class="dock-content">
         <!-- Integrated Connection HUD Stats (Zero Overlap, Real-time Latency & FPS) -->
@@ -288,56 +297,49 @@
         <!-- Monitor Switcher -->
         <div class="dock-select-wrap" id="viewer-mon-wrap" title="Alternar Monitor">
           <select id="viewer-monitor-select" class="dock-select" onchange="switchRemoteMonitor(this.value)">
-            <option value="0">🖥️ Monitor 1</option>
+            <option value="0">🖥️ Mon 1</option>
           </select>
         </div>
 
         <!-- Quality Preset -->
         <div class="dock-select-wrap" title="Ajustar Qualidade">
           <select id="viewer-quality-select" class="dock-select" onchange="setViewerQuality(this.value)">
-            <option value="speed">⚡ Rápido (60 FPS)</option>
-            <option value="balanced" selected>⚖️ Equilibrado (30 FPS)</option>
-            <option value="hd">💎 Alta Definição</option>
+            <option value="speed">⚡ 60 FPS</option>
+            <option value="balanced" selected>⚖️ 30 FPS</option>
+            <option value="hd">💎 HD</option>
+          </select>
+        </div>
+
+        <!-- Unified Power & Security Actions Dropdown -->
+        <div class="dock-select-wrap" title="Ações de Energia e Sistema">
+          <select id="viewer-power-select" class="dock-select" onchange="handlePowerDropdown(this.value)">
+            <option value="" disabled selected>⚡ Energia</option>
+            <option value="lock">🔒 Bloquear PC (Win+L)</option>
+            <option value="reboot">🔄 Reiniciar PC</option>
+            <option value="suspend">🌙 Suspender / Repouso</option>
+            <option value="shutdown">🛑 Desligar PC</option>
           </select>
         </div>
 
         <div class="dock-divider"></div>
 
-        <!-- System Commands -->
+        <!-- Quick Actions -->
         <button class="dock-btn" onclick="sendSystemAction('cad')" title="Enviar Ctrl+Alt+Del">
-          ⌨️ <span class="dock-label">Ctrl+Alt+Del</span>
+          ⌨️ <span class="dock-label">CAD</span>
         </button>
         <button class="dock-btn" onclick="sendSystemAction('taskmgr')" title="Abrir Gerenciador de Tarefas">
           ⚡ <span class="dock-label">Tarefas</span>
         </button>
-        <button class="dock-btn" onclick="sendSystemAction('win_r')" title="Executar (Win+R)">
-          🚀 <span class="dock-label">Win+R</span>
-        </button>
-        <button class="dock-btn" onclick="sendSystemAction('alt_tab')" title="Alternar Janelas (Alt+Tab)">
-          🗂️ <span class="dock-label">Alt+Tab</span>
-        </button>
         <button class="dock-btn" onclick="sendSystemAction('desktop')" title="Mostrar Área de Trabalho (Win+D)">
           🪟 <span class="dock-label">Win+D</span>
         </button>
-        <button class="dock-btn" onclick="sendSystemAction('lock')" title="Bloquear PC Remoto">
-          🔒 <span class="dock-label">Bloquear</span>
-        </button>
-        <button class="dock-btn" onclick="sendPowerAction('reboot')" title="Reiniciar PC Remoto com Confirmação">
-          🔄 <span class="dock-label">Reiniciar</span>
-        </button>
-        <button class="dock-btn" onclick="sendPowerAction('suspend')" title="Suspender/Dormir PC Remoto">
-          🌙 <span class="dock-label">Suspender</span>
-        </button>
-        <button class="dock-btn" onclick="sendPowerAction('shutdown')" title="Desligar PC Remoto com Confirmação" style="color: #f87171;">
-          🛑 <span class="dock-label">Desligar</span>
-        </button>
-        <button class="dock-btn" id="btn-block-input" onclick="toggleBlockInput()" title="Bloquear Mouse e Teclado Local do PC Acessado">
+        <button class="dock-btn" id="btn-block-input" onclick="toggleBlockInput()" title="Bloquear Mouse e Teclado Físico do Cliente Acessado">
           🚫 <span class="dock-label">Bloquear Entrada</span>
         </button>
         <button class="dock-btn" onclick="openClipboardModal()" title="Colar Texto Remoto">
           📋 <span class="dock-label">Colar</span>
         </button>
-        <button class="dock-btn" onclick="toggleChatDrawer()" title="Chat com a Máquina Remota">
+        <button class="dock-btn" onclick="toggleChatDrawer()" title="Chat com o Cliente">
           💬 <span class="dock-label">Chat</span>
         </button>
         <button class="dock-btn" onclick="toggleFullscreen()" title="Alternar Tela Cheia">
@@ -347,7 +349,7 @@
         <div class="dock-divider"></div>
 
         <button class="dock-btn btn-disconnect" onclick="closeViewer()" title="Desconectar e Encerrar">
-          ✕ <span class="dock-label">Desconectar</span>
+          ✕ <span class="dock-label">Sair</span>
         </button>
       </div>
     </div>
@@ -356,42 +358,42 @@
     <div id="canvas-wrapper">
       <canvas id="screen-canvas" tabindex="0"></canvas>
 
-        <!-- In-Session Floating Chat -->
-        <div id="chat-drawer" class="chat-drawer" style="display: none;">
-          <div class="chat-header">
-            <span class="chat-title">💬 Bate-Papo da Sessão</span>
-            <button class="btn-close-chat" onclick="toggleChatDrawer()">✕</button>
-          </div>
-          <div id="chat-messages" class="chat-body">
-            <div class="chat-intro">Sessão de chat conectada com a máquina remota</div>
-          </div>
-          <form onsubmit="sendChatMessage(event)" class="chat-footer">
-            <input type="text" id="chat-input" class="chat-input" placeholder="Digite uma mensagem..." required autocomplete="off">
-            <button type="submit" class="btn-send-chat">Enviar</button>
-          </form>
+      <!-- In-Session Floating Chat (Viewer) -->
+      <div id="chat-drawer" class="chat-drawer" style="display: none;">
+        <div class="chat-header">
+          <span class="chat-title">💬 Bate-Papo com o Cliente</span>
+          <button class="btn-close-chat" onclick="toggleChatDrawer()">✕</button>
         </div>
+        <div id="chat-messages" class="chat-body">
+          <div class="chat-intro">Sessão de chat conectada com o cliente</div>
+        </div>
+        <form onsubmit="sendChatMessage(event)" class="chat-footer">
+          <input type="text" id="chat-input" class="chat-input" placeholder="Digite uma mensagem..." required autocomplete="off">
+          <button type="submit" class="btn-send-chat">Enviar</button>
+        </form>
+      </div>
 
-        <!-- Floating In-Session Toast Notification for Viewer -->
-        <div id="chat-toast-popup" class="chat-toast-popup" style="display: none;" onclick="handleToastClick()">
-          <div class="chat-toast-icon">💬</div>
-          <div class="chat-toast-content">
-            <div id="chat-toast-title" class="chat-toast-title">Nova Mensagem</div>
-            <div id="chat-toast-text" class="chat-toast-text">...</div>
-          </div>
-          <button class="chat-toast-close" onclick="event.stopPropagation(); hideChatToast()">✕</button>
+      <!-- Floating In-Session Toast Notification for Viewer -->
+      <div id="chat-toast-popup" class="chat-toast-popup" style="display: none;" onclick="handleToastClick()">
+        <div class="chat-toast-icon">💬</div>
+        <div class="chat-toast-content">
+          <div id="chat-toast-title" class="chat-toast-title">Nova Mensagem</div>
+          <div id="chat-toast-text" class="chat-toast-text">...</div>
         </div>
+        <button class="chat-toast-close" onclick="event.stopPropagation(); hideChatToast()">✕</button>
       </div>
     </div>
+  </div>
 
-    <!-- Floating Toast Notification for Host View -->
-    <div id="host-toast-popup" class="chat-toast-popup" style="display: none;" onclick="handleHostToastClick()">
-      <div class="chat-toast-icon">💬</div>
-      <div class="chat-toast-content">
-        <div id="host-toast-title" class="chat-toast-title">Nova Mensagem do Operador</div>
-        <div id="host-toast-text" class="chat-toast-text">...</div>
-      </div>
-      <button class="chat-toast-close" onclick="event.stopPropagation(); hideHostToast()">✕</button>
+  <!-- Floating Toast Notification for Host/Client View -->
+  <div id="host-toast-popup" class="chat-toast-popup" style="display: none;" onclick="handleHostToastClick()">
+    <div class="chat-toast-icon">💬</div>
+    <div class="chat-toast-content">
+      <div id="host-toast-title" class="chat-toast-title">Nova Mensagem do Controlador</div>
+      <div id="host-toast-text" class="chat-toast-text">...</div>
     </div>
+    <button class="chat-toast-close" onclick="event.stopPropagation(); hideHostToast()">✕</button>
+  </div>
 
   <!-- Custom In-App Glassmorphic Dialog Modal (Alert, Confirm, Prompt) -->
   <div id="app-dialog-modal" class="modal-backdrop" style="display: none; z-index: 200000;">

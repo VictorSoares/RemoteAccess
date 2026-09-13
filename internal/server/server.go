@@ -105,10 +105,13 @@ func (s *LocalServer) Start(port int) error {
 	mux.HandleFunc("/api/send-chat", s.handleSendChatMessage)
 	mux.HandleFunc("/api/send-wol", s.handleSendWoL)
 	mux.HandleFunc("/api/system-info", s.handleSystemInfo)
+	mux.HandleFunc("/api/elevate", s.handleElevate)
+	mux.HandleFunc("/api/install", s.handleInstall)
 	mux.HandleFunc("/api/app-close", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
+		log.Println("[Janela] Solicitação de encerramento recebida pela interface (app-close).")
 		go func() {
-			time.Sleep(80 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 			s.Shutdown()
 			os.Exit(0)
 		}()
@@ -202,9 +205,10 @@ func (s *LocalServer) handleSessionStatus(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	if sess != nil {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"active":    true,
-			"client_id": sess.ClientID,
-			"duration":  int(time.Since(sess.ConnectedAt).Seconds()),
+			"active":       true,
+			"client_id":    sess.ClientID,
+			"client_alias": sess.ClientAlias,
+			"duration":     int(time.Since(sess.ConnectedAt).Seconds()),
 		})
 	} else {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -269,10 +273,56 @@ func (s *LocalServer) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	primaryMAC := wol.GetPrimaryMACAddress()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
-		"hostname": hostname,
-		"os":       runtime.GOOS + " " + runtime.GOARCH,
-		"monitors": numDisplays,
-		"mac":      primaryMAC,
+		"hostname":     hostname,
+		"os":           runtime.GOOS + " " + runtime.GOARCH,
+		"monitors":     numDisplays,
+		"mac":          primaryMAC,
+		"is_admin":     config.IsAdmin(),
+		"is_installed": config.IsInstalled(),
+	})
+}
+
+func (s *LocalServer) handleElevate(w http.ResponseWriter, r *http.Request) {
+	if config.IsAdmin() {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":   "ok",
+			"is_admin": true,
+			"message":  "O aplicativo já está em execução com privilégios de Administrador.",
+		})
+		return
+	}
+
+	err := config.ElevateSelf("")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Erro ao solicitar elevação: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "ok",
+		"message": "Solicitação de elevação UAC disparada com sucesso.",
+	})
+
+	go func() {
+		time.Sleep(1500 * time.Millisecond)
+		s.Shutdown()
+		os.Exit(0)
+	}()
+}
+
+func (s *LocalServer) handleInstall(w http.ResponseWriter, r *http.Request) {
+	err := s.Config.InstallAsAdmin()
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Erro ao instalar: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "ok",
+		"message": "RemoteAccess instalado com sucesso em Program Files com privilégios elevados!",
 	})
 }
 
@@ -300,6 +350,8 @@ func (s *LocalServer) handleHostInfo(w http.ResponseWriter, r *http.Request) {
 		"save_log_file": s.Config.Data.SaveLogFile,
 		"cloud_status":  s.cloudStatus,
 		"mac":           wol.GetPrimaryMACAddress(),
+		"is_admin":      config.IsAdmin(),
+		"is_installed":  config.IsInstalled(),
 	})
 }
 
@@ -533,13 +585,17 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 		if senderID == "" {
 			senderID = msg.TargetID
 		}
-		log.Printf("[Conexão] Cliente remoto conectado: %s (iniciando captura de tela)", senderID)
+		senderAlias := msg.Alias
+		if senderAlias == "" {
+			senderAlias = "Controlador"
+		}
+		log.Printf("[Conexão] Cliente remoto conectado: %s (%s) (iniciando captura de tela)", senderAlias, senderID)
 
 		s.mu.Lock()
 		sess := s.hostSession
 		if sess == nil {
 			var err error
-			sess, err = webrtcmod.NewHostSession(senderID, s.Config.Data.FPS, s.Config.Data.Quality, func(outMsg protocol.SignalingMessage) {
+			sess, err = webrtcmod.NewHostSession(senderID, senderAlias, s.Config.Data.FPS, s.Config.Data.Quality, func(outMsg protocol.SignalingMessage) {
 				outMsg.ID = s.Config.Data.ID
 				if outMsg.TargetID == "" {
 					outMsg.TargetID = senderID
@@ -562,8 +618,24 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 			}
 
 			sess.OnChat = func(sender string, text string) {
-				s.addChatMessage("Controlador", text)
+				senderName := "Controlador"
+				if sess.ClientAlias != "" {
+					senderName = sess.ClientAlias
+				}
+				s.addChatMessage(senderName, text)
 				input.FlashAppWindow()
+			}
+
+			sess.OnClose = func() {
+				s.mu.Lock()
+				if s.hostSession == sess {
+					s.hostSession = nil
+				}
+				s.mu.Unlock()
+				s.chatMu.Lock()
+				s.chatMsgs = nil
+				s.chatMu.Unlock()
+				log.Println("[Sessão] Sessão remota finalizada e recursos liberados.")
 			}
 
 			s.hostSession = sess
@@ -581,6 +653,8 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 				TargetID: senderID,
 				Payload:  string(initInfo),
 			})
+		} else if msg.Alias != "" {
+			sess.ClientAlias = msg.Alias
 		}
 		s.mu.Unlock()
 
@@ -607,13 +681,16 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 		}
 
 	case protocol.ActionClose:
-		log.Printf("[Conexão] Sessão remota encerrada")
+		log.Printf("[Conexão] Sessão remota encerrada via sinalização")
 		s.mu.Lock()
 		if s.hostSession != nil {
 			s.hostSession.Close()
 			s.hostSession = nil
 		}
 		s.mu.Unlock()
+		s.chatMu.Lock()
+		s.chatMsgs = nil
+		s.chatMu.Unlock()
 	}
 }
 

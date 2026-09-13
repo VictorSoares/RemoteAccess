@@ -49,13 +49,14 @@ var (
 )
 
 const (
-	whKeyboardLL        = 13
-	whMouseLL           = 14
-	wmQuit              = 0x0012
-	llkhfInjected       = 0x00000010 // Bit 4 is LLKHF_INJECTED for Keyboard
-	llmhfInjected       = 0x00000001 // Bit 0 is LLMHF_INJECTED for Mouse
-	flashwAll           = 0x00000003
-	flashwTimerNoFg     = 0x0000000C
+	whKeyboardLL                = 13
+	whMouseLL                   = 14
+	wmQuit                      = 0x0012
+	llkhfInjected               = 0x00000010 // Bit 4 is LLKHF_INJECTED for Keyboard
+	llmhfInjected               = 0x00000001 // Bit 0 is LLMHF_INJECTED for Mouse
+	remoteAccessMagicExtraInfo  = 0x52414343 // "RACC" magic tag to distinguish RemoteAccess inputs
+	flashwAll                   = 0x00000003
+	flashwTimerNoFg             = 0x0000000C
 )
 
 type kbdLLHookStruct struct {
@@ -77,10 +78,13 @@ type msLLHookStruct struct {
 func keyboardHookCallback(nCode int, wParam uintptr, lParam uintptr) uintptr {
 	if nCode >= 0 {
 		kbd := (*kbdLLHookStruct)(unsafe.Pointer(lParam))
-		// If event is physical hardware (LLKHF_INJECTED bit 4 is not set), block it!
-		if kbd.Flags&llkhfInjected == 0 {
-			return 1
+		// If event is injected (synthesized by remote controller) or tagged with magic extra info, ALLOW IT!
+		if (kbd.Flags&llkhfInjected != 0) || kbd.DwExtraInfo == remoteAccessMagicExtraInfo {
+			ret, _, _ := procCallNextHookEx.Call(0, uintptr(nCode), wParam, lParam)
+			return ret
 		}
+		// Block local physical keyboard press
+		return 1
 	}
 	ret, _, _ := procCallNextHookEx.Call(0, uintptr(nCode), wParam, lParam)
 	return ret
@@ -89,10 +93,13 @@ func keyboardHookCallback(nCode int, wParam uintptr, lParam uintptr) uintptr {
 func mouseHookCallback(nCode int, wParam uintptr, lParam uintptr) uintptr {
 	if nCode >= 0 {
 		ms := (*msLLHookStruct)(unsafe.Pointer(lParam))
-		// If event is physical hardware (LLMHF_INJECTED bit 0 is not set), block it!
-		if ms.Flags&llmhfInjected == 0 {
-			return 1
+		// If event is injected (synthesized by remote controller) or tagged with magic extra info, ALLOW IT!
+		if (ms.Flags&llmhfInjected != 0) || ms.DwExtraInfo == remoteAccessMagicExtraInfo {
+			ret, _, _ := procCallNextHookEx.Call(0, uintptr(nCode), wParam, lParam)
+			return ret
 		}
+		// Block local physical mouse event
+		return 1
 	}
 	ret, _, _ := procCallNextHookEx.Call(0, uintptr(nCode), wParam, lParam)
 	return ret
@@ -135,14 +142,7 @@ func BlockLocalInput(block bool) error {
 	hookMu.Lock()
 	defer hookMu.Unlock()
 
-	// 1. Also invoke OS BlockInput (effective if running with elevated privileges)
-	val := uintptr(0)
-	if block {
-		val = 1
-	}
-	procBlockInput.Call(val)
-
-	// 2. Install/Uninstall user-mode Low-Level Hooks (effective even as standard non-elevated user)
+	// Install/Uninstall user-mode Low-Level Hooks that selectively filter physical inputs while allowing injected ones
 	if block && !isHooked {
 		isHooked = true
 		startedChan := make(chan struct{})
@@ -371,7 +371,7 @@ func MouseDown(button int) error {
 	default:
 		return nil
 	}
-	procMouseEvent.Call(flag, 0, 0, 0, 0)
+	procMouseEvent.Call(flag, 0, 0, 0, remoteAccessMagicExtraInfo)
 	return nil
 }
 
@@ -388,7 +388,7 @@ func MouseUp(button int) error {
 	default:
 		return nil
 	}
-	procMouseEvent.Call(flag, 0, 0, 0, 0)
+	procMouseEvent.Call(flag, 0, 0, 0, remoteAccessMagicExtraInfo)
 	return nil
 }
 
@@ -400,7 +400,7 @@ func MouseWheel(deltaY int) error {
 	} else if deltaY < 0 {
 		delta = -120
 	}
-	procMouseEvent.Call(mouseeventfWheel, 0, 0, uintptr(uint32(delta)), 0)
+	procMouseEvent.Call(mouseeventfWheel, 0, 0, uintptr(uint32(delta)), remoteAccessMagicExtraInfo)
 	return nil
 }
 
@@ -412,7 +412,7 @@ func KeyDown(key, code string, keyCode int) error {
 		if isExtendedKey(vk) {
 			flags |= keyeventfExtendedkey
 		}
-		procKeybdEvent.Call(uintptr(vk), 0, flags, 0)
+		procKeybdEvent.Call(uintptr(vk), 0, flags, remoteAccessMagicExtraInfo)
 		return nil
 	}
 	return nil
@@ -426,7 +426,7 @@ func KeyUp(key, code string, keyCode int) error {
 		if isExtendedKey(vk) {
 			flags |= keyeventfExtendedkey
 		}
-		procKeybdEvent.Call(uintptr(vk), 0, flags, 0)
+		procKeybdEvent.Call(uintptr(vk), 0, flags, remoteAccessMagicExtraInfo)
 		return nil
 	}
 	return nil

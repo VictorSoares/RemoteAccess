@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -32,26 +33,47 @@ type ConfigManager struct {
 }
 
 func getConfigPath() string {
-	// Priority 1: AppData (%APPDATA%\RemoteAccess\config.json) - keeps executable directory 100% clean
+	// Priority 1: ProgramData (C:\ProgramData\RemoteAccess\config.json) - Machine-wide, shared seamlessly between Standard User and Admin
+	progData := os.Getenv("ProgramData")
+	if progData == "" {
+		progData = `C:\ProgramData`
+	}
+	sharedDir := filepath.Join(progData, "RemoteAccess")
+	sharedFile := filepath.Join(sharedDir, "config.json")
+
+	// Priority 2: User AppData (%APPDATA%\RemoteAccess\config.json)
 	appData := os.Getenv("APPDATA")
+	var userFile string
+	if appData != "" {
+		userFile = filepath.Join(appData, "RemoteAccess", "config.json")
+	}
+
+	// If shared config already exists in ProgramData, use it!
+	if _, err := os.Stat(sharedFile); err == nil {
+		return sharedFile
+	}
+
+	// If user config exists in AppData, migrate it to ProgramData so Admin also sees it!
+	if userFile != "" {
+		if data, err := os.ReadFile(userFile); err == nil && len(data) > 0 {
+			if err := os.MkdirAll(sharedDir, 0777); err == nil {
+				if err := os.WriteFile(sharedFile, data, 0666); err == nil {
+					return sharedFile
+				}
+			}
+			return userFile
+		}
+	}
+
+	// Create in ProgramData if possible
+	if err := os.MkdirAll(sharedDir, 0777); err == nil {
+		return sharedFile
+	}
+
+	// Fallback to AppData
 	if appData != "" {
 		dir := filepath.Join(appData, "RemoteAccess")
 		_ = os.MkdirAll(dir, 0755)
-		return filepath.Join(dir, "config.json")
-	}
-
-	// Priority 2: UserProfile
-	userProfile := os.Getenv("USERPROFILE")
-	if userProfile != "" {
-		dir := filepath.Join(userProfile, ".remoteaccess")
-		_ = os.MkdirAll(dir, 0755)
-		return filepath.Join(dir, "config.json")
-	}
-
-	// Priority 3: Alongside executable
-	exePath, err := os.Executable()
-	if err == nil {
-		dir := filepath.Dir(exePath)
 		return filepath.Join(dir, "config.json")
 	}
 
@@ -99,12 +121,11 @@ func LoadConfig() *ConfigManager {
 		if err := json.Unmarshal(data, &cm.Data); err == nil && cm.Data.ID != "" {
 			if cm.Data.Alias == "" {
 				cm.Data.Alias = hostname
-				_ = cm.Save()
 			}
-			if cm.Data.SignalingURL == "" {
+			if strings.TrimSpace(cm.Data.SignalingURL) == "" {
 				cm.Data.SignalingURL = DefaultSignalingURL
-				_ = cm.Save()
 			}
+			_ = cm.Save()
 			return cm
 		}
 	}
@@ -171,18 +192,112 @@ func (cm *ConfigManager) SetSaveLogFile(enable bool) error {
 
 // Windows Registry Auto-start management (HKCU - No Admin Needed)
 var (
-	advapi32         = syscall.NewLazyDLL("advapi32.dll")
-	procRegOpenKeyEx = advapi32.NewProc("RegOpenKeyExW")
-	procRegSetValue  = advapi32.NewProc("RegSetValueExW")
-	procRegDeleteVal = advapi32.NewProc("RegDeleteValueW")
-	procRegCloseKey  = advapi32.NewProc("RegCloseKey")
+	advapi32          = syscall.NewLazyDLL("advapi32.dll")
+	shell32           = syscall.NewLazyDLL("shell32.dll")
+	procRegOpenKeyEx  = advapi32.NewProc("RegOpenKeyExW")
+	procRegSetValue   = advapi32.NewProc("RegSetValueExW")
+	procRegDeleteVal  = advapi32.NewProc("RegDeleteValueW")
+	procRegCloseKey   = advapi32.NewProc("RegCloseKey")
+	procIsUserAnAdmin = shell32.NewProc("IsUserAnAdmin")
+	procShellExecuteW = shell32.NewProc("ShellExecuteW")
 )
 
 const (
-	hkeyCurrentUser = 0x80000001
-	keyAllAccess     = 0xF003F
-	regSz            = 1
+	hkeyCurrentUser   = 0x80000001
+	hkeyLocalMachine  = 0x80000002
+	keyAllAccess      = 0xF003F
+	regSz             = 1
 )
+
+// IsAdmin returns true if current process is running with elevated administrator privileges
+func IsAdmin() bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	if procIsUserAnAdmin.Find() == nil {
+		ret, _, _ := procIsUserAnAdmin.Call()
+		return ret != 0
+	}
+	return false
+}
+
+// IsInstalled returns true if running from Program Files
+func IsInstalled() bool {
+	exePath, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	progFiles := os.Getenv("ProgramFiles")
+	if progFiles != "" && strings.HasPrefix(strings.ToLower(exePath), strings.ToLower(progFiles)) {
+		return true
+	}
+	return false
+}
+
+// ElevateSelf triggers UAC prompt to restart current executable as Administrator
+func ElevateSelf(args string) error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	exePath, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	verb, _ := syscall.UTF16PtrFromString("runas")
+	file, _ := syscall.UTF16PtrFromString(exePath)
+	params, _ := syscall.UTF16PtrFromString(args)
+
+	ret, _, _ := procShellExecuteW.Call(
+		0,
+		uintptr(unsafe.Pointer(verb)),
+		uintptr(unsafe.Pointer(file)),
+		uintptr(unsafe.Pointer(params)),
+		0,
+		1, // SW_SHOWNORMAL
+	)
+	if ret <= 32 {
+		return fmt.Errorf("solicitação de elevação cancelada ou falhou (código %d)", ret)
+	}
+	return nil
+}
+
+// InstallAsAdmin installs the application into Program Files and sets up elevated auto-start
+func (cm *ConfigManager) InstallAsAdmin() error {
+	if !IsAdmin() {
+		return ElevateSelf("-install")
+	}
+
+	progFiles := os.Getenv("ProgramFiles")
+	if progFiles == "" {
+		progFiles = `C:\Program Files`
+	}
+	targetDir := filepath.Join(progFiles, "RemoteAccess")
+	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		return fmt.Errorf("falha ao criar diretório em Program Files: %w", err)
+	}
+
+	targetExe := filepath.Join(targetDir, "RemoteAccess.exe")
+	currentExe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+
+	if strings.ToLower(currentExe) != strings.ToLower(targetExe) {
+		inputData, err := os.ReadFile(currentExe)
+		if err != nil {
+			return fmt.Errorf("falha ao ler executável atual: %w", err)
+		}
+		if err := os.WriteFile(targetExe, inputData, 0755); err != nil {
+			return fmt.Errorf("falha ao copiar executável para %s: %w", targetExe, err)
+		}
+	}
+
+	// Update executable path
+	cm.executable = targetExe
+	_ = cm.SetAutoStart(true)
+
+	return nil
+}
 
 func (cm *ConfigManager) SetAutoStart(enable bool) error {
 	if runtime.GOOS != "windows" {
@@ -197,16 +312,33 @@ func (cm *ConfigManager) SetAutoStart(enable bool) error {
 	subKey, _ := syscall.UTF16PtrFromString(`Software\Microsoft\Windows\CurrentVersion\Run`)
 	valueName, _ := syscall.UTF16PtrFromString("RemoteAccess")
 
+	// If admin, we can also register in HKLM for all users
+	rootKey := uintptr(hkeyCurrentUser)
+	if IsAdmin() {
+		rootKey = uintptr(hkeyLocalMachine)
+	}
+
 	var hKey uintptr
 	ret, _, _ := procRegOpenKeyEx.Call(
-		uintptr(hkeyCurrentUser),
+		rootKey,
 		uintptr(unsafe.Pointer(subKey)),
 		0,
 		uintptr(keyAllAccess),
 		uintptr(unsafe.Pointer(&hKey)),
 	)
 	if ret != 0 {
-		return fmt.Errorf("failed to open registry key: code %d", ret)
+		// Fallback to HKCU if HKLM fails
+		rootKey = uintptr(hkeyCurrentUser)
+		ret, _, _ = procRegOpenKeyEx.Call(
+			rootKey,
+			uintptr(unsafe.Pointer(subKey)),
+			0,
+			uintptr(keyAllAccess),
+			uintptr(unsafe.Pointer(&hKey)),
+		)
+		if ret != 0 {
+			return fmt.Errorf("failed to open registry key: code %d", ret)
+		}
 	}
 	defer procRegCloseKey.Call(hKey)
 
@@ -232,3 +364,4 @@ func (cm *ConfigManager) SetAutoStart(enable bool) error {
 
 	return nil
 }
+

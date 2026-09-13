@@ -39,8 +39,8 @@ func acquireSingleInstanceLock() uintptr {
 	return hMutex
 }
 
-// runNativeAppWindow opens the standalone desktop app window and invokes onWindowClose when closed
-func runNativeAppWindow(url string, onWindowClose func()) {
+// runNativeAppWindow opens the standalone desktop app window (Edge App mode or browser fallback)
+func runNativeAppWindow(url string) {
 	if runtime.GOOS == "windows" {
 		edgePaths := []string{
 			os.Getenv("ProgramFiles(x86)") + `\Microsoft\Edge\Application\msedge.exe`,
@@ -64,26 +64,21 @@ func runNativeAppWindow(url string, onWindowClose func()) {
 					"--no-default-browser-check",
 				)
 				if err := cmd.Start(); err == nil {
-					_ = cmd.Wait()
-					if onWindowClose != nil {
-						onWindowClose()
-					}
+					log.Printf("[Janela] Janela desktop nativa iniciada via Edge (%s)", edgePath)
 					return
 				}
 			}
 		}
 
 		// Fallback: standard browser
+		log.Println("[Janela] Edge não encontrado diretamente, abrindo navegador padrão...")
 		_ = exec.Command("cmd", "/c", "start", url).Start()
 		return
 	}
 
 	if runtime.GOOS == "darwin" {
 		cmd := exec.Command("open", "-W", url)
-		_ = cmd.Run()
-		if onWindowClose != nil {
-			onWindowClose()
-		}
+		_ = cmd.Start()
 	} else {
 		cmd := exec.Command("xdg-open", url)
 		_ = cmd.Start()
@@ -102,18 +97,44 @@ func findAvailablePort(startPort int) int {
 }
 
 func main() {
+	portFlag := flag.Int("port", 8080, "Porta local para o painel de controle")
+	noBrowser := flag.Bool("no-browser", false, "Modo silencioso de segundo plano (para inicializacao com Windows)")
+	autostart := flag.Bool("autostart", false, "Ativar inicialização automática com o Windows")
+	installFlag := flag.Bool("install", false, "Instalar no Program Files com privilégios de Administrador")
+	elevateFlag := flag.Bool("elevate", false, "Reiniciar como Administrador")
+	defaultPwd := flag.String("password", "", "Definir senha padrao")
+	flag.Parse()
+
+	if *installFlag {
+		cfg := config.LoadConfig()
+		if err := cfg.InstallAsAdmin(); err != nil {
+			log.Fatalf("[Instalação] Erro ao instalar: %v", err)
+		}
+		log.Println("[Instalação] RemoteAccess instalado com sucesso em Program Files com privilégios elevados!")
+		if !*noBrowser {
+			progFiles := os.Getenv("ProgramFiles")
+			if progFiles == "" {
+				progFiles = `C:\Program Files`
+			}
+			targetExe := filepath.Join(progFiles, "RemoteAccess", "RemoteAccess.exe")
+			_ = exec.Command(targetExe).Start()
+		}
+		os.Exit(0)
+	}
+
+	if *elevateFlag {
+		if !config.IsAdmin() {
+			_ = config.ElevateSelf("")
+			os.Exit(0)
+		}
+	}
+
 	_ = acquireSingleInstanceLock()
 
 	cfg := config.LoadConfig()
 
 	// Initialize in-memory (and optional file) logging
 	logger.InitLogger(cfg.Data.SaveLogFile)
-
-	portFlag := flag.Int("port", 8080, "Porta local para o painel de controle")
-	noBrowser := flag.Bool("no-browser", false, "Modo silencioso de segundo plano (para inicializacao com Windows)")
-	autostart := flag.Bool("autostart", false, "Ativar inicialização automática com o Windows")
-	defaultPwd := flag.String("password", "", "Definir senha padrao")
-	flag.Parse()
 
 	if *defaultPwd != "" {
 		_ = cfg.SetPassword(*defaultPwd)
@@ -128,8 +149,13 @@ func main() {
 
 	url := fmt.Sprintf("http://127.0.0.1:%d", port)
 
+	adminStatus := "Usuário Padrão (Portátil)"
+	if config.IsAdmin() {
+		adminStatus = "Administrador (Acesso Total a Telas UAC)"
+	}
+
 	log.Printf("[Início] RemoteAccess v%s iniciado na porta :%d", version, port)
-	log.Printf("[Início] Seu ID: %s | AutoStart: %v", cfg.Data.ID, cfg.Data.AutoStart)
+	log.Printf("[Início] Seu ID: %s | Privilégio: %s | AutoStart: %v", cfg.Data.ID, adminStatus, cfg.Data.AutoStart)
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
@@ -154,11 +180,8 @@ func main() {
 	// Launch as Standalone Desktop Window (unless in silent autostart background mode)
 	if !*noBrowser {
 		go func() {
-			time.Sleep(100 * time.Millisecond)
-			runNativeAppWindow(url, func() {
-				log.Println("[Janela] Janela desktop fechada pelo usuário. Encerrando processo...")
-				stop <- syscall.SIGTERM
-			})
+			time.Sleep(120 * time.Millisecond)
+			runNativeAppWindow(url)
 		}()
 	}
 
@@ -168,3 +191,4 @@ func main() {
 	time.Sleep(200 * time.Millisecond)
 	os.Exit(0)
 }
+

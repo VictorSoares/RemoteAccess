@@ -42,14 +42,16 @@ type HostSession struct {
 	FPS          int
 	Quality      int
 	ClientID     string
+	ClientAlias  string
 	ConnectedAt  time.Time
 	OnStatus     func(status string, msg string)
 	SendSignal   func(msg protocol.SignalingMessage)
 	OnRelayFrame func(jpegBase64 string)
 	OnChat       func(sender string, text string)
+	OnClose      func()
 }
 
-func NewHostSession(clientID string, fps int, quality int, sendSignal func(protocol.SignalingMessage)) (*HostSession, error) {
+func NewHostSession(clientID string, clientAlias string, fps int, quality int, sendSignal func(protocol.SignalingMessage)) (*HostSession, error) {
 	capturer, err := capture.NewFastCapturer(0)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init screen capture: %w", err)
@@ -66,6 +68,7 @@ func NewHostSession(clientID string, fps int, quality int, sendSignal func(proto
 
 	return &HostSession{
 		ClientID:    clientID,
+		ClientAlias: clientAlias,
 		ConnectedAt: time.Now(),
 		capturer:    capturer,
 		FPS:         fps,
@@ -92,6 +95,21 @@ func (h *HostSession) HandleRemoteOffer(targetID string, sdpStr string) error {
 
 	pc.OnICEConnectionStateChange(func(state pion.ICEConnectionState) {
 		log.Printf("[Host] ICE P2P State: %s (Relay WSS ativo em paralelo)", state.String())
+	})
+
+	pc.OnConnectionStateChange(func(state pion.PeerConnectionState) {
+		log.Printf("[Host] PeerConnection State: %s", state.String())
+		if state == pion.PeerConnectionStateClosed || state == pion.PeerConnectionStateFailed || state == pion.PeerConnectionStateDisconnected {
+			go func() {
+				time.Sleep(1500 * time.Millisecond)
+				h.mu.Lock()
+				pcCurrent := h.peerConn
+				h.mu.Unlock()
+				if pcCurrent != nil && (pcCurrent.ConnectionState() == pion.PeerConnectionStateClosed || pcCurrent.ConnectionState() == pion.PeerConnectionStateFailed || pcCurrent.ConnectionState() == pion.PeerConnectionStateDisconnected) {
+					h.Close()
+				}
+			}()
+		}
 	})
 
 	pc.OnICECandidate(func(c *pion.ICECandidate) {
@@ -319,9 +337,15 @@ func (h *HostSession) Close() {
 	_ = input.BlockLocalInput(false)
 	h.cancel()
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	if h.peerConn != nil {
 		_ = h.peerConn.Close()
 		h.peerConn = nil
+	}
+	onClose := h.OnClose
+	h.OnClose = nil
+	h.mu.Unlock()
+
+	if onClose != nil {
+		onClose()
 	}
 }

@@ -90,10 +90,10 @@
       box-shadow: 0 0 8px #10b981;
     }
     main {
-      max-width: 1240px;
+      max-width: 1380px;
       width: 100%;
       margin: 1.5rem auto 2.5rem;
-      padding: 0 1.5rem;
+      padding: 0 1.25rem;
       flex: 1;
       display: flex;
       flex-direction: column;
@@ -101,70 +101,72 @@
     }
     .stats-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 1rem;
     }
     .stat-card {
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 14px;
-      padding: 1.25rem 1.5rem;
+      padding: 1.15rem 1.35rem;
       display: flex;
       flex-direction: column;
-      gap: 0.4rem;
+      gap: 0.35rem;
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
     }
     .stat-label {
-      font-size: 0.8rem;
+      font-size: 0.78rem;
       font-weight: 600;
       color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.05em;
     }
     .stat-val {
-      font-size: 2rem;
+      font-size: 1.85rem;
       font-weight: 800;
       color: #fff;
       font-family: var(--font-mono);
     }
     .stat-hint {
-      font-size: 0.75rem;
+      font-size: 0.74rem;
       color: var(--text-muted);
     }
     .panel {
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 16px;
-      padding: 1.5rem;
+      padding: 1.35rem;
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
     }
     .panel-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 1.25rem;
+      margin-bottom: 1.15rem;
+      gap: 1rem;
     }
     .panel-title {
-      font-size: 1.15rem;
+      font-size: 1.12rem;
       font-weight: 800;
     }
     table {
       width: 100%;
       border-collapse: collapse;
-      font-size: 0.88rem;
+      font-size: 0.86rem;
     }
     th {
       text-align: left;
-      padding: 0.75rem 1rem;
+      padding: 0.65rem 0.75rem;
       border-bottom: 1px solid var(--border);
       color: var(--text-muted);
       font-weight: 600;
-      font-size: 0.78rem;
+      font-size: 0.76rem;
       text-transform: uppercase;
       letter-spacing: 0.05em;
+      white-space: nowrap;
     }
     td {
-      padding: 0.9rem 1rem;
+      padding: 0.75rem 0.75rem;
       border-bottom: 1px solid rgba(255, 255, 255, 0.04);
       vertical-align: middle;
     }
@@ -175,9 +177,9 @@
       display: inline-flex;
       align-items: center;
       gap: 4px;
-      padding: 0.25rem 0.55rem;
+      padding: 0.22rem 0.5rem;
       border-radius: 6px;
-      font-size: 0.75rem;
+      font-size: 0.72rem;
       font-weight: 700;
       white-space: nowrap;
       line-height: 1.2;
@@ -200,23 +202,24 @@
     .id-tag {
       font-family: var(--font-mono);
       font-weight: 800;
-      font-size: 1.05rem;
+      font-size: 1rem;
       color: #38bdf8;
       letter-spacing: 0.05em;
+      white-space: nowrap;
     }
     .pwd-wrapper {
       display: inline-flex;
       align-items: center;
-      gap: 0.35rem;
+      gap: 0.3rem;
       background: rgba(255, 255, 255, 0.03);
-      padding: 0.2rem 0.35rem 0.2rem 0.55rem;
+      padding: 0.18rem 0.3rem 0.18rem 0.5rem;
       border-radius: 8px;
       border: 1px solid rgba(255, 255, 255, 0.07);
     }
     .pwd-tag {
       font-family: var(--font-mono);
       font-weight: 600;
-      font-size: 0.85rem;
+      font-size: 0.82rem;
       color: #cbd5e1;
       letter-spacing: 0.12em;
     }
@@ -225,9 +228,9 @@
       border: none;
       color: var(--text-muted);
       cursor: pointer;
-      padding: 0.2rem 0.35rem;
+      padding: 0.15rem 0.3rem;
       border-radius: 4px;
-      font-size: 0.8rem;
+      font-size: 0.78rem;
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -241,13 +244,14 @@
       display: flex;
       align-items: center;
       justify-content: flex-end;
-      gap: 0.5rem;
+      gap: 0.4rem;
+      white-space: nowrap;
     }
     .btn-action {
       border: none;
-      padding: 0.45rem 0.85rem;
+      padding: 0.4rem 0.75rem;
       border-radius: 8px;
-      font-size: 0.82rem;
+      font-size: 0.8rem;
       font-weight: 700;
       cursor: pointer;
       display: inline-flex;
@@ -380,38 +384,52 @@
       z-index: 99999;
       flex-direction: column;
     }
-    .web-viewer-hud {
+    .viewer-tab-handle {
       position: fixed;
-      top: 14px;
-      left: 16px;
-      z-index: 100001;
-      background: rgba(9, 13, 22, 0.9);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      border-radius: 9999px;
-      padding: 5px 12px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-family: var(--font-mono);
-      font-size: 0.78rem;
-      color: #e2e8f0;
-      pointer-events: none;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 130px;
+      height: 6px;
+      background: rgba(56, 189, 248, 0.6);
+      border-bottom-left-radius: 8px;
+      border-bottom-right-radius: 8px;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+      z-index: 100002;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .viewer-tab-handle:hover {
+      height: 9px;
+      background: #38bdf8;
+      box-shadow: 0 0 16px rgba(56, 189, 248, 0.8);
     }
     .web-viewer-dock {
       position: fixed;
-      top: 12px;
+      top: 10px;
       left: 50%;
-      transform: translateX(-50%);
+      transform: translateX(-50%) translateY(-130%);
+      opacity: 0;
+      pointer-events: none;
       z-index: 100000;
-      background: rgba(15, 23, 42, 0.9);
+      background: rgba(15, 23, 42, 0.94);
       backdrop-filter: blur(16px);
-      border: 1px solid rgba(255, 255, 255, 0.12);
+      border: 1px solid rgba(255, 255, 255, 0.14);
       border-radius: 9999px;
-      padding: 5px 12px;
+      padding: 4px 10px;
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 5px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8), 0 0 16px rgba(56, 189, 248, 0.2);
+      transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s;
+      max-width: 95vw;
+    }
+    .web-viewer-dock.dock-visible,
+    .web-viewer-dock:hover,
+    .web-viewer-dock:focus-within {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+      pointer-events: auto;
     }
     .dock-select-wrap {
       position: relative;
@@ -422,9 +440,9 @@
       background: rgba(255, 255, 255, 0.08);
       color: #fff;
       border: 1px solid rgba(255, 255, 255, 0.15);
-      padding: 0.45rem 0.8rem;
+      padding: 0.35rem 1.4rem 0.35rem 0.6rem;
       border-radius: 8px;
-      font-size: 0.82rem;
+      font-size: 0.78rem;
       font-weight: 700;
       outline: none;
       cursor: pointer;
@@ -432,7 +450,7 @@
     }
     .dock-select:hover {
       background: rgba(255, 255, 255, 0.14);
-      border-color: rgba(255, 255, 255, 0.3);
+      border-color: #38bdf8;
     }
     .dock-select option {
       background: #0f172a;
@@ -738,37 +756,49 @@
 
   <!-- Embedded Web Viewer (1-Click Remote Access straight from Browser) -->
   <div id="web-viewer-container">
-    <div class="web-viewer-dock">
+    <div class="viewer-tab-handle" id="web-viewer-tab-handle" title="Passar o mouse para exibir a barra de controle"></div>
+
+    <div class="web-viewer-dock" id="web-viewer-toolbar">
       <!-- Integrated Stats Group -->
-      <div style="display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 0.76rem; padding: 0 6px; flex-shrink: 0;">
-        <span style="color: #4ade80;">● Online</span>
+      <div style="display: flex; align-items: center; gap: 7px; font-family: var(--font-mono); font-size: 0.74rem; padding: 0 4px; flex-shrink: 0;">
+        <span style="color: #4ade80; font-weight: 700;">● Online</span>
         <span style="opacity: 0.3;">|</span>
-        <span id="web-stat-lat" style="color: #38bdf8;">⚡ 0 ms</span>
+        <span id="web-stat-lat" style="color: #38bdf8; font-weight: 700;">⚡ 0 ms</span>
         <span style="opacity: 0.3;">|</span>
         <span id="web-stat-fps">🎥 0 FPS</span>
         <span style="opacity: 0.3;">|</span>
         <span id="web-stat-target" style="color: #cbd5e1;">Host: ---</span>
       </div>
 
-      <div style="width: 1px; height: 18px; background: rgba(255,255,255,0.18); margin: 0 2px; flex-shrink: 0;"></div>
+      <div style="width: 1px; height: 16px; background: rgba(255,255,255,0.18); margin: 0 2px; flex-shrink: 0;"></div>
 
       <!-- Remote Monitor Switcher -->
       <div class="dock-select-wrap" title="Alternar Monitor Remoto">
         <select id="web-viewer-mon-select" class="dock-select" onchange="switchWebViewerMonitor(this.value)">
-          <option value="0">🖥️ Monitor 1</option>
+          <option value="0">🖥️ Mon 1</option>
         </select>
       </div>
 
-      <button class="btn-action" onclick="sendViewerSys('cad')" style="background: rgba(255,255,255,0.1); color: #fff;">⌨️ Ctrl+Alt+Del</button>
-      <button class="btn-action" onclick="sendViewerSys('desktop')" style="background: rgba(255,255,255,0.1); color: #fff;">🪟 Win+D</button>
-      <button class="btn-action" onclick="sendViewerSys('taskmgr')" style="background: rgba(255,255,255,0.1); color: #fff;">⚡ Tarefas</button>
-      <button class="btn-action" onclick="sendViewerSys('lock')" style="background: rgba(255,255,255,0.1); color: #fff;">🔒 Bloquear</button>
-      <button class="btn-action" onclick="sendViewerPower('reboot')" style="background: rgba(255,255,255,0.1); color: #93c5fd;" title="Reiniciar PC Remoto com Confirmação">🔄 Reiniciar</button>
-      <button class="btn-action" onclick="sendViewerPower('suspend')" style="background: rgba(255,255,255,0.1); color: #cbd5e1;" title="Suspender PC Remoto">🌙 Suspender</button>
-      <button class="btn-action" onclick="sendViewerPower('shutdown')" style="background: rgba(255,255,255,0.1); color: #fca5a5;" title="Desligar PC Remoto com Confirmação">🛑 Desligar</button>
-      <button class="btn-action" onclick="toggleViewerChat()" style="background: rgba(255,255,255,0.1); color: #fff;">💬 Chat <span id="viewer-chat-badge" class="chat-badge" style="display: none;">0</span></button>
-      <button class="btn-action" onclick="toggleViewerFullscreen()" style="background: rgba(255,255,255,0.1); color: #fff;">⛶ Tela Cheia</button>
-      <button class="btn-action btn-kill" onclick="closeWebViewer()">✕ Desconectar</button>
+      <!-- Unified Power & Security Actions Dropdown -->
+      <div class="dock-select-wrap" title="Ações de Energia e Sistema">
+        <select id="web-viewer-power-select" class="dock-select" onchange="handleWebViewerPowerDropdown(this.value)">
+          <option value="" disabled selected>⚡ Energia</option>
+          <option value="lock">🔒 Bloquear PC (Win+L)</option>
+          <option value="reboot">🔄 Reiniciar PC</option>
+          <option value="suspend">🌙 Suspender / Repouso</option>
+          <option value="shutdown">🛑 Desligar PC</option>
+        </select>
+      </div>
+
+      <div style="width: 1px; height: 16px; background: rgba(255,255,255,0.18); margin: 0 2px; flex-shrink: 0;"></div>
+
+      <!-- Quick Actions -->
+      <button class="btn-action" onclick="sendViewerSys('cad')" title="Enviar Ctrl+Alt+Del" style="background: rgba(255,255,255,0.08); color: #fff;">⌨️ CAD</button>
+      <button class="btn-action" onclick="sendViewerSys('taskmgr')" title="Abrir Gerenciador de Tarefas" style="background: rgba(255,255,255,0.08); color: #fff;">⚡ Tarefas</button>
+      <button class="btn-action" onclick="sendViewerSys('desktop')" title="Mostrar Área de Trabalho" style="background: rgba(255,255,255,0.08); color: #fff;">🪟 Win+D</button>
+      <button class="btn-action" onclick="toggleViewerChat()" title="Bate-Papo" style="background: rgba(255,255,255,0.08); color: #fff;">💬 Chat <span id="viewer-chat-badge" class="chat-badge" style="display: none;">0</span></button>
+      <button class="btn-action" onclick="toggleViewerFullscreen()" title="Alternar Tela Cheia" style="background: rgba(255,255,255,0.08); color: #fff;">⛶ Tela Cheia</button>
+      <button class="btn-action btn-kill" onclick="closeWebViewer()" title="Desconectar e Sair">✕ Sair</button>
     </div>
 
     <div style="flex: 1; display: flex; align-items: center; justify-content: center; position: relative; width: 100%; height: 100%; overflow: hidden; background: #000;">
@@ -1011,10 +1041,14 @@
                 ? '<span style="color: #38bdf8; font-weight: 700;">● Em Andamento</span>'
                 : '<span style="color: #4ade80; font-weight: 700;">✓ Concluída (' + formatDuration(item.duration_sec) + ')</span>';
 
+              const clientDisplay = item.client_alias 
+                ? '<strong style="color: #d8b4fe;">' + item.client_alias + '</strong> <span style="font-size: 0.75rem; color: var(--text-muted);">(' + formatID(item.client_id) + ')</span>'
+                : '<span style="font-family: var(--font-mono); color: #d8b4fe;">' + formatID(item.client_id) + '</span>';
+
               tr.innerHTML = '<td>' + dateStr + '</td>' +
                 '<td><strong style="color: #60a5fa;">' + (item.host_alias || 'Host') + '</strong></td>' +
                 '<td><span class="id-tag" style="font-size: 0.9rem;">' + formatID(item.host_id) + '</span></td>' +
-                '<td><span style="font-family: var(--font-mono); color: #d8b4fe;">' + item.client_id + '</span></td>' +
+                '<td>' + clientDisplay + '</td>' +
                 '<td>' + statusTag + '</td>';
               hBody.appendChild(tr);
             });
@@ -1082,6 +1116,16 @@
       viewerConnected = true;
       updateWebViewerMonitors(monitorsCount || 1);
 
+      const dock = document.getElementById('web-viewer-toolbar');
+      if (dock) {
+        dock.classList.add('dock-visible');
+        setTimeout(() => {
+          if (dock && !dock.matches(':hover') && !dock.matches(':focus-within')) {
+            dock.classList.remove('dock-visible');
+          }
+        }, 3500);
+      }
+
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = wsProtocol + '//' + window.location.host + '/ws';
       const sessionId = 'web_admin_' + Math.random().toString(36).substring(2, 8);
@@ -1097,7 +1141,8 @@
           action: 'connect',
           id: sessionId,
           targetId: targetId,
-          password: targetPwd
+          password: targetPwd,
+          alias: 'Painel Web (Admin)'
         }));
         if (vPingTimer) clearInterval(vPingTimer);
         vPingTimer = setInterval(() => {
@@ -1290,6 +1335,17 @@
       sendViewerCtrl({ t: 'sys_cmd', cmd: cmd });
     }
 
+    function handleWebViewerPowerDropdown(action) {
+      const select = document.getElementById('web-viewer-power-select');
+      if (select) select.value = '';
+      if (!action) return;
+      if (action === 'lock') {
+        sendViewerSys('lock');
+      } else if (action === 'reboot' || action === 'shutdown' || action === 'suspend') {
+        sendViewerPower(action);
+      }
+    }
+
     function sendViewerPower(action) {
       if (!viewerConnected) return;
       if (action === 'reboot') {
@@ -1308,6 +1364,28 @@
         }
       }
     }
+
+    // Auto-hide toolbar mouse detection in browser web viewer
+    window.addEventListener('mousemove', (e) => {
+      if (!viewerConnected) return;
+      const dock = document.getElementById('web-viewer-toolbar');
+      if (!dock) return;
+      if (e.clientY <= 55) {
+        dock.classList.add('dock-visible');
+      } else if (e.clientY > 85 && !dock.matches(':hover') && !dock.matches(':focus-within')) {
+        dock.classList.remove('dock-visible');
+      }
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const vHandle = document.getElementById('web-viewer-tab-handle');
+      if (vHandle) {
+        vHandle.addEventListener('mouseenter', () => {
+          const dock = document.getElementById('web-viewer-toolbar');
+          if (dock) dock.classList.add('dock-visible');
+        });
+      }
+    });
 
     async function triggerServerWoL(mac, name) {
       if (!mac) return;
