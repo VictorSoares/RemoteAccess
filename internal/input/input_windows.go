@@ -4,6 +4,7 @@ package input
 
 import (
 	"image"
+	"os/exec"
 	"strings"
 	"sync"
 	"syscall"
@@ -15,6 +16,7 @@ var (
 	user32                       = syscall.NewLazyDLL("user32.dll")
 	shell32                      = syscall.NewLazyDLL("shell32.dll")
 	sasDll                       = syscall.NewLazyDLL("sas.dll")
+	powrprof                     = syscall.NewLazyDLL("powrprof.dll")
 	procSetCursorPos             = user32.NewProc("SetCursorPos")
 	procMouseEvent               = user32.NewProc("mouse_event")
 	procKeybdEvent               = user32.NewProc("keybd_event")
@@ -25,6 +27,7 @@ var (
 	procSetProcessDPIAware       = user32.NewProc("SetProcessDPIAware")
 	procSendSAS                  = sasDll.NewProc("SendSAS")
 	procShellExecute             = shell32.NewProc("ShellExecuteW")
+	procSetSuspendState          = powrprof.NewProc("SetSuspendState")
 
 	activeBoundsMu sync.RWMutex
 	activeBounds   image.Rectangle
@@ -75,6 +78,40 @@ func BlockLocalInput(block bool) error {
 // LockWorkstation immediately locks the Windows desktop
 func LockWorkstation() {
 	procLockWorkStation.Call()
+}
+
+// RebootMachine reboots the computer gracefully with a short 5-second countdown
+func RebootMachine() error {
+	cmd := exec.Command("shutdown.exe", "/r", "/t", "5", "/f", "/c", "Reiniciando via RemoteAccess...")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
+	}
+	return cmd.Run()
+}
+
+// ShutdownMachine powers off the computer gracefully with a short 5-second countdown
+func ShutdownMachine() error {
+	cmd := exec.Command("shutdown.exe", "/s", "/t", "5", "/f", "/c", "Desligando via RemoteAccess...")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
+	}
+	return cmd.Run()
+}
+
+// SuspendMachine places the computer into sleep/suspend mode instantly
+func SuspendMachine() {
+	if procSetSuspendState.Find() == nil {
+		procSetSuspendState.Call(0, 0, 0)
+		return
+	}
+	cmd := exec.Command("rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: 0x08000000,
+	}
+	_ = cmd.Run()
 }
 
 // OpenTaskManager launches Windows Task Manager directly without any console flashes

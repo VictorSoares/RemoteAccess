@@ -724,9 +724,12 @@
       <button class="btn-action" onclick="sendViewerSys('desktop')" style="background: rgba(255,255,255,0.1); color: #fff;">🪟 Win+D</button>
       <button class="btn-action" onclick="sendViewerSys('taskmgr')" style="background: rgba(255,255,255,0.1); color: #fff;">⚡ Tarefas</button>
       <button class="btn-action" onclick="sendViewerSys('lock')" style="background: rgba(255,255,255,0.1); color: #fff;">🔒 Bloquear</button>
+      <button class="btn-action" onclick="sendViewerPower('reboot')" style="background: rgba(255,255,255,0.1); color: #93c5fd;" title="Reiniciar PC Remoto com Confirmação">🔄 Reiniciar</button>
+      <button class="btn-action" onclick="sendViewerPower('suspend')" style="background: rgba(255,255,255,0.1); color: #cbd5e1;" title="Suspender PC Remoto">🌙 Suspender</button>
+      <button class="btn-action" onclick="sendViewerPower('shutdown')" style="background: rgba(255,255,255,0.1); color: #fca5a5;" title="Desligar PC Remoto com Confirmação">🛑 Desligar</button>
       <button class="btn-action" onclick="toggleViewerChat()" style="background: rgba(255,255,255,0.1); color: #fff;">💬 Chat <span id="viewer-chat-badge" class="chat-badge" style="display: none;">0</span></button>
       <button class="btn-action" onclick="toggleViewerFullscreen()" style="background: rgba(255,255,255,0.1); color: #fff;">⛶ Tela Cheia</button>
-      <button class="btn-action btn-kill" onclick="closeWebViewer()">🛑 Encerrar Acesso</button>
+      <button class="btn-action btn-kill" onclick="closeWebViewer()">✕ Desconectar</button>
     </div>
 
     <div style="flex: 1; display: flex; align-items: center; justify-content: center; position: relative; width: 100%; height: 100%; overflow: hidden; background: #000;">
@@ -909,6 +912,9 @@
             let actionsHtml = '';
             if (p.is_host) {
               actionsHtml += '<button class="btn-action btn-connect-direct" onclick="connectDirect(\'' + p.id + '\', \'' + (p.password || '') + '\', ' + monCount + ')">🚀 Acessar</button>';
+              if (p.mac) {
+                actionsHtml += '<button class="btn-action" style="background: rgba(245,158,11,0.2); color: #fcd34d; border: 1px solid rgba(245,158,11,0.4);" onclick="triggerServerWoL(\'' + p.mac + '\', \'' + (p.alias || p.id) + '\')" title="Disparar pacote Magic Packet Wake-on-LAN">⚡ WoL</button>';
+              }
               if (p.blocked) {
                 actionsHtml += '<button class="btn-action" style="background: rgba(16,185,129,0.2); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.4);" onclick="toggleBlockPeer(\'' + p.id + '\', false)">🔓 Desbloquear</button>';
               } else {
@@ -917,13 +923,15 @@
             }
             actionsHtml += '<button class="btn-action btn-kill" onclick="kickPeer(\'' + p.id + '\')">🛑 Kill</button>';
 
+            const macDisplay = p.mac ? '<div style="font-size: 0.72rem; color: #38bdf8; font-weight: 600;">⚡ ' + p.mac + '</div>' : '';
+
             tr.innerHTML = '<td>' + typeContainer + '</td>' +
               '<td>' + aliasDisplay + '</td>' +
               '<td><span class="id-tag">' + formatID(p.id) + '</span></td>' +
               '<td>' + pwdDisplay + '</td>' +
               '<td>' + statusHtml + '</td>' +
               '<td>' + formatDuration(p.duration_sec) + '</td>' +
-              '<td style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);">' + p.remote_addr + '</td>' +
+              '<td style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);">' + p.remote_addr + macDisplay + '</td>' +
               '<td class="actions-cell">' + actionsHtml + '</td>';
             tbody.appendChild(tr);
           });
@@ -1230,6 +1238,44 @@
 
     function sendViewerSys(cmd) {
       sendViewerCtrl({ t: 'sys_cmd', cmd: cmd });
+    }
+
+    function sendViewerPower(action) {
+      if (!viewerConnected) return;
+      if (action === 'reboot') {
+        if (confirm('⚠️ Deseja realmente REINICIAR este computador remoto?\n\nEle será reiniciado em 5 segundos e estará disponível para reconexão assim que inicializar.')) {
+          sendViewerSys('reboot');
+          alert('Comando de reinicialização transmitido ao computador.');
+        }
+      } else if (action === 'shutdown') {
+        if (confirm('🛑 ATENÇÃO: Deseja realmente DESLIGAR este computador remoto?\n\nEle será desligado completamente. Para ligá-lo novamente pela nuvem, use a função Wake-on-LAN (WoL).')) {
+          sendViewerSys('shutdown');
+          alert('Comando de desligamento transmitido ao computador.');
+        }
+      } else if (action === 'suspend') {
+        if (confirm('🌙 Deseja colocar o computador remoto em modo de SUSPENSÃO (Sleep)?')) {
+          sendViewerSys('suspend');
+        }
+      }
+    }
+
+    async function triggerServerWoL(mac, name) {
+      if (!mac) return;
+      try {
+        const res = await fetch('/api/wol?key=' + encodeURIComponent(adminKey), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mac: mac })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          alert('⚡ Pacote Magic Packet Wake-on-LAN disparado com sucesso para ' + name + ' (' + mac + ')!');
+        } else {
+          alert('Erro ao disparar Wake-on-LAN: ' + (data.message || 'Falha'));
+        }
+      } catch (err) {
+        alert('Erro ao enviar requisição WoL.');
+      }
     }
 
     function getVCoords(e) {

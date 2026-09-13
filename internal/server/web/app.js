@@ -204,6 +204,10 @@ async function fetchSystemInfo() {
     const data = await res.json();
     if (data.hostname) document.getElementById('sys-hostname').innerText = data.hostname;
     if (data.os) document.getElementById('sys-os').innerText = data.os;
+    if (data.mac) {
+      const macEl = document.getElementById('sys-mac');
+      if (macEl) macEl.innerText = data.mac;
+    }
     if (data.monitors) {
       document.getElementById('sys-monitors').innerText = `${data.monitors} Monitor(es)`;
       
@@ -366,6 +370,25 @@ async function kickActiveSession() {
 
 function sendSystemAction(action) {
   sendControl({ t: 'sys_cmd', cmd: action });
+}
+
+function sendPowerAction(action) {
+  if (!isConnected) return;
+  if (action === 'reboot') {
+    if (confirm('⚠️ Deseja realmente REINICIAR o computador remoto?\n\nO sistema será reiniciado em 5 segundos e você poderá reconectar assim que ele inicializar.')) {
+      sendControl({ t: 'sys_cmd', cmd: 'reboot' });
+      alert('Comando de reinicialização enviado ao computador remoto.');
+    }
+  } else if (action === 'shutdown') {
+    if (confirm('🛑 ATENÇÃO: Deseja realmente DESLIGAR o computador remoto?\n\nEle será desligado completamente. Para ligá-lo novamente à distância, será necessário utilizar Wake-on-LAN (WoL).')) {
+      sendControl({ t: 'sys_cmd', cmd: 'shutdown' });
+      alert('Comando de desligamento enviado ao computador remoto.');
+    }
+  } else if (action === 'suspend') {
+    if (confirm('🌙 Deseja colocar o computador remoto em modo de SUSPENSÃO (Sleep/Repouso)?')) {
+      sendControl({ t: 'sys_cmd', cmd: 'suspend' });
+    }
+  }
 }
 
 function updateNetworkBadge(status, url) {
@@ -1026,7 +1049,7 @@ function sendSpecialKey(type) {
   }
 }
 
-// Saved Connections with Passwords (1-Click Reconnect)
+// Saved Connections with Passwords and WoL (1-Click Reconnect & Wake-on-LAN)
 function loadRecentConnections() {
   const raw = localStorage.getItem('ra_saved_devices');
   const list = raw ? JSON.parse(raw) : [];
@@ -1042,9 +1065,24 @@ function loadRecentConnections() {
     const chip = document.createElement('div');
     chip.className = 'recent-chip';
     const label = item.alias ? `${item.alias} (${formatID(item.id)})` : formatID(item.id);
-    chip.innerHTML = `💻 <strong>${label}</strong> <span style="font-size: 0.75rem; background: rgba(59,130,246,0.3); padding: 0.15rem 0.4rem; border-radius: 4px; margin-left: 0.3rem;">⚡ Conectar</span> <span class="btn-remove-recent" title="Remover" style="margin-left: 0.4rem; opacity: 0.6; cursor: pointer;">✕</span>`;
     
-    chip.querySelector('strong').onclick = (e) => {
+    let wolHtml = '';
+    if (item.mac) {
+      wolHtml = `<button class="btn-wol-mini" onclick="event.stopPropagation(); triggerLocalWoL('${item.mac}', '${item.alias || item.id}')" title="Enviar Wake-on-LAN (Ligar este computador à distância)" style="background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.4); color: #fcd34d; padding: 0.2rem 0.5rem; border-radius: 6px; font-size: 0.75rem; cursor: pointer; margin-left: 0.35rem; font-weight: 700;">⚡ Ligar (WoL)</button>`;
+    } else {
+      wolHtml = `<button class="btn-wol-mini" onclick="event.stopPropagation(); promptSetDeviceMAC(${idx})" title="Cadastrar MAC Address para Wake-on-LAN" style="background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12); color: var(--text-muted); padding: 0.2rem 0.4rem; border-radius: 6px; font-size: 0.7rem; cursor: pointer; margin-left: 0.35rem;">+ WoL</button>`;
+    }
+
+    chip.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">
+        <span>💻 <strong>${label}</strong></span>
+        ${wolHtml}
+        <span class="btn-connect-chip" style="font-size: 0.75rem; background: rgba(59,130,246,0.3); padding: 0.2rem 0.5rem; border-radius: 6px; cursor: pointer; font-weight: 700; color: #93c5fd;">🚀 Conectar</span>
+        <span class="btn-remove-recent" title="Remover dos Recentes" style="margin-left: 0.3rem; opacity: 0.6; cursor: pointer; padding: 0.1rem 0.3rem;">✕</span>
+      </div>
+    `;
+    
+    chip.querySelector('.btn-connect-chip').onclick = (e) => {
       e.stopPropagation();
       document.getElementById('target-id').value = formatID(item.id);
       document.getElementById('target-pwd').value = item.password || '';
@@ -1065,6 +1103,36 @@ function loadRecentConnections() {
   });
 }
 
+async function triggerLocalWoL(mac, name) {
+  if (!mac) return;
+  try {
+    const res = await fetch('/api/send-wol', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mac: mac })
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      alert(`⚡ Pacote Magic Packet Wake-on-LAN disparado para ${name} (${mac})!\n\nSe a placa-mãe/BIOS estiver com WoL ativado, o computador irá ligar agora.`);
+    } else {
+      alert('Falha ao enviar pacote WoL: ' + (data.message || 'Erro desconhecido'));
+    }
+  } catch (err) {
+    alert('Erro de comunicação ao enviar Wake-on-LAN.');
+  }
+}
+
+function promptSetDeviceMAC(idx) {
+  let list = JSON.parse(localStorage.getItem('ra_saved_devices') || '[]');
+  if (!list[idx]) return;
+  const current = list[idx].mac || '';
+  const input = prompt(`Digite o endereço MAC físico do computador ${list[idx].alias || list[idx].id} (ex: 00:1A:2B:3C:4D:5E):`, current);
+  if (input === null) return;
+  list[idx].mac = input.trim().toUpperCase();
+  localStorage.setItem('ra_saved_devices', JSON.stringify(list));
+  loadRecentConnections();
+}
+
 function removeRecentConnection(idx) {
   let list = JSON.parse(localStorage.getItem('ra_saved_devices') || '[]');
   list.splice(idx, 1);
@@ -1072,9 +1140,12 @@ function removeRecentConnection(idx) {
   loadRecentConnections();
 }
 
-function saveRecentConnection(id, password, alias) {
+function saveRecentConnection(id, password, alias, mac) {
   let list = JSON.parse(localStorage.getItem('ra_saved_devices') || '[]');
-  list = [{ id: id, password: password, alias: alias || '' }, ...list.filter((x) => x.id !== id)].slice(0, 6);
+  const existing = list.find((x) => x.id === id);
+  const finalMac = mac || (existing ? existing.mac : '');
+  const finalAlias = alias || (existing ? existing.alias : '');
+  list = [{ id: id, password: password, alias: finalAlias, mac: finalMac }, ...list.filter((x) => x.id !== id)].slice(0, 8);
   localStorage.setItem('ra_saved_devices', JSON.stringify(list));
   loadRecentConnections();
 }

@@ -166,6 +166,10 @@
               <span class="pill-label">🪟 Sistema:</span>
               <span id="sys-os" class="pill-val">Windows</span>
             </div>
+            <div class="info-pill" title="Endereço MAC da placa de rede física (utilizado para Wake-on-LAN)">
+              <span class="pill-label">⚡ MAC (WoL):</span>
+              <span id="sys-mac" class="pill-val" style="font-family: var(--font-mono); font-weight: 700; color: #38bdf8;">Detectando...</span>
+            </div>
           </div>
 
           <!-- Unattended Access Settings -->
@@ -317,6 +321,15 @@
         <button class="dock-btn" onclick="sendSystemAction('lock')" title="Bloquear PC Remoto">
           🔒 <span class="dock-label">Bloquear</span>
         </button>
+        <button class="dock-btn" onclick="sendPowerAction('reboot')" title="Reiniciar PC Remoto com Confirmação">
+          🔄 <span class="dock-label">Reiniciar</span>
+        </button>
+        <button class="dock-btn" onclick="sendPowerAction('suspend')" title="Suspender/Dormir PC Remoto">
+          🌙 <span class="dock-label">Suspender</span>
+        </button>
+        <button class="dock-btn" onclick="sendPowerAction('shutdown')" title="Desligar PC Remoto com Confirmação" style="color: #f87171;">
+          🛑 <span class="dock-label">Desligar</span>
+        </button>
         <button class="dock-btn" id="btn-block-input" onclick="toggleBlockInput()" title="Bloquear Mouse e Teclado Local do PC Acessado">
           🚫 <span class="dock-label">Bloquear Entrada</span>
         </button>
@@ -333,7 +346,7 @@
         <div class="dock-divider"></div>
 
         <button class="dock-btn btn-disconnect" onclick="closeViewer()" title="Desconectar e Encerrar">
-          🛑 <span class="dock-label">Desconectar</span>
+          ✕ <span class="dock-label">Desconectar</span>
         </button>
       </div>
     </div>

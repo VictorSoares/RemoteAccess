@@ -34,6 +34,7 @@ func main() {
 	http.HandleFunc("/api/block", srv.HandleBlockPeer)
 	http.HandleFunc("/api/logs", srv.HandleLogs)
 	http.HandleFunc("/api/kick", srv.HandleKick)
+	http.HandleFunc("/api/wol", srv.HandleWoL)
 
 	// Health check endpoint for Render/Cloud monitoring
 	http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {

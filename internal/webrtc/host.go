@@ -225,6 +225,12 @@ func (h *HostSession) HandleControlData(data []byte) {
 			_ = input.KeyUp("Alt", "AltLeft", 18)
 		case "block_input":
 			_ = input.BlockLocalInput(ctrl.Block)
+		case "reboot":
+			_ = input.RebootMachine()
+		case "shutdown":
+			_ = input.ShutdownMachine()
+		case "suspend", "sleep":
+			input.SuspendMachine()
 		}
 	case protocol.TypeChat:
 		if h.OnChat != nil {

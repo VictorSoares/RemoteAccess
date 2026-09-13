@@ -16,6 +16,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"remoteaccess/internal/protocol"
+	"remoteaccess/internal/wol"
 )
 
 //go:embed web/dashboard.html
@@ -31,6 +32,7 @@ type Peer struct {
 	ID             string          `json:"id"`
 	Alias          string          `json:"alias"`
 	Monitors       int             `json:"monitors"`
+	MAC            string          `json:"mac,omitempty"`
 	IsHost         bool            `json:"is_host"`
 	Password       string          `json:"password,omitempty"`
 	RemoteAddr     string          `json:"remote_addr"`
@@ -212,12 +214,15 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 			if msg.Monitors > 0 {
 				peer.Monitors = msg.Monitors
 			}
+			if msg.MAC != "" {
+				peer.MAC = msg.MAC
+			}
 			peer.IsHost = true
 			peer.Password = msg.Password
 			s.peers[msg.ID] = peer
 			s.mu.Unlock()
 
-			s.addLog("Host registrado: %s [Nome: %s, Monitores: %d] (Pronto para conexões)", msg.ID, peer.Alias, peer.Monitors)
+			s.addLog("Host registrado: %s [Nome: %s, Monitores: %d, MAC: %s] (Pronto para conexões)", msg.ID, peer.Alias, peer.Monitors, peer.MAC)
 			_ = conn.WriteJSON(protocol.SignalingMessage{
 				Action:   protocol.ActionStatus,
 				Status:   "registered",
@@ -225,6 +230,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 				ID:       msg.ID,
 				Alias:    peer.Alias,
 				Monitors: peer.Monitors,
+				MAC:      peer.MAC,
 			})
 
 		case protocol.ActionUnregister:
@@ -383,6 +389,7 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 		ID             string `json:"id"`
 		Alias          string `json:"alias"`
 		Monitors       int    `json:"monitors"`
+		MAC            string `json:"mac,omitempty"`
 		IsHost         bool   `json:"is_host"`
 		Password       string `json:"password,omitempty"`
 		DurationSec    int    `json:"duration_sec"`
@@ -426,6 +433,7 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 			ID:             p.ID,
 			Alias:          p.Alias,
 			Monitors:       mons,
+			MAC:            p.MAC,
 			IsHost:         p.IsHost,
 			Password:       p.Password,
 			DurationSec:    int(time.Since(p.ConnectedAt).Seconds()),
@@ -553,6 +561,39 @@ func (s *Server) HandleKick(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"status": "ok",
 		"kicked": exists,
+	})
+}
+
+func (s *Server) HandleWoL(w http.ResponseWriter, r *http.Request) {
+	if !s.checkAdminAuth(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	var req struct {
+		MAC string `json:"mac"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.MAC) == "" {
+		http.Error(w, "Endereço MAC inválido", http.StatusBadRequest)
+		return
+	}
+
+	cleanMAC := strings.TrimSpace(req.MAC)
+	err := wol.SendMagicPacket(cleanMAC)
+	s.addLog("Pacote Wake-on-LAN disparado para o MAC: %s", cleanMAC)
+
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "error",
+			"message": fmt.Sprintf("Erro ao enviar pacote WoL: %v", err),
+		})
+		return
+	}
+
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "ok",
+		"message": fmt.Sprintf("Pacote Magic Packet Wake-on-LAN transmitido para %s", cleanMAC),
 	})
 }
 

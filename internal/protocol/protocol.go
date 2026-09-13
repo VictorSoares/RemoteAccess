@@ -22,6 +22,7 @@ type SignalingMessage struct {
 	ID        string          `json:"id,omitempty"`
 	Alias     string          `json:"alias,omitempty"`
 	Monitors  int             `json:"monitors,omitempty"`
+	MAC       string          `json:"mac,omitempty"`
 	TargetID  string          `json:"targetId,omitempty"`
 	Password  string          `json:"password,omitempty"`
 	SDP       string          `json:"sdp,omitempty"`

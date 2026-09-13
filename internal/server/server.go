@@ -20,6 +20,7 @@ import (
 	"remoteaccess/internal/protocol"
 	"remoteaccess/internal/signaling"
 	webrtcmod "remoteaccess/internal/webrtc"
+	"remoteaccess/internal/wol"
 )
 
 //go:embed web/*
@@ -101,6 +102,7 @@ func (s *LocalServer) Start(port int) error {
 	mux.HandleFunc("/api/kick-session", s.handleKickSession)
 	mux.HandleFunc("/api/chat-messages", s.handleGetChatMessages)
 	mux.HandleFunc("/api/send-chat", s.handleSendChatMessage)
+	mux.HandleFunc("/api/send-wol", s.handleSendWoL)
 	mux.HandleFunc("/api/system-info", s.handleSystemInfo)
 	mux.HandleFunc("/api/app-close", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -238,14 +240,38 @@ func (s *LocalServer) handleKickSession(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+func (s *LocalServer) handleSendWoL(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		MAC string `json:"mac"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.MAC) == "" {
+		http.Error(w, "Endereço MAC inválido", http.StatusBadRequest)
+		return
+	}
+	cleanMAC := strings.TrimSpace(req.MAC)
+	err := wol.SendMagicPacket(cleanMAC)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Erro ao enviar pacote WoL: %v", err), http.StatusInternalServerError)
+		return
+	}
+	log.Printf("[WoL] Pacote Magic Packet Wake-on-LAN enviado para: %s", cleanMAC)
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"status":  "ok",
+		"message": fmt.Sprintf("Pacote Wake-on-LAN transmitido para %s", cleanMAC),
+	})
+}
+
 func (s *LocalServer) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 	hostname, _ := os.Hostname()
 	numDisplays := capture.GetNumDisplays()
+	primaryMAC := wol.GetPrimaryMACAddress()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"hostname": hostname,
 		"os":       runtime.GOOS + " " + runtime.GOARCH,
 		"monitors": numDisplays,
+		"mac":      primaryMAC,
 	})
 }
 
@@ -272,6 +298,7 @@ func (s *LocalServer) handleHostInfo(w http.ResponseWriter, r *http.Request) {
 		"signaling_url": s.Config.Data.SignalingURL,
 		"save_log_file": s.Config.Data.SaveLogFile,
 		"cloud_status":  s.cloudStatus,
+		"mac":           wol.GetPrimaryMACAddress(),
 	})
 }
 
@@ -303,6 +330,7 @@ func (s *LocalServer) handleSetAlias(w http.ResponseWriter, r *http.Request) {
 			Alias:    cleanAlias,
 			Password: hostPwd,
 			Monitors: capture.GetNumDisplays(),
+			MAC:      wol.GetPrimaryMACAddress(),
 		})
 	}
 
@@ -370,6 +398,7 @@ func (s *LocalServer) handleSetPassword(w http.ResponseWriter, r *http.Request) 
 			Alias:    hostAlias,
 			Password: req.Password,
 			Monitors: capture.GetNumDisplays(),
+			MAC:      wol.GetPrimaryMACAddress(),
 		})
 	}
 
@@ -457,9 +486,10 @@ func (s *LocalServer) cloudSignalingLoop() {
 		hostAlias := s.Config.Data.Alias
 		hostPwd := s.Config.Data.Password
 		numDisplays := capture.GetNumDisplays()
+		primaryMAC := wol.GetPrimaryMACAddress()
 		s.mu.Unlock()
 
-		log.Printf("[Nuvem] Conectado com sucesso! Registrado Host ID: %s (Alias: %s, Monitores: %d)", hostID, hostAlias, numDisplays)
+		log.Printf("[Nuvem] Conectado com sucesso! Registrado Host ID: %s (Alias: %s, Monitores: %d, MAC: %s)", hostID, hostAlias, numDisplays, primaryMAC)
 
 		err = conn.WriteJSON(protocol.SignalingMessage{
 			Action:   protocol.ActionRegister,
@@ -467,6 +497,7 @@ func (s *LocalServer) cloudSignalingLoop() {
 			Alias:    hostAlias,
 			Password: hostPwd,
 			Monitors: numDisplays,
+			MAC:      primaryMAC,
 		})
 		if err != nil {
 			conn.Close()
