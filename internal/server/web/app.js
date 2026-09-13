@@ -389,6 +389,8 @@ async function fetchSessionStatus() {
       if (box) box.style.display = 'none';
       const chatSec = document.getElementById('host-chat-container');
       if (chatSec) chatSec.style.display = 'none';
+      const floatingDrawer = document.getElementById('host-floating-chat-drawer');
+      if (floatingDrawer) floatingDrawer.style.display = 'none';
       const badge = document.getElementById('host-chat-badge');
       if (badge) {
         badge.innerText = '0';
@@ -397,6 +399,10 @@ async function fetchSessionStatus() {
       const chatMessages = document.getElementById('host-chat-messages');
       if (chatMessages && lastSeenHostMsgCount > 0) {
         chatMessages.innerHTML = '<div class="chat-intro">💬 Bate-papo em tempo real com o operador remoto.</div>';
+      }
+      const floatMessages = document.getElementById('host-floating-chat-messages');
+      if (floatMessages && lastSeenHostMsgCount > 0) {
+        floatMessages.innerHTML = '<div class="chat-intro">Sessão de chat conectada com o operador remoto</div>';
       }
       hostChatOpen = false;
       lastSeenHostMsgCount = 0;
@@ -466,17 +472,31 @@ function handleToastClick() {
 
 function handleHostToastClick() {
   hideHostToast();
-  hostChatOpen = true;
-  const chatSec = document.getElementById('host-chat-container');
-  if (chatSec) {
-    chatSec.style.display = 'flex';
-    const input = document.getElementById('host-chat-input');
-    if (input) setTimeout(() => input.focus(), 60);
+  toggleHostFloatingChat(true);
+}
+
+function toggleHostFloatingChat(forceOpen) {
+  const drawer = document.getElementById('host-floating-chat-drawer');
+  if (!drawer) return;
+  if (forceOpen === true) {
+    hostChatOpen = true;
+  } else if (forceOpen === false) {
+    hostChatOpen = false;
+  } else {
+    hostChatOpen = !hostChatOpen;
   }
-  const badge = document.getElementById('host-chat-badge');
-  if (badge) {
-    badge.innerText = '0';
-    badge.style.display = 'none';
+  drawer.style.display = hostChatOpen ? 'flex' : 'none';
+  if (hostChatOpen) {
+    hideHostToast();
+    const badge = document.getElementById('host-chat-badge');
+    if (badge) {
+      badge.innerText = '0';
+      badge.style.display = 'none';
+    }
+    const container = document.getElementById('host-floating-chat-messages');
+    if (container) container.scrollTop = container.scrollHeight;
+    const input = document.getElementById('host-floating-chat-input');
+    if (input) setTimeout(() => input.focus(), 60);
   }
 }
 
@@ -487,20 +507,28 @@ async function refreshHostChat() {
     if (!data.messages) return;
 
     const container = document.getElementById('host-chat-messages');
+    const floatContainer = document.getElementById('host-floating-chat-messages');
     if (data.messages.length !== lastSeenHostMsgCount) {
       const prevCount = lastSeenHostMsgCount;
       lastSeenHostMsgCount = data.messages.length;
 
-      if (container) {
-        container.innerHTML = '';
+      const buildChatHTML = () => {
+        let html = '';
         data.messages.forEach(msg => {
           const isMe = msg.sender.includes('Host') || msg.sender.includes('Você');
-          const bubble = document.createElement('div');
-          bubble.className = `msg-bubble ${isMe ? 'msg-mine' : 'msg-other'}`;
-          bubble.innerHTML = `<strong style="font-size: 0.72rem; opacity: 0.85;">${msg.sender}</strong><div>${msg.text}</div><div class="msg-meta">${msg.time}</div>`;
-          container.appendChild(bubble);
+          html += `<div class="msg-bubble ${isMe ? 'msg-mine' : 'msg-other'}"><strong style="font-size: 0.72rem; opacity: 0.85;">${msg.sender}</strong><div>${msg.text}</div><div class="msg-meta">${msg.time}</div></div>`;
         });
+        return html;
+      };
+
+      const chatHtml = buildChatHTML();
+      if (container) {
+        container.innerHTML = chatHtml;
         container.scrollTop = container.scrollHeight;
+      }
+      if (floatContainer) {
+        floatContainer.innerHTML = chatHtml;
+        floatContainer.scrollTop = floatContainer.scrollHeight;
       }
 
       const newSlice = data.messages.slice(prevCount);
@@ -508,6 +536,8 @@ async function refreshHostChat() {
         const isMe = msg.sender.includes('Host') || msg.sender.includes('Você');
         if (!isMe) {
           showChatToast(msg.sender, msg.text);
+          // Auto-open floating chat window for host so customer sees it immediately on bottom-right!
+          toggleHostFloatingChat(true);
           const badge = document.getElementById('host-chat-badge');
           if (badge && !hostChatOpen) {
             badge.innerText = parseInt(badge.innerText || '0') + 1;
@@ -521,7 +551,7 @@ async function refreshHostChat() {
 }
 
 function toggleHostChat() {
-  hostChatOpen = !hostChatOpen;
+  toggleHostFloatingChat();
   const chatSec = document.getElementById('host-chat-container');
   if (chatSec) chatSec.style.display = hostChatOpen ? 'flex' : 'none';
   if (hostChatOpen) {
@@ -540,6 +570,24 @@ function toggleHostChat() {
 async function sendHostChatMessage(e) {
   if (e) e.preventDefault();
   const input = document.getElementById('host-chat-input');
+  if (!input) return;
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+
+  try {
+    await fetch('/api/send-chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text })
+    });
+    await refreshHostChat();
+  } catch (err) {}
+}
+
+async function sendHostFloatingChatMessage(e) {
+  if (e) e.preventDefault();
+  const input = document.getElementById('host-floating-chat-input');
   if (!input) return;
   const text = input.value.trim();
   if (!text) return;

@@ -1022,6 +1022,20 @@ select option, .dock-select option {
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7);
 }
 
+.chat-drawer-fixed {
+  position: fixed !important;
+  right: 24px !important;
+  bottom: 24px !important;
+  width: 330px !important;
+  height: 420px !important;
+  max-width: 90vw;
+  max-height: 80vh;
+  z-index: 100005 !important;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.8), 0 0 20px rgba(56, 189, 248, 0.25);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  animation: slide-in-toast 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 .chat-header {
   padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--border);

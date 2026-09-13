@@ -98,18 +98,7 @@ func (h *HostSession) HandleRemoteOffer(targetID string, sdpStr string) error {
 	})
 
 	pc.OnConnectionStateChange(func(state pion.PeerConnectionState) {
-		log.Printf("[Host] PeerConnection State: %s", state.String())
-		if state == pion.PeerConnectionStateClosed || state == pion.PeerConnectionStateFailed || state == pion.PeerConnectionStateDisconnected {
-			go func() {
-				time.Sleep(1500 * time.Millisecond)
-				h.mu.Lock()
-				pcCurrent := h.peerConn
-				h.mu.Unlock()
-				if pcCurrent != nil && (pcCurrent.ConnectionState() == pion.PeerConnectionStateClosed || pcCurrent.ConnectionState() == pion.PeerConnectionStateFailed || pcCurrent.ConnectionState() == pion.PeerConnectionStateDisconnected) {
-					h.Close()
-				}
-			}()
-		}
+		log.Printf("[Host] PeerConnection State: %s (Relay WSS ativo em paralelo)", state.String())
 	})
 
 	pc.OnICECandidate(func(c *pion.ICECandidate) {

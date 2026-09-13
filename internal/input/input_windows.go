@@ -355,6 +355,8 @@ func MoveMouseAbsolute(ratioX, ratioY float64) error {
 	targetY := originY + int32(ratioY*float64(h))
 
 	procSetCursorPos.Call(uintptr(targetX), uintptr(targetY))
+	// Synthesize hardware mouse move event into Windows input subsystem to trigger Taskbar Previews and Hover states
+	procMouseEvent.Call(mouseeventfMove, 0, 0, 0, remoteAccessMagicExtraInfo)
 	return nil
 }
 

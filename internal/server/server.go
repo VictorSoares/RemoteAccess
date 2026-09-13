@@ -40,10 +40,21 @@ type LocalServer struct {
 	hostSession *webrtcmod.HostSession
 	upgrader    websocket.Upgrader
 	cloudWS     *websocket.Conn
+	cloudWsMu   sync.Mutex
 	cloudStatus string
 	stopCloud   chan struct{}
 	chatMsgs    []ChatMessage
 	chatMu      sync.Mutex
+}
+
+func (s *LocalServer) writeCloudJSON(msg protocol.SignalingMessage) error {
+	s.cloudWsMu.Lock()
+	defer s.cloudWsMu.Unlock()
+	if s.cloudWS == nil {
+		return fmt.Errorf("cloud ws is nil")
+	}
+	_ = s.cloudWS.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	return s.cloudWS.WriteJSON(msg)
 }
 
 func normalizeWSURL(rawURL string) string {
@@ -221,10 +232,9 @@ func (s *LocalServer) handleKickSession(w http.ResponseWriter, r *http.Request) 
 	s.mu.Lock()
 	if s.hostSession != nil {
 		clientID := s.hostSession.ClientID
-		cws := s.cloudWS
 		hostID := s.Config.Data.ID
-		if cws != nil && clientID != "" {
-			_ = cws.WriteJSON(protocol.SignalingMessage{
+		if clientID != "" {
+			_ = s.writeCloudJSON(protocol.SignalingMessage{
 				Action:   protocol.ActionClose,
 				ID:       hostID,
 				TargetID: clientID,
@@ -532,8 +542,10 @@ func (s *LocalServer) cloudSignalingLoop() {
 			continue
 		}
 
-		s.mu.Lock()
+		s.cloudWsMu.Lock()
 		s.cloudWS = conn
+		s.cloudWsMu.Unlock()
+		s.mu.Lock()
 		s.cloudStatus = "connected"
 		hostID := s.Config.Data.ID
 		hostAlias := s.Config.Data.Alias
@@ -544,7 +556,7 @@ func (s *LocalServer) cloudSignalingLoop() {
 
 		log.Printf("[Nuvem] Conectado com sucesso! Registrado Host ID: %s (Alias: %s, Monitores: %d, MAC: %s)", hostID, hostAlias, numDisplays, primaryMAC)
 
-		err = conn.WriteJSON(protocol.SignalingMessage{
+		err = s.writeCloudJSON(protocol.SignalingMessage{
 			Action:   protocol.ActionRegister,
 			ID:       hostID,
 			Alias:    hostAlias,
@@ -557,6 +569,25 @@ func (s *LocalServer) cloudSignalingLoop() {
 			continue
 		}
 
+		pingTicker := time.NewTicker(15 * time.Second)
+		pingDone := make(chan struct{})
+		go func() {
+			defer pingTicker.Stop()
+			for {
+				select {
+				case <-pingDone:
+					return
+				case <-pingTicker.C:
+					s.cloudWsMu.Lock()
+					if s.cloudWS != nil {
+						_ = s.cloudWS.SetWriteDeadline(time.Now().Add(5 * time.Second))
+						_ = s.cloudWS.WriteMessage(websocket.PingMessage, []byte{})
+					}
+					s.cloudWsMu.Unlock()
+				}
+			}
+		}()
+
 		for {
 			var msg protocol.SignalingMessage
 			err := conn.ReadJSON(&msg)
@@ -568,9 +599,12 @@ func (s *LocalServer) cloudSignalingLoop() {
 			s.handleSignalingMessage(conn, msg)
 		}
 
+		close(pingDone)
 		conn.Close()
-		s.mu.Lock()
+		s.cloudWsMu.Lock()
 		s.cloudWS = nil
+		s.cloudWsMu.Unlock()
+		s.mu.Lock()
 		s.cloudStatus = "disconnected"
 		s.mu.Unlock()
 
@@ -600,7 +634,7 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 				if outMsg.TargetID == "" {
 					outMsg.TargetID = senderID
 				}
-				_ = conn.WriteJSON(outMsg)
+				_ = s.writeCloudJSON(outMsg)
 			})
 			if err != nil {
 				s.mu.Unlock()
@@ -609,12 +643,14 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 			}
 
 			sess.OnRelayFrame = func(jpegBase64 string) {
-				_ = conn.WriteJSON(protocol.SignalingMessage{
-					Action:   protocol.ActionData,
-					ID:       s.Config.Data.ID,
-					TargetID: senderID,
-					Payload:  jpegBase64,
-				})
+				go func(b64 string) {
+					_ = s.writeCloudJSON(protocol.SignalingMessage{
+						Action:   protocol.ActionData,
+						ID:       s.Config.Data.ID,
+						TargetID: senderID,
+						Payload:  b64,
+					})
+				}(jpegBase64)
 			}
 
 			sess.OnChat = func(sender string, text string) {
@@ -647,7 +683,7 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 				Type:    protocol.TypeInitInfo,
 				Monitor: numDisplays,
 			})
-			_ = conn.WriteJSON(protocol.SignalingMessage{
+			_ = s.writeCloudJSON(protocol.SignalingMessage{
 				Action:   protocol.ActionData,
 				ID:       s.Config.Data.ID,
 				TargetID: senderID,

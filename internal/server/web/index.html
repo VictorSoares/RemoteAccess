@@ -385,6 +385,21 @@
     </div>
   </div>
 
+  <!-- Floating In-App Chat Drawer for Host/Client (Fixed bottom-right) -->
+  <div id="host-floating-chat-drawer" class="chat-drawer chat-drawer-fixed" style="display: none;">
+    <div class="chat-header">
+      <span class="chat-title">💬 Bate-Papo com o Controlador</span>
+      <button class="btn-close-chat" onclick="toggleHostFloatingChat()">✕</button>
+    </div>
+    <div id="host-floating-chat-messages" class="chat-body">
+      <div class="chat-intro">Sessão de chat conectada com o operador remoto</div>
+    </div>
+    <form onsubmit="sendHostFloatingChatMessage(event)" class="chat-footer">
+      <input type="text" id="host-floating-chat-input" class="chat-input" placeholder="Digite uma mensagem..." required autocomplete="off">
+      <button type="submit" class="btn-send-chat">Enviar</button>
+    </form>
+  </div>
+
   <!-- Floating Toast Notification for Host/Client View -->
   <div id="host-toast-popup" class="chat-toast-popup" style="display: none;" onclick="handleHostToastClick()">
     <div class="chat-toast-icon">💬</div>
