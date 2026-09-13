@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -88,12 +89,6 @@ func runNativeAppWindow(url string) {
 				)
 				if err := cmd.Start(); err == nil {
 					log.Printf("[Janela] Janela desktop nativa iniciada via Edge (%s)", edgePath)
-					go func() {
-						_ = cmd.Wait()
-						log.Println("[Janela] Janela desktop fechada pelo usuário. Encerrando processo...")
-						time.Sleep(100 * time.Millisecond)
-						os.Exit(0)
-					}()
 					return
 				}
 			}
@@ -211,14 +206,18 @@ func main() {
 		}
 	}()
 
-	// Wait until HTTP server is actively accepting connections
-	for i := 0; i < 50; i++ {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 50*time.Millisecond)
-		if err == nil {
-			conn.Close()
+	// Wait until HTTP server is actively answering HTTP requests
+	httpClient := &http.Client{Timeout: 80 * time.Millisecond}
+	for i := 0; i < 100; i++ {
+		resp, err := httpClient.Get(fmt.Sprintf("http://127.0.0.1:%d/api/host-info", port))
+		if err == nil && resp.StatusCode == http.StatusOK {
+			_ = resp.Body.Close()
 			break
 		}
-		time.Sleep(30 * time.Millisecond)
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 
 	// Initialize Windows System Tray Icon with native context menu
@@ -237,10 +236,7 @@ func main() {
 
 	// Launch as Standalone Desktop Window (unless in silent autostart background mode)
 	if !*noBrowser {
-		go func() {
-			time.Sleep(120 * time.Millisecond)
-			runNativeAppWindow(url)
-		}()
+		runNativeAppWindow(url)
 	}
 
 	<-stop
