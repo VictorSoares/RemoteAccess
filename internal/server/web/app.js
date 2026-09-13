@@ -1036,11 +1036,15 @@ async function connectToRemote(e) {
 
   peerConnection.onconnectionstatechange = () => {
     console.log('[WebRTC] Connection State:', peerConnection.connectionState);
-    if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'closed') {
-      if (isConnected) {
-        closeViewer();
-        showModalAlert('Sessão Encerrada', 'A conexão com o computador remoto foi encerrada.', 'ℹ️');
-      }
+    if (peerConnection.connectionState === 'connected') {
+      const badgeEl = document.getElementById('hud-status-badge');
+      if (badgeEl) badgeEl.innerHTML = `<span class="hud-dot"></span> P2P Direct`;
+      const latEl = document.getElementById('stat-latency');
+      if (latEl) latEl.innerText = `⚡ P2P Ativo`;
+    } else if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected') {
+      console.log('[WebRTC] P2P direto indisponível, transmitindo via Nuvem Relay.');
+      const badgeEl = document.getElementById('hud-status-badge');
+      if (badgeEl) badgeEl.innerHTML = `<span class="hud-dot" style="background-color: #38bdf8; box-shadow: 0 0 6px #38bdf8;"></span> Nuvem Relay`;
     }
   };
 
@@ -1083,11 +1087,7 @@ function setupDataChannels(targetId) {
   };
 
   inputChannel.onclose = () => {
-    console.log('[Client] Input DataChannel fechado.');
-    if (isConnected) {
-      closeViewer();
-      showModalAlert('Sessão Encerrada', 'A sessão remota foi desconectada pelo Host.', 'ℹ️');
-    }
+    console.log('[Client] Input DataChannel fechado. Controles ativos via Nuvem Relay.');
   };
 
   inputChannel.onmessage = (event) => {

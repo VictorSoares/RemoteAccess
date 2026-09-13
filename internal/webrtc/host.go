@@ -117,18 +117,10 @@ func (h *HostSession) HandleRemoteOffer(targetID string, sdpStr string) error {
 
 	pc.OnICEConnectionStateChange(func(state pion.ICEConnectionState) {
 		log.Printf("[Host] ICE P2P State: %s (Relay WSS ativo em paralelo)", state.String())
-		if state == pion.ICEConnectionStateFailed || state == pion.ICEConnectionStateClosed {
-			log.Printf("[Host] ICE connection state is %s, cleaning up session.", state.String())
-			go h.Close()
-		}
 	})
 
 	pc.OnConnectionStateChange(func(state pion.PeerConnectionState) {
 		log.Printf("[Host] PeerConnection State: %s (Relay WSS ativo em paralelo)", state.String())
-		if state == pion.PeerConnectionStateClosed || state == pion.PeerConnectionStateFailed || state == pion.PeerConnectionStateDisconnected {
-			log.Printf("[Host] PeerConnection state is %s, closing host session.", state.String())
-			go h.Close()
-		}
 	})
 
 	pc.OnICECandidate(func(c *pion.ICECandidate) {
@@ -401,8 +393,8 @@ func (h *HostSession) StartStreaming() {
 				}
 			case <-watchdogTicker.C:
 				last := atomic.LoadInt64(&h.lastActivity)
-				if last > 0 && time.Now().Unix()-last > 8 {
-					log.Printf("[Host] Cliente (%s) inativo/desconectado por mais de 8s. Encerrando sessão automaticamente.", h.ClientID)
+				if last > 0 && time.Now().Unix()-last > 30 {
+					log.Printf("[Host] Cliente (%s) inativo por mais de 30s. Encerrando sessão automaticamente.", h.ClientID)
 					go h.Close()
 					return
 				}
@@ -453,6 +445,14 @@ func (h *HostSession) Close() {
 			Text: "Sessão encerrada pelo Host.",
 		})
 		_ = h.inputChannel.Send(closeMsg)
+	}
+	// Notify Cloud Signaling Server so the controller and relay are in 100% sync
+	if h.SendSignal != nil && h.ClientID != "" {
+		h.SendSignal(protocol.SignalingMessage{
+			Action:   protocol.ActionClose,
+			TargetID: h.ClientID,
+			Message:  "Sessão encerrada pelo Host.",
+		})
 	}
 	for _, f := range h.activeFiles {
 		if f != nil {

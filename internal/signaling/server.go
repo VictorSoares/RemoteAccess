@@ -371,6 +371,12 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+			if !exists && peer.ActiveTargetID != "" {
+				if tp, ok := s.peers[peer.ActiveTargetID]; ok {
+					targetPeer = tp
+					exists = true
+				}
+			}
 			s.mu.RUnlock()
 
 			if exists {
@@ -387,8 +393,10 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 						tAlias = targetPeer.ID
 					}
 					s.addLog("Sessão finalizada: %s (%s) encerrou a conexão com %s (%s)", pAlias, peer.ID, tAlias, targetPeer.ID)
+					s.mu.Lock()
 					peer.ActiveTargetID = ""
 					targetPeer.ActiveTargetID = ""
+					s.mu.Unlock()
 					s.endHistorySession(peer.ID, targetPeer.ID)
 				}
 				targetPeer.mu.Lock()
