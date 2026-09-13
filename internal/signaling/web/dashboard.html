@@ -629,6 +629,53 @@
     .chat-toast-close:hover {
       color: #fff;
     }
+    /* Custom In-App Glassmorphic Dialog Modal */
+    .modal-backdrop {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(8px);
+      z-index: 200000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .dialog-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      max-width: 440px;
+      width: 90%;
+      display: flex;
+      flex-direction: column;
+      padding: 1.5rem;
+      text-align: center;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), 0 0 30px rgba(59, 130, 246, 0.2);
+      animation: modal-pop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @keyframes modal-pop {
+      from { transform: scale(0.92); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+    .dialog-input {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid var(--border);
+      color: #fff;
+      padding: 0.6rem 0.85rem;
+      border-radius: 8px;
+      font-size: 0.88rem;
+      outline: none;
+      width: 100%;
+      margin-bottom: 1.25rem;
+      font-family: var(--font-family);
+    }
+    .dialog-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 10px var(--accent-glow);
+    }
   </style>
 </head>
 <body>
@@ -848,6 +895,17 @@
         </div>
         <button class="chat-toast-close" onclick="event.stopPropagation(); hideViewerToast()">✕</button>
       </div>
+  <!-- Custom In-App Glassmorphic Dialog Modal (Alert, Confirm, Prompt) -->
+  <div id="app-dialog-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card dialog-card">
+      <div id="dialog-icon" style="font-size: 2.2rem; margin-bottom: 0.5rem;">⚡</div>
+      <h3 id="dialog-title" style="font-size: 1.15rem; font-weight: 800; margin-bottom: 0.5rem; color: #fff;">Aviso</h3>
+      <p id="dialog-message" style="font-size: 0.88rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 1.25rem; white-space: pre-line;">Mensagem</p>
+      <input type="text" id="dialog-input" class="dialog-input" style="display: none;" autocomplete="off">
+      <div id="dialog-actions" style="display: flex; gap: 0.6rem; justify-content: center;">
+        <button id="dialog-btn-cancel" class="btn-action" style="display: none; background: rgba(255,255,255,0.08); color: #cbd5e1; padding: 0.55rem 1.1rem; border-radius: 8px; font-size: 0.85rem;" onclick="closeAppDialog(false)">Cancelar</button>
+        <button id="dialog-btn-ok" class="btn-action btn-connect-direct" style="padding: 0.55rem 1.4rem; border-radius: 8px; font-size: 0.85rem;" onclick="closeAppDialog(true)">OK</button>
+      </div>
     </div>
   </div>
 
@@ -860,6 +918,71 @@
     let vLastFpsTime = performance.now();
     const vCanvas = document.getElementById('viewer-canvas');
     const vCtx = vCanvas.getContext('2d');
+
+    // Dialog helper for Custom In-App Glassmorphic Modals
+    let dialogResolve = null;
+
+    function showModalAlert(title, message, icon = 'ℹ️') {
+      return new Promise((resolve) => {
+        dialogResolve = resolve;
+        document.getElementById('dialog-icon').innerText = icon;
+        document.getElementById('dialog-title').innerText = title;
+        document.getElementById('dialog-message').innerText = message;
+        document.getElementById('dialog-input').style.display = 'none';
+        document.getElementById('dialog-btn-cancel').style.display = 'none';
+        document.getElementById('dialog-btn-ok').innerText = 'OK';
+        document.getElementById('app-dialog-modal').style.display = 'flex';
+      });
+    }
+
+    function showModalConfirm(title, message, icon = '⚠️', okText = 'Confirmar', cancelText = 'Cancelar') {
+      return new Promise((resolve) => {
+        dialogResolve = resolve;
+        document.getElementById('dialog-icon').innerText = icon;
+        document.getElementById('dialog-title').innerText = title;
+        document.getElementById('dialog-message').innerText = message;
+        document.getElementById('dialog-input').style.display = 'none';
+        document.getElementById('dialog-btn-cancel').innerText = cancelText;
+        document.getElementById('dialog-btn-cancel').style.display = 'inline-block';
+        document.getElementById('dialog-btn-ok').innerText = okText;
+        document.getElementById('app-dialog-modal').style.display = 'flex';
+      });
+    }
+
+    function showModalPrompt(title, message, defaultValue = '', icon = '✏️', okText = 'Salvar', cancelText = 'Cancelar') {
+      return new Promise((resolve) => {
+        dialogResolve = resolve;
+        document.getElementById('dialog-icon').innerText = icon;
+        document.getElementById('dialog-title').innerText = title;
+        document.getElementById('dialog-message').innerText = message;
+        const input = document.getElementById('dialog-input');
+        input.style.display = 'block';
+        input.value = defaultValue;
+        document.getElementById('dialog-btn-cancel').innerText = cancelText;
+        document.getElementById('dialog-btn-cancel').style.display = 'inline-block';
+        document.getElementById('dialog-btn-ok').innerText = okText;
+        document.getElementById('app-dialog-modal').style.display = 'flex';
+        setTimeout(() => {
+          input.focus();
+          input.select();
+        }, 60);
+      });
+    }
+
+    function closeAppDialog(result) {
+      const modal = document.getElementById('app-dialog-modal');
+      modal.style.display = 'none';
+      const input = document.getElementById('dialog-input');
+      const isPrompt = input.style.display !== 'none';
+      if (dialogResolve) {
+        if (isPrompt) {
+          dialogResolve(result ? input.value : null);
+        } else {
+          dialogResolve(result);
+        }
+        dialogResolve = null;
+      }
+    }
 
     function formatDuration(sec) {
       const h = Math.floor(sec / 3600).toString().padStart(2, '0');
@@ -901,10 +1024,10 @@
           document.getElementById('auth-overlay').style.display = 'none';
           refreshData();
         } else {
-          alert('Chave incorreta.');
+          await showModalAlert('Acesso Negado', 'Chave de segurança incorreta. Verifique a chave informada.', '🔒');
         }
       } catch (err) {
-        alert('Erro ao autenticar.');
+        await showModalAlert('Erro', 'Não foi possível autenticar no servidor.', '❌');
       }
     }
 
@@ -931,10 +1054,10 @@
 
     function copyPwd(pwd) {
       if (!pwd) return;
-      navigator.clipboard.writeText(pwd).then(() => {
-        alert('Senha copiada para a área de transferência!');
-      }).catch(() => {
-        prompt('Copie a senha:', pwd);
+      navigator.clipboard.writeText(pwd).then(async () => {
+        await showModalAlert('Copiado', 'Senha copiada para a área de transferência!', '📋');
+      }).catch(async () => {
+        await showModalPrompt('Copiar Senha', 'Copie a senha abaixo:', pwd, '📋', 'OK', 'Fechar');
       });
     }
 
@@ -1086,12 +1209,13 @@
         });
         refreshData();
       } catch (err) {
-        alert('Erro ao alterar status de bloqueio.');
+        await showModalAlert('Erro', 'Erro ao alterar status de bloqueio.', '❌');
       }
     }
 
     async function kickPeer(id) {
-      if (!confirm('Deseja realmente forçar a desconexão do dispositivo ' + id + '?')) return;
+      const ok = await showModalConfirm('Desconectar Dispositivo', 'Deseja realmente forçar a desconexão do dispositivo ' + id + '?', '🛑', 'Desconectar', 'Cancelar');
+      if (!ok) return;
       try {
         await fetch('/api/kick?key=' + encodeURIComponent(adminKey), {
           method: 'POST',
@@ -1100,7 +1224,7 @@
         });
         refreshData();
       } catch (err) {
-        alert('Erro ao desconectar dispositivo.');
+        await showModalAlert('Erro', 'Erro ao desconectar dispositivo.', '❌');
       }
     }
 
@@ -1170,7 +1294,7 @@
         }, 1200);
       };
 
-      viewerWS.onmessage = (event) => {
+      viewerWS.onmessage = async (event) => {
         try {
           const msg = JSON.parse(event.data);
           if (msg.action === 'data') {
@@ -1208,10 +1332,10 @@
             };
             img.src = 'data:image/jpeg;base64,' + msg.payload;
           } else if (msg.action === 'close') {
-            alert('A sessão remota foi encerrada pelo computador remoto.');
+            await showModalAlert('Sessão Encerrada', 'A sessão remota foi encerrada pelo computador remoto.', 'ℹ️');
             closeWebViewer();
           } else if (msg.action === 'error') {
-            alert(msg.message || 'Erro de conexão.');
+            await showModalAlert('Erro na Conexão', msg.message || 'Erro de conexão com o computador remoto.', '❌');
             closeWebViewer();
           }
         } catch(e) {}
@@ -1368,20 +1492,23 @@
       }
     }
 
-    function sendViewerPower(action) {
+    async function sendViewerPower(action) {
       if (!viewerConnected) return;
       if (action === 'reboot') {
-        if (confirm('⚠️ Deseja realmente REINICIAR este computador remoto?\n\nEle será reiniciado em 5 segundos e estará disponível para reconexão assim que inicializar.')) {
+        const ok = await showModalConfirm('Reiniciar Computador', '⚠️ Deseja realmente REINICIAR este computador remoto?\n\nEle será reiniciado em 5 segundos e estará disponível para reconexão assim que inicializar.', '🔄', 'Reiniciar Agora', 'Cancelar');
+        if (ok) {
           sendViewerSys('reboot');
-          alert('Comando de reinicialização transmitido ao computador.');
+          await showModalAlert('Comando Transmitido', 'Comando de reinicialização transmitido ao computador.', '🚀');
         }
       } else if (action === 'shutdown') {
-        if (confirm('🛑 ATENÇÃO: Deseja realmente DESLIGAR este computador remoto?\n\nEle será desligado completamente. Para ligá-lo novamente pela nuvem, use a função Wake-on-LAN (WoL).')) {
+        const ok = await showModalConfirm('Desligar Computador', '🛑 ATENÇÃO: Deseja realmente DESLIGAR este computador remoto?\n\nEle será desligado completamente. Para ligá-lo novamente pela nuvem, use a função Wake-on-LAN (WoL).', '🛑', 'Desligar PC', 'Cancelar');
+        if (ok) {
           sendViewerSys('shutdown');
-          alert('Comando de desligamento transmitido ao computador.');
+          await showModalAlert('Comando Transmitido', 'Comando de desligamento transmitido ao computador.', '🛑');
         }
       } else if (action === 'suspend') {
-        if (confirm('🌙 Deseja colocar o computador remoto em modo de SUSPENSÃO (Sleep)?')) {
+        const ok = await showModalConfirm('Suspender Computador', '🌙 Deseja colocar o computador remoto em modo de SUSPENSÃO (Sleep)?', '🌙', 'Suspender', 'Cancelar');
+        if (ok) {
           sendViewerSys('suspend');
         }
       }
@@ -1407,6 +1534,19 @@
           if (dock) dock.classList.add('dock-visible');
         });
       }
+
+      const dlgInput = document.getElementById('dialog-input');
+      if (dlgInput) {
+        dlgInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            closeAppDialog(true);
+          } else if (e.key === 'Escape') {
+            e.preventDefault();
+            closeAppDialog(false);
+          }
+        });
+      }
     });
 
     async function triggerServerWoL(mac, name) {
@@ -1419,12 +1559,12 @@
         });
         const data = await res.json();
         if (data.status === 'ok') {
-          alert('⚡ Pacote Magic Packet Wake-on-LAN disparado com sucesso para ' + name + ' (' + mac + ')!');
+          await showModalAlert('Wake-on-LAN', '⚡ Pacote Magic Packet Wake-on-LAN disparado com sucesso para ' + name + ' (' + mac + ')!\n\nSe a placa-mãe/BIOS estiver configurada, o computador irá ligar agora.', '⚡');
         } else {
-          alert('Erro ao disparar Wake-on-LAN: ' + (data.message || 'Falha'));
+          await showModalAlert('Falha no WoL', 'Erro ao disparar Wake-on-LAN: ' + (data.message || 'Falha'), '❌');
         }
       } catch (err) {
-        alert('Erro ao enviar requisição WoL.');
+        await showModalAlert('Erro', 'Erro ao enviar requisição de Wake-on-LAN para o servidor.', '❌');
       }
     }
 
