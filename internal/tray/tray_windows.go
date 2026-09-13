@@ -233,7 +233,7 @@ func StartTray(hostID string, isAdmin bool, onOpen func(), onAdmin func(), onExi
 		runtime.LockOSThread()
 
 		hInst, _, _ := procGetModuleHandleW.Call(0)
-		className, _ := syscall.UTF16PtrFromString("RemoteAccessTrayClass")
+		className, _ := syscall.UTF16PtrFromString("RemoteAccessTrayInternalHelper")
 
 		// Extract native crisp icons from executable resources
 		exePath, _ := os.Executable()
@@ -262,11 +262,12 @@ func StartTray(hostID string, isAdmin bool, onOpen func(), onAdmin func(), onExi
 		}
 		procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
 
-		wndName, _ := syscall.UTF16PtrFromString("RemoteAccessTrayWindow")
+		emptyTitle, _ := syscall.UTF16PtrFromString("")
+		// WS_EX_TOOLWINDOW = 0x00000080
 		hwnd, _, _ := procCreateWindowExW.Call(
-			0,
+			0x00000080,
 			uintptr(unsafe.Pointer(className)),
-			uintptr(unsafe.Pointer(wndName)),
+			uintptr(unsafe.Pointer(emptyTitle)),
 			0,
 			0, 0, 0, 0,
 			0, 0, hInst, 0,

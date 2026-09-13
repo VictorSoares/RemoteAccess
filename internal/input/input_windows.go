@@ -262,17 +262,23 @@ func FlashAppWindow() {
 		DwTimeout uint32
 	}
 
-	title, _ := syscall.UTF16PtrFromString("RemoteAccess")
-	hwnd, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(title)))
-	if hwnd != 0 {
-		var fi flashwInfo
-		fi.CbSize = uint32(unsafe.Sizeof(fi))
-		fi.Hwnd = hwnd
-		fi.DwFlags = flashwAll | flashwTimerNoFg
-		fi.UCount = 5
-		fi.DwTimeout = 0
-		procFlashWindowEx.Call(uintptr(unsafe.Pointer(&fi)))
-	}
+	cb := syscall.NewCallback(func(hwnd uintptr, lParam uintptr) uintptr {
+		var buf [256]uint16
+		procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), 256)
+		title := syscall.UTF16ToString(buf[:])
+		if title != "" && strings.Contains(title, "RemoteAccess") && !strings.Contains(title, "Tray") {
+			var fi flashwInfo
+			fi.CbSize = uint32(unsafe.Sizeof(fi))
+			fi.Hwnd = hwnd
+			fi.DwFlags = flashwAll | flashwTimerNoFg
+			fi.UCount = 5
+			fi.DwTimeout = 0
+			procFlashWindowEx.Call(uintptr(unsafe.Pointer(&fi)))
+			return 0
+		}
+		return 1
+	})
+	procEnumWindows.Call(cb, 0)
 }
 
 // BringAppToFront brings the application window to the foreground on the Windows desktop
@@ -281,7 +287,7 @@ func BringAppToFront() {
 		var buf [256]uint16
 		procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), 256)
 		title := syscall.UTF16ToString(buf[:])
-		if strings.Contains(title, "RemoteAccess") {
+		if title != "" && strings.Contains(title, "RemoteAccess") && !strings.Contains(title, "Tray") {
 			procShowWindow.Call(hwnd, 9) // SW_RESTORE = 9
 			procSetForegroundWindow.Call(hwnd)
 			return 0 // stop enumeration

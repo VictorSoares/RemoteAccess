@@ -463,38 +463,77 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 
 	peerList := make([]PeerInfo, 0)
 	hostCount := 0
-	clientCount := 0
 	activeSessions := 0
 
+	// 1. Index active clients controlling hosts
+	// targetHostID -> clientPeer
+	controllingClients := make(map[string]*Peer)
+	// clientIP / clientAlias -> targetHostID
+	clientControllerMap := make(map[string]string)
+
 	for _, p := range s.peers {
-		// Only list registered Hosts or clients in active sessions
-		if !p.IsHost && p.ActiveTargetID == "" {
+		if !p.IsHost && p.ActiveTargetID != "" {
+			controllingClients[cleanID(p.ActiveTargetID)] = p
+			controllingClients[p.ActiveTargetID] = p
+			if p.Alias != "" {
+				clientControllerMap[p.Alias] = p.ActiveTargetID
+			}
+			hostIP := strings.Split(p.RemoteAddr, ":")[0]
+			if hostIP != "" {
+				clientControllerMap[hostIP] = p.ActiveTargetID
+			}
+		}
+	}
+
+	for _, p := range s.peers {
+		// Only list registered host machines in the cluster
+		if !p.IsHost {
 			continue
 		}
 
+		hostCount++
 		status := "Online / Livre"
+
 		if p.Blocked {
 			status = "Bloqueado (Admin)"
-		} else if p.ActiveTargetID != "" {
-			partnerLabel := p.ActiveTargetID
-			for _, other := range s.peers {
-				if other.ID == p.ActiveTargetID || cleanID(other.ID) == cleanID(p.ActiveTargetID) {
-					if other.Alias != "" && other.Alias != "Não definido" {
-						partnerLabel = fmt.Sprintf("%s (%s)", other.Alias, formatID(other.ID))
-					} else {
-						partnerLabel = formatID(other.ID)
-					}
-					break
+		} else if p.ActiveTargetID != "" || controllingClients[cleanID(p.ID)] != nil || controllingClients[p.ID] != nil {
+			// This host is currently being controlled
+			activeSessions++
+			clientPeer := controllingClients[cleanID(p.ID)]
+			if clientPeer == nil {
+				clientPeer = controllingClients[p.ID]
+			}
+			callerName := "Controlador Remoto"
+			if clientPeer != nil {
+				if clientPeer.Alias != "" && clientPeer.Alias != "Não definido" {
+					callerName = clientPeer.Alias
+				} else {
+					callerName = formatID(clientPeer.ID)
 				}
 			}
-			status = fmt.Sprintf("Em Sessão com %s", partnerLabel)
-			activeSessions++
-		}
-
-		if p.IsHost {
-			hostCount++
+			status = fmt.Sprintf("Sendo controlado por %s", callerName)
 		} else {
-			clientCount++
+			// Check if this host is actively controlling another machine
+			hostIP := strings.Split(p.RemoteAddr, ":")[0]
+			targetID := ""
+			if p.Alias != "" && clientControllerMap[p.Alias] != "" {
+				targetID = clientControllerMap[p.Alias]
+			} else if hostIP != "" && clientControllerMap[hostIP] != "" {
+				targetID = clientControllerMap[hostIP]
+			}
+
+			if targetID != "" {
+				targetLabel := formatID(targetID)
+				for _, other := range s.peers {
+					if other.ID == targetID || cleanID(other.ID) == cleanID(targetID) {
+						if other.Alias != "" && other.Alias != "Não definido" {
+							targetLabel = fmt.Sprintf("%s (%s)", other.Alias, formatID(other.ID))
+						}
+						break
+					}
+				}
+				status = fmt.Sprintf("Controlando %s", targetLabel)
+			}
 		}
 
 		mons := p.Monitors
@@ -521,10 +560,10 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":          "online",
 		"uptime_sec":      int(time.Since(s.startTime).Seconds()),
-		"total_online":    hostCount + clientCount,
+		"total_online":    hostCount,
 		"host_count":      hostCount,
-		"client_count":    clientCount,
-		"active_sessions": activeSessions / 2, // Host + Client pairs
+		"client_count":    len(controllingClients),
+		"active_sessions": activeSessions,
 		"total_packets":   atomic.LoadUint64(&s.totalPackets),
 		"peers":           peerList,
 	})

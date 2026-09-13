@@ -48,6 +48,7 @@ type HostSession struct {
 	ConnectedAt  time.Time
 	activeFiles  map[string]*os.File
 	lastActivity int64
+	fpsUpdate    chan int
 	OnStatus     func(status string, msg string)
 	SendSignal   func(msg protocol.SignalingMessage)
 	OnRelayFrame func(jpegBase64 string)
@@ -80,6 +81,7 @@ func NewHostSession(clientID string, clientAlias string, fps int, quality int, s
 		ctx:          ctx,
 		cancel:       cancel,
 		lastActivity: time.Now().Unix(),
+		fpsUpdate:    make(chan int, 10),
 		activeFiles:  make(map[string]*os.File),
 		SendSignal:   sendSignal,
 	}
@@ -243,6 +245,10 @@ func (h *HostSession) HandleControlData(data []byte) {
 		}
 		if ctrl.FPS > 0 && ctrl.FPS <= 60 {
 			h.FPS = ctrl.FPS
+			select {
+			case h.fpsUpdate <- ctrl.FPS:
+			default:
+			}
 		}
 	case protocol.TypeSysCommand:
 		switch ctrl.Command {
@@ -388,6 +394,11 @@ func (h *HostSession) StartStreaming() {
 			select {
 			case <-h.ctx.Done():
 				return
+			case newFPS := <-h.fpsUpdate:
+				if newFPS > 0 && newFPS <= 60 {
+					ticker.Reset(time.Second / time.Duration(newFPS))
+					log.Printf("[Host] FPS de streaming reconfigurado dinamicamente para %d FPS", newFPS)
+				}
 			case <-watchdogTicker.C:
 				last := atomic.LoadInt64(&h.lastActivity)
 				if last > 0 && time.Now().Unix()-last > 8 {
@@ -407,8 +418,8 @@ func (h *HostSession) StartStreaming() {
 
 				// 1. If WebRTC DataChannel is connected and open, send via Direct P2P (Ultra-low latency, zero server bandwidth)
 				if vChan != nil && vChan.ReadyState() == pion.DataChannelStateOpen {
-					// Guard against buffer bloat / backpressure freeze: skip frame if client has > 256KB unconsumed
-					if vChan.BufferedAmount() > 256*1024 {
+					// Guard against buffer bloat / backpressure freeze: skip frame if client has > 1MB unconsumed
+					if vChan.BufferedAmount() > 1024*1024 {
 						continue
 					}
 					_ = vChan.Send(frameData)

@@ -88,6 +88,12 @@ func runNativeAppWindow(url string) {
 				)
 				if err := cmd.Start(); err == nil {
 					log.Printf("[Janela] Janela desktop nativa iniciada via Edge (%s)", edgePath)
+					go func() {
+						_ = cmd.Wait()
+						log.Println("[Janela] Janela desktop fechada pelo usuário. Encerrando processo...")
+						time.Sleep(100 * time.Millisecond)
+						os.Exit(0)
+					}()
 					return
 				}
 			}
