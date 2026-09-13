@@ -1079,3 +1079,9 @@ function saveRecentConnection(id, password, alias) {
   loadRecentConnections();
 }
 
+window.addEventListener('beforeunload', () => {
+  try {
+    navigator.sendBeacon('/api/app-close');
+  } catch (e) {}
+});
+

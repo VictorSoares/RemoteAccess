@@ -102,6 +102,14 @@ func (s *LocalServer) Start(port int) error {
 	mux.HandleFunc("/api/chat-messages", s.handleGetChatMessages)
 	mux.HandleFunc("/api/send-chat", s.handleSendChatMessage)
 	mux.HandleFunc("/api/system-info", s.handleSystemInfo)
+	mux.HandleFunc("/api/app-close", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		go func() {
+			time.Sleep(80 * time.Millisecond)
+			s.Shutdown()
+			os.Exit(0)
+		}()
+	})
 
 	mux.HandleFunc("/ws", s.handleWS)
 
