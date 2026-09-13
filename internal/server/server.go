@@ -209,12 +209,16 @@ func (s *LocalServer) handleSetLogFile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *LocalServer) handleSessionStatus(w http.ResponseWriter, r *http.Request) {
-	s.mu.RLock()
+	s.mu.Lock()
 	sess := s.hostSession
-	s.mu.RUnlock()
+	if sess != nil && !sess.IsActive() {
+		sess = nil
+		s.hostSession = nil
+	}
+	s.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	if sess != nil {
+	if sess != nil && sess.IsActive() {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"active":       true,
 			"client_id":    sess.ClientID,

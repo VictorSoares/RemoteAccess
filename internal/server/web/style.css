@@ -25,6 +25,11 @@
   padding: 0;
 }
 
+html, body {
+  min-width: 540px;
+  min-height: 580px;
+}
+
 body {
   font-family: var(--font-family);
   background-color: var(--bg-app);
@@ -32,7 +37,7 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  overflow-x: hidden;
+  overflow-x: auto;
   user-select: none;
   -webkit-font-smoothing: antialiased;
 }

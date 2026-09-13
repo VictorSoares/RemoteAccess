@@ -182,6 +182,11 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		s.mu.Lock()
 		activeTarget := peer.ActiveTargetID
+		peerAlias := peer.Alias
+		if peerAlias == "" {
+			peerAlias = "Dispositivo"
+		}
+		isHost := peer.IsHost
 		delete(s.peers, peer.ID)
 		if peer.ID != peerID {
 			delete(s.peers, peerID)
@@ -191,8 +196,10 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 				targetPeer.ActiveTargetID = ""
 				targetPeer.mu.Lock()
 				_ = targetPeer.Conn.WriteJSON(protocol.SignalingMessage{
-					Action:  protocol.ActionClose,
-					Message: "A outra ponta foi desconectada.",
+					Action:   protocol.ActionClose,
+					TargetID: targetPeer.ID,
+					ID:       peer.ID,
+					Message:  "A sessão foi encerrada pela outra ponta.",
 				})
 				targetPeer.mu.Unlock()
 			}
@@ -200,9 +207,12 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		if activeTarget != "" {
 			s.endHistorySession(peer.ID, activeTarget)
+			s.addLog("Sessão encerrada por desconexão de %s (%s) com %s", peerAlias, peer.ID, activeTarget)
 		}
-		if peer.IsHost {
-			s.addLog("Host desconectado: %s", peer.ID)
+		if isHost {
+			s.addLog("Host desconectado: %s (%s)", peerAlias, peer.ID)
+		} else {
+			s.addLog("Controlador/Cliente desconectado: %s (%s)", peerAlias, peer.ID)
 		}
 	}()
 
@@ -368,10 +378,18 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 					msg.ID = peer.ID
 				}
 				if msg.Action == protocol.ActionClose {
-					s.addLog("Sessão finalizada entre %s e %s", peer.ID, msg.TargetID)
+					pAlias := peer.Alias
+					if pAlias == "" {
+						pAlias = peer.ID
+					}
+					tAlias := targetPeer.Alias
+					if tAlias == "" {
+						tAlias = targetPeer.ID
+					}
+					s.addLog("Sessão finalizada: %s (%s) encerrou a conexão com %s (%s)", pAlias, peer.ID, tAlias, targetPeer.ID)
 					peer.ActiveTargetID = ""
 					targetPeer.ActiveTargetID = ""
-					s.endHistorySession(peer.ID, msg.TargetID)
+					s.endHistorySession(peer.ID, targetPeer.ID)
 				}
 				targetPeer.mu.Lock()
 				_ = targetPeer.Conn.WriteJSON(msg)

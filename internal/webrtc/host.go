@@ -47,6 +47,7 @@ type HostSession struct {
 	ClientAlias  string
 	ConnectedAt  time.Time
 	activeFiles  map[string]*os.File
+	lastActivity int64
 	OnStatus     func(status string, msg string)
 	SendSignal   func(msg protocol.SignalingMessage)
 	OnRelayFrame func(jpegBase64 string)
@@ -69,18 +70,33 @@ func NewHostSession(clientID string, clientAlias string, fps int, quality int, s
 
 	input.SetActiveMonitorBounds(capturer.GetBounds())
 
-	return &HostSession{
-		ClientID:    clientID,
-		ClientAlias: clientAlias,
-		ConnectedAt: time.Now(),
-		capturer:    capturer,
-		FPS:         fps,
-		Quality:     quality,
-		ctx:         ctx,
-		cancel:      cancel,
-		activeFiles: make(map[string]*os.File),
-		SendSignal:  sendSignal,
-	}, nil
+	sess := &HostSession{
+		ClientID:     clientID,
+		ClientAlias:  clientAlias,
+		ConnectedAt:  time.Now(),
+		capturer:     capturer,
+		FPS:          fps,
+		Quality:      quality,
+		ctx:          ctx,
+		cancel:       cancel,
+		lastActivity: time.Now().Unix(),
+		activeFiles:  make(map[string]*os.File),
+		SendSignal:   sendSignal,
+	}
+
+	return sess, nil
+}
+
+func (h *HostSession) IsActive() bool {
+	if h == nil {
+		return false
+	}
+	select {
+	case <-h.ctx.Done():
+		return false
+	default:
+		return true
+	}
 }
 
 func (h *HostSession) HandleRemoteOffer(targetID string, sdpStr string) error {
@@ -184,6 +200,7 @@ func (h *HostSession) AddICECandidate(candidateJSON []byte) error {
 }
 
 func (h *HostSession) HandleControlData(data []byte) {
+	atomic.StoreInt64(&h.lastActivity, time.Now().Unix())
 	var ctrl protocol.ControlMessage
 	if err := json.Unmarshal(data, &ctrl); err != nil {
 		return
