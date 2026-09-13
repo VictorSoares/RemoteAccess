@@ -287,11 +287,14 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 			if msg.ID == "" {
 				msg.ID = peer.ID
 			}
+			if msg.Alias != "" {
+				peer.Alias = msg.Alias
+			}
 
 			peer.ActiveTargetID = msg.TargetID
 			targetPeer.ActiveTargetID = peer.ID
 
-			s.addLog("Sessão iniciada: %s está controlando o Host %s (%s)", peer.ID, msg.TargetID, targetPeer.Alias)
+			s.addLog("Sessão iniciada: %s (%s) está controlando o Host %s (%s)", peer.Alias, peer.ID, targetPeer.Alias, msg.TargetID)
 
 			// Record in session history
 			s.addHistory(SessionRecord{
@@ -414,7 +417,11 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 		if p.Blocked {
 			status = "Bloqueado (Admin)"
 		} else if p.ActiveTargetID != "" {
-			status = fmt.Sprintf("Em Sessão com %s", p.ActiveTargetID)
+			partnerLabel := p.ActiveTargetID
+			if targetPeer, ok := s.peers[p.ActiveTargetID]; ok && targetPeer.Alias != "" {
+				partnerLabel = fmt.Sprintf("%s (%s)", targetPeer.Alias, targetPeer.ID)
+			}
+			status = fmt.Sprintf("Em Sessão com %s", partnerLabel)
 			activeSessions++
 		}
 

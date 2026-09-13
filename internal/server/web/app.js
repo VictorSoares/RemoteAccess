@@ -33,8 +33,86 @@ const canvas = document.getElementById('screen-canvas');
 const ctx = canvas.getContext('2d');
 const viewerContainer = document.getElementById('viewer-container');
 
+// Dialog helper for Custom In-App Glassmorphic Modals
+let dialogResolve = null;
+
+function showModalAlert(title, message, icon = 'ℹ️') {
+  return new Promise((resolve) => {
+    dialogResolve = resolve;
+    document.getElementById('dialog-icon').innerText = icon;
+    document.getElementById('dialog-title').innerText = title;
+    document.getElementById('dialog-message').innerText = message;
+    document.getElementById('dialog-input').style.display = 'none';
+    document.getElementById('dialog-btn-cancel').style.display = 'none';
+    document.getElementById('dialog-btn-ok').innerText = 'OK';
+    document.getElementById('app-dialog-modal').style.display = 'flex';
+  });
+}
+
+function showModalConfirm(title, message, icon = '⚠️', okText = 'Confirmar', cancelText = 'Cancelar') {
+  return new Promise((resolve) => {
+    dialogResolve = resolve;
+    document.getElementById('dialog-icon').innerText = icon;
+    document.getElementById('dialog-title').innerText = title;
+    document.getElementById('dialog-message').innerText = message;
+    document.getElementById('dialog-input').style.display = 'none';
+    document.getElementById('dialog-btn-cancel').innerText = cancelText;
+    document.getElementById('dialog-btn-cancel').style.display = 'inline-block';
+    document.getElementById('dialog-btn-ok').innerText = okText;
+    document.getElementById('app-dialog-modal').style.display = 'flex';
+  });
+}
+
+function showModalPrompt(title, message, defaultValue = '', icon = '✏️', okText = 'Salvar', cancelText = 'Cancelar') {
+  return new Promise((resolve) => {
+    dialogResolve = resolve;
+    document.getElementById('dialog-icon').innerText = icon;
+    document.getElementById('dialog-title').innerText = title;
+    document.getElementById('dialog-message').innerText = message;
+    const input = document.getElementById('dialog-input');
+    input.style.display = 'block';
+    input.value = defaultValue;
+    document.getElementById('dialog-btn-cancel').innerText = cancelText;
+    document.getElementById('dialog-btn-cancel').style.display = 'inline-block';
+    document.getElementById('dialog-btn-ok').innerText = okText;
+    document.getElementById('app-dialog-modal').style.display = 'flex';
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 60);
+  });
+}
+
+function closeAppDialog(result) {
+  const modal = document.getElementById('app-dialog-modal');
+  modal.style.display = 'none';
+  const input = document.getElementById('dialog-input');
+  const isPrompt = input.style.display !== 'none';
+  if (dialogResolve) {
+    if (isPrompt) {
+      dialogResolve(result ? input.value : null);
+    } else {
+      dialogResolve(result);
+    }
+    dialogResolve = null;
+  }
+}
+
 // Initialize application
 window.addEventListener('DOMContentLoaded', async () => {
+  const dlgInput = document.getElementById('dialog-input');
+  if (dlgInput) {
+    dlgInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        closeAppDialog(true);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeAppDialog(false);
+      }
+    });
+  }
+
   loadRecentConnections();
   await fetchHostInfo();
   await fetchSystemInfo();
@@ -87,7 +165,7 @@ async function fetchHostInfo() {
 
 async function openCustomAliasModal() {
   const current = myHostInfo.alias || '';
-  const newAlias = prompt('Digite o novo apelido/nome de identificação para este computador:', current);
+  const newAlias = await showModalPrompt('Alterar Apelido', 'Digite o novo apelido/nome de identificação para este computador:', current, '🏷️');
   if (!newAlias || newAlias.trim() === '') return;
 
   try {
@@ -101,10 +179,10 @@ async function openCustomAliasModal() {
       myHostInfo.alias = data.alias;
       const aliasEl = document.getElementById('my-alias');
       if (aliasEl) aliasEl.innerText = data.alias;
-      alert('Apelido do computador atualizado com sucesso!');
+      await showModalAlert('Apelido Atualizado', 'Apelido do computador atualizado com sucesso!', '✅');
     }
   } catch (err) {
-    alert('Erro ao salvar novo apelido.');
+    await showModalAlert('Erro', 'Erro ao salvar novo apelido.', '❌');
   }
 }
 
@@ -119,13 +197,13 @@ async function toggleSaveLogFile(e) {
     const data = await res.json();
     if (data.status === 'ok') {
       if (enable) {
-        alert('Gravação de arquivo de log em disco ativada (%APPDATA%\\RemoteAccess\\remoteaccess.log).');
+        await showModalAlert('Logs em Disco', 'Gravação de arquivo de log em disco ativada (%APPDATA%\\RemoteAccess\\remoteaccess.log).', '📜');
       } else {
-        alert('Gravação de arquivo de log desativada. A pasta permanecerá limpa.');
+        await showModalAlert('Logs em Disco', 'Gravação de arquivo de log desativada. A pasta permanecerá limpa.', '🧹');
       }
     }
   } catch (err) {
-    alert('Erro ao salvar configuração de log.');
+    await showModalAlert('Erro', 'Erro ao salvar configuração de log.', '❌');
     e.target.checked = !enable;
   }
 }
@@ -210,17 +288,27 @@ async function fetchSystemInfo() {
     }
     if (data.monitors) {
       document.getElementById('sys-monitors').innerText = `${data.monitors} Monitor(es)`;
-      
-      const monSelect = document.getElementById('viewer-monitor-select');
-      monSelect.innerHTML = '';
-      for (let i = 0; i < data.monitors; i++) {
-        const opt = document.createElement('option');
-        opt.value = i;
-        opt.innerText = `🖥️ Monitor ${i + 1}`;
-        monSelect.appendChild(opt);
-      }
     }
   } catch (err) {}
+}
+
+function updateViewerMonitors(count) {
+  const monSelect = document.getElementById('viewer-monitor-select');
+  if (!monSelect) return;
+  const currentVal = monSelect.value;
+  monSelect.innerHTML = '';
+  const total = Math.max(1, count || 1);
+  for (let i = 0; i < total; i++) {
+    const opt = document.createElement('option');
+    opt.value = i;
+    opt.innerText = `🖥️ Monitor ${i + 1}`;
+    monSelect.appendChild(opt);
+  }
+  if (currentVal && parseInt(currentVal) < total) {
+    monSelect.value = currentVal;
+  } else {
+    monSelect.value = 0;
+  }
 }
 
 let hostChatOpen = false;
@@ -372,20 +460,23 @@ function sendSystemAction(action) {
   sendControl({ t: 'sys_cmd', cmd: action });
 }
 
-function sendPowerAction(action) {
+async function sendPowerAction(action) {
   if (!isConnected) return;
   if (action === 'reboot') {
-    if (confirm('⚠️ Deseja realmente REINICIAR o computador remoto?\n\nO sistema será reiniciado em 5 segundos e você poderá reconectar assim que ele inicializar.')) {
+    const confirmed = await showModalConfirm('Reiniciar Computador Remoto', '⚠️ Deseja realmente REINICIAR o computador remoto?\n\nO sistema será reiniciado em 5 segundos e você poderá reconectar assim que ele inicializar.', '🔄', 'Reiniciar', 'Cancelar');
+    if (confirmed) {
       sendControl({ t: 'sys_cmd', cmd: 'reboot' });
-      alert('Comando de reinicialização enviado ao computador remoto.');
+      await showModalAlert('Comando Enviado', 'Comando de reinicialização enviado ao computador remoto.', '🚀');
     }
   } else if (action === 'shutdown') {
-    if (confirm('🛑 ATENÇÃO: Deseja realmente DESLIGAR o computador remoto?\n\nEle será desligado completamente. Para ligá-lo novamente à distância, será necessário utilizar Wake-on-LAN (WoL).')) {
+    const confirmed = await showModalConfirm('Desligar Computador Remoto', '🛑 ATENÇÃO: Deseja realmente DESLIGAR o computador remoto?\n\nEle será desligado completamente. Para ligá-lo novamente à distância, será necessário utilizar Wake-on-LAN (WoL).', '🛑', 'Desligar Agora', 'Cancelar');
+    if (confirmed) {
       sendControl({ t: 'sys_cmd', cmd: 'shutdown' });
-      alert('Comando de desligamento enviado ao computador remoto.');
+      await showModalAlert('Comando Enviado', 'Comando de desligamento enviado ao computador remoto.', '🛑');
     }
   } else if (action === 'suspend') {
-    if (confirm('🌙 Deseja colocar o computador remoto em modo de SUSPENSÃO (Sleep/Repouso)?')) {
+    const confirmed = await showModalConfirm('Suspender Computador Remoto', '🌙 Deseja colocar o computador remoto em modo de SUSPENSÃO (Sleep/Repouso)?', '🌙', 'Suspender', 'Cancelar');
+    if (confirmed) {
       sendControl({ t: 'sys_cmd', cmd: 'suspend' });
     }
   }
@@ -469,9 +560,10 @@ function togglePasswordVisibility() {
 }
 
 async function openCustomPasswordModal() {
-  const newPwd = prompt('Digite a nova senha fixa permanente que deseja usar para este computador (mínimo 3 caracteres):', myHostInfo.rawPwd);
+  const newPwd = await showModalPrompt('Definir Senha Fixa', 'Digite a nova senha fixa permanente que deseja usar para este computador (mínimo 3 caracteres):', myHostInfo.rawPwd, '🔑');
+  if (newPwd === null) return;
   if (!newPwd || newPwd.trim().length < 3) {
-    if (newPwd !== null) alert('A senha precisa ter pelo menos 3 caracteres.');
+    await showModalAlert('Senha Inválida', 'A senha precisa ter pelo menos 3 caracteres.', '⚠️');
     return;
   }
 
@@ -485,10 +577,10 @@ async function openCustomPasswordModal() {
     if (data.status === 'ok') {
       myHostInfo.rawPwd = data.password;
       updatePasswordDisplay();
-      alert('Senha fixa salva com sucesso! Ela nunca mais mudará.');
+      await showModalAlert('Senha Fixa Salva', 'Senha fixa salva com sucesso! Ela nunca mais mudará.', '✅');
     }
   } catch (err) {
-    alert('Erro ao salvar nova senha.');
+    await showModalAlert('Erro', 'Erro ao salvar nova senha.', '❌');
   }
 }
 
@@ -504,13 +596,13 @@ async function toggleAutoStart(e) {
     if (data.status === 'ok') {
       myHostInfo.autoStart = enable;
       if (enable) {
-        alert('RemoteAccess agora iniciará automaticamente em segundo plano com o Windows!');
+        await showModalAlert('Inicialização com Windows', 'RemoteAccess agora iniciará automaticamente em segundo plano com o Windows!', '🚀');
       } else {
-        alert('Inicialização automática desativada.');
+        await showModalAlert('Inicialização com Windows', 'Inicialização automática desativada.', 'ℹ️');
       }
     }
   } catch (err) {
-    alert('Erro ao atualizar inicialização automática.');
+    await showModalAlert('Erro', 'Erro ao atualizar inicialização automática.', '❌');
     e.target.checked = !enable;
   }
 }
@@ -518,8 +610,8 @@ async function toggleAutoStart(e) {
 function copyToClipboard(elementId) {
   const el = document.getElementById(elementId);
   const text = elementId === 'my-pwd' ? myHostInfo.rawPwd : el.innerText.replace(/\s+/g, '');
-  navigator.clipboard.writeText(text).then(() => {
-    alert('Copiado para a área de transferência: ' + text);
+  navigator.clipboard.writeText(text).then(async () => {
+    await showModalAlert('Copiado', 'Copiado para a área de transferência: ' + text, '📋');
   });
 }
 
@@ -535,7 +627,7 @@ function updateHostConfig() {
 
 async function openSignalingModal() {
   const current = myHostInfo.signalingURL || '';
-  const newUrl = prompt('Digite o endereço do seu servidor Render (ex: https://remoteaccess-ltwx.onrender.com ou deixe em branco para modo local):', current);
+  const newUrl = await showModalPrompt('Configurar Servidor Nuvem', 'Digite o endereço do seu servidor Render (ex: https://remoteaccess-ltwx.onrender.com ou deixe em branco para modo local):', current, '🌐');
   if (newUrl === null) return;
 
   try {
@@ -547,12 +639,12 @@ async function openSignalingModal() {
     const data = await res.json();
     if (data.status === 'ok') {
       myHostInfo.signalingURL = data.signaling_url;
-      alert('Servidor de Nuvem configurado!');
+      await showModalAlert('Servidor Configurado', 'Servidor de Nuvem configurado com sucesso!', '✅');
       await fetchHostInfo();
       connectSignaling();
     }
   } catch (err) {
-    alert('Erro ao salvar servidor de sinalização.');
+    await showModalAlert('Erro', 'Erro ao salvar servidor de sinalização.', '❌');
   }
 }
 
@@ -597,7 +689,7 @@ function connectSignaling() {
           break;
 
         case 'error':
-          alert(msg.message || 'Erro de conexão.');
+          await showModalAlert('Erro na Conexão', msg.message || 'Falha ao conectar com o computador remoto.', '❌');
           resetConnectButton();
           break;
 
@@ -628,6 +720,8 @@ function connectSignaling() {
                 if (badgeEl) badgeEl.innerHTML = `<span class="hud-dot" style="background-color: #38bdf8; box-shadow: 0 0 6px #38bdf8;"></span> Nuvem Relay`;
               } else if (ctrl.t === 'chat') {
                 appendChatMessage('Remoto', ctrl.text);
+              } else if (ctrl.t === 'init_info' && ctrl.mon) {
+                updateViewerMonitors(ctrl.mon);
               }
             } catch(e) {}
           } else {
@@ -637,8 +731,8 @@ function connectSignaling() {
 
         case 'close':
           const closeReason = msg.message || 'A sessão remota foi encerrada.';
-          alert(closeReason);
           closeViewer();
+          await showModalAlert('Sessão Encerrada', closeReason, 'ℹ️');
           break;
       }
     } catch (e) {
@@ -658,7 +752,7 @@ async function connectToRemote(e) {
   const targetPwd = document.getElementById('target-pwd').value;
 
   if (!rawTargetId || !targetPwd) {
-    alert('Por favor, informe o ID e a Senha.');
+    await showModalAlert('Campos Obrigatórios', 'Por favor, informe o ID e a Senha do computador remoto.', '⚠️');
     return;
   }
 
@@ -675,13 +769,15 @@ async function connectToRemote(e) {
     await new Promise(r => setTimeout(r, 800));
   }
 
-  // 1. Send authentication request
+  // 1. Send authentication request with alias and host ID
   if (signalingWS && signalingWS.readyState === WebSocket.OPEN) {
     signalingWS.send(JSON.stringify({
       action: 'connect',
       id: currentClientSessionId,
       targetId: rawTargetId,
-      password: targetPwd
+      password: targetPwd,
+      alias: (myHostInfo.alias || 'Meu PC') + ' (Controlador)',
+      host_id: myHostInfo.id
     }));
   }
 
@@ -758,6 +854,8 @@ function setupDataChannels(targetId) {
         if (badgeEl) badgeEl.innerHTML = `<span class="hud-dot"></span> P2P Direct`;
       } else if (msg.t === 'chat') {
         appendChatMessage('Remoto', msg.text);
+      } else if (msg.t === 'init_info' && msg.mon) {
+        updateViewerMonitors(msg.mon);
       }
     } catch (e) {}
   };
@@ -880,6 +978,10 @@ function closeViewer() {
   if (document.fullscreenElement) {
     document.exitFullscreen().catch(() => {});
   }
+  // Clear canvas
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // Switch back to client view tab
+  switchTab('client');
   resetConnectButton();
 }
 
@@ -911,15 +1013,15 @@ function setViewerQuality(mode) {
   }
 }
 
-function openClipboardModal() {
-  const text = prompt('Digite ou cole o texto que deseja enviar para a máquina remota:');
+async function openClipboardModal() {
+  const text = await showModalPrompt('Colar Texto no Remoto', 'Digite ou cole o texto que deseja digitar na máquina remota:', '', '📋', 'Digitar Texto');
   if (text !== null && text.length > 0) {
     for (let i = 0; i < text.length; i++) {
       const ch = text[i];
       sendControl({ t: 'kd', k: ch, c: 'Key' + ch.toUpperCase(), kc: ch.charCodeAt(0) });
       sendControl({ t: 'ku', k: ch, c: 'Key' + ch.toUpperCase(), kc: ch.charCodeAt(0) });
     }
-    alert('Texto enviado para o computador remoto!');
+    await showModalAlert('Texto Enviado', 'Texto enviado e digitado no computador remoto!', '✅');
   }
 }
 
@@ -1118,20 +1220,20 @@ async function triggerLocalWoL(mac, name) {
     });
     const data = await res.json();
     if (data.status === 'ok') {
-      alert(`⚡ Pacote Magic Packet Wake-on-LAN disparado para ${name} (${mac})!\n\nSe a placa-mãe/BIOS estiver com WoL ativado, o computador irá ligar agora.`);
+      await showModalAlert('Wake-on-LAN', `⚡ Pacote Magic Packet Wake-on-LAN disparado para ${name} (${mac})!\n\nSe a placa-mãe/BIOS estiver com WoL ativado, o computador irá ligar agora.`, '⚡');
     } else {
-      alert('Falha ao enviar pacote WoL: ' + (data.message || 'Erro desconhecido'));
+      await showModalAlert('Falha no WoL', 'Falha ao enviar pacote WoL: ' + (data.message || 'Erro desconhecido'), '❌');
     }
   } catch (err) {
-    alert('Erro de comunicação ao enviar Wake-on-LAN.');
+    await showModalAlert('Erro', 'Erro de comunicação ao enviar Wake-on-LAN.', '❌');
   }
 }
 
-function promptSetDeviceMAC(idx) {
+async function promptSetDeviceMAC(idx) {
   let list = JSON.parse(localStorage.getItem('ra_saved_devices') || '[]');
   if (!list[idx]) return;
   const current = list[idx].mac || '';
-  const input = prompt(`Digite o endereço MAC físico do computador ${list[idx].alias || list[idx].id} (ex: 00:1A:2B:3C:4D:5E):`, current);
+  const input = await showModalPrompt('Endereço MAC (WoL)', `Digite o endereço MAC físico do computador ${list[idx].alias || list[idx].id} (ex: 00:1A:2B:3C:4D:5E):`, current, '⚡');
   if (input === null) return;
   list[idx].mac = input.trim().toUpperCase();
   localStorage.setItem('ra_saved_devices', JSON.stringify(list));

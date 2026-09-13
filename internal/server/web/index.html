@@ -286,10 +286,9 @@
         <div class="dock-divider"></div>
 
         <!-- Monitor Switcher -->
-        <div class="dock-select-wrap" title="Alternar Monitor">
+        <div class="dock-select-wrap" id="viewer-mon-wrap" title="Alternar Monitor">
           <select id="viewer-monitor-select" class="dock-select" onchange="switchRemoteMonitor(this.value)">
             <option value="0">🖥️ Monitor 1</option>
-            <option value="1">🖥️ Monitor 2</option>
           </select>
         </div>
 
@@ -382,6 +381,20 @@
       <div id="chat-toast-text" class="chat-toast-text">...</div>
     </div>
     <button class="chat-toast-close" onclick="event.stopPropagation(); hideChatToast()">✕</button>
+  </div>
+
+  <!-- Custom In-App Glassmorphic Dialog Modal (Alert, Confirm, Prompt) -->
+  <div id="app-dialog-modal" class="modal-backdrop" style="display: none; z-index: 200000;">
+    <div class="modal-card dialog-card" style="max-width: 440px; padding: 1.5rem; text-align: center;">
+      <div id="dialog-icon" style="font-size: 2.2rem; margin-bottom: 0.5rem;">⚡</div>
+      <h3 id="dialog-title" style="font-size: 1.15rem; font-weight: 800; margin-bottom: 0.5rem;">Aviso</h3>
+      <p id="dialog-message" style="font-size: 0.88rem; color: var(--text-sub); line-height: 1.5; margin-bottom: 1.25rem;">Mensagem</p>
+      <input type="text" id="dialog-input" class="form-input" style="display: none; width: 100%; margin-bottom: 1.25rem;" autocomplete="off">
+      <div id="dialog-actions" style="display: flex; gap: 0.6rem; justify-content: center;">
+        <button id="dialog-btn-cancel" class="btn-action" style="display: none; background: rgba(255,255,255,0.08); color: #cbd5e1; padding: 0.55rem 1.1rem; border-radius: 8px; font-size: 0.85rem;" onclick="closeAppDialog(false)">Cancelar</button>
+        <button id="dialog-btn-ok" class="btn-action btn-connect-primary" style="padding: 0.55rem 1.4rem; border-radius: 8px; font-size: 0.85rem;" onclick="closeAppDialog(true)">OK</button>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

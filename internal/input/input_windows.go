@@ -35,6 +35,8 @@ var (
 	procGetMessageW              = user32.NewProc("GetMessageW")
 	procPostThreadMessageW       = user32.NewProc("PostThreadMessageW")
 	procGetCurrentThreadId       = kernel32.NewProc("GetCurrentThreadId")
+	procFlashWindowEx            = user32.NewProc("FlashWindowEx")
+	procFindWindowW              = user32.NewProc("FindWindowW")
 
 	activeBoundsMu sync.RWMutex
 	activeBounds   image.Rectangle
@@ -47,9 +49,13 @@ var (
 )
 
 const (
-	whKeyboardLL = 13
-	whMouseLL    = 14
-	wmQuit       = 0x0012
+	whKeyboardLL        = 13
+	whMouseLL           = 14
+	wmQuit              = 0x0012
+	llkhfInjected       = 0x00000010 // Bit 4 is LLKHF_INJECTED for Keyboard
+	llmhfInjected       = 0x00000001 // Bit 0 is LLMHF_INJECTED for Mouse
+	flashwAll           = 0x00000003
+	flashwTimerNoFg     = 0x0000000C
 )
 
 type kbdLLHookStruct struct {
@@ -71,8 +77,8 @@ type msLLHookStruct struct {
 func keyboardHookCallback(nCode int, wParam uintptr, lParam uintptr) uintptr {
 	if nCode >= 0 {
 		kbd := (*kbdLLHookStruct)(unsafe.Pointer(lParam))
-		// If event is physical (not injected from remote controller), block it!
-		if kbd.Flags&0x01 == 0 {
+		// If event is physical hardware (LLKHF_INJECTED bit 4 is not set), block it!
+		if kbd.Flags&llkhfInjected == 0 {
 			return 1
 		}
 	}
@@ -83,8 +89,8 @@ func keyboardHookCallback(nCode int, wParam uintptr, lParam uintptr) uintptr {
 func mouseHookCallback(nCode int, wParam uintptr, lParam uintptr) uintptr {
 	if nCode >= 0 {
 		ms := (*msLLHookStruct)(unsafe.Pointer(lParam))
-		// If event is physical (not injected from remote controller), block it!
-		if ms.Flags&0x01 == 0 {
+		// If event is physical hardware (LLMHF_INJECTED bit 0 is not set), block it!
+		if ms.Flags&llmhfInjected == 0 {
 			return 1
 		}
 	}
@@ -235,6 +241,29 @@ func SuspendMachine() {
 		CreationFlags: 0x08000000,
 	}
 	_ = cmd.Run()
+}
+
+// FlashAppWindow flashes the application window on the taskbar to alert the user of new messages
+func FlashAppWindow() {
+	type flashwInfo struct {
+		CbSize    uint32
+		Hwnd      uintptr
+		DwFlags   uint32
+		UCount    uint32
+		DwTimeout uint32
+	}
+
+	title, _ := syscall.UTF16PtrFromString("RemoteAccess")
+	hwnd, _, _ := procFindWindowW.Call(0, uintptr(unsafe.Pointer(title)))
+	if hwnd != 0 {
+		var fi flashwInfo
+		fi.CbSize = uint32(unsafe.Sizeof(fi))
+		fi.Hwnd = hwnd
+		fi.DwFlags = flashwAll | flashwTimerNoFg
+		fi.UCount = 5
+		fi.DwTimeout = 0
+		procFlashWindowEx.Call(uintptr(unsafe.Pointer(&fi)))
+	}
 }
 
 // OpenTaskManager launches Windows Task Manager directly without any console flashes

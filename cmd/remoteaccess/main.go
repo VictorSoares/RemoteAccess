@@ -134,22 +134,33 @@ func main() {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
+	// Start local server in background
+	go func() {
+		if err := srv.Start(port); err != nil {
+			log.Fatalf("Erro ao iniciar servidor: %v", err)
+		}
+	}()
+
+	// Wait until HTTP server is actively accepting connections
+	for i := 0; i < 50; i++ {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 50*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			break
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+
 	// Launch as Standalone Desktop Window (unless in silent autostart background mode)
 	if !*noBrowser {
 		go func() {
-			time.Sleep(300 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 			runNativeAppWindow(url, func() {
 				log.Println("[Janela] Janela desktop fechada pelo usuário. Encerrando processo...")
 				stop <- syscall.SIGTERM
 			})
 		}()
 	}
-
-	go func() {
-		if err := srv.Start(port); err != nil {
-			log.Fatalf("Erro ao iniciar servidor: %v", err)
-		}
-	}()
 
 	<-stop
 	log.Println("[RemoteAccess] Notificando nuvem e encerrando com segurança...")

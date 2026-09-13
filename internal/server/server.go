@@ -16,6 +16,7 @@ import (
 	"github.com/gorilla/websocket"
 	"remoteaccess/internal/capture"
 	"remoteaccess/internal/config"
+	"remoteaccess/internal/input"
 	"remoteaccess/internal/logger"
 	"remoteaccess/internal/protocol"
 	"remoteaccess/internal/signaling"
@@ -562,6 +563,7 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 
 			sess.OnChat = func(sender string, text string) {
 				s.addChatMessage("Controlador", text)
+				input.FlashAppWindow()
 			}
 
 			s.hostSession = sess
