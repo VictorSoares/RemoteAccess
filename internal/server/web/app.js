@@ -133,6 +133,20 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // Enforce minimum window dimensions on resize
+  window.addEventListener('resize', () => {
+    if (window.outerWidth && window.outerWidth < 540) {
+      if (typeof window.resizeTo === 'function') {
+        try { window.resizeTo(540, Math.max(580, window.outerHeight)); } catch(e) {}
+      }
+    }
+    if (window.outerHeight && window.outerHeight < 580) {
+      if (typeof window.resizeTo === 'function') {
+        try { window.resizeTo(Math.max(540, window.outerWidth), 580); } catch(e) {}
+      }
+    }
+  });
+
   loadRecentConnections();
   await fetchHostInfo();
   await fetchSystemInfo();
@@ -1019,6 +1033,16 @@ async function connectToRemote(e) {
     }
   };
 
+  peerConnection.onconnectionstatechange = () => {
+    console.log('[WebRTC] Connection State:', peerConnection.connectionState);
+    if (peerConnection.connectionState === 'disconnected' || peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'closed') {
+      if (isConnected) {
+        closeViewer();
+        showModalAlert('Sessão Encerrada', 'A conexão com o computador remoto foi encerrada.', 'ℹ️');
+      }
+    }
+  };
+
   setupDataChannels(rawTargetId);
 
   peerConnection.onicecandidate = (event) => {
@@ -1057,6 +1081,14 @@ function setupDataChannels(targetId) {
     startPingLoop();
   };
 
+  inputChannel.onclose = () => {
+    console.log('[Client] Input DataChannel fechado.');
+    if (isConnected) {
+      closeViewer();
+      showModalAlert('Sessão Encerrada', 'A sessão remota foi desconectada pelo Host.', 'ℹ️');
+    }
+  };
+
   inputChannel.onmessage = (event) => {
     try {
       const msg = JSON.parse(event.data);
@@ -1070,6 +1102,9 @@ function setupDataChannels(targetId) {
         appendChatMessage('Remoto', msg.text);
       } else if (msg.t === 'init_info' && msg.mon) {
         updateViewerMonitors(msg.mon);
+      } else if (msg.t === 'close' || (msg.t === 'sys_cmd' && msg.cmd === 'close')) {
+        closeViewer();
+        showModalAlert('Sessão Encerrada', msg.text || 'A sessão remota foi encerrada pelo computador remoto.', 'ℹ️');
       }
     } catch (e) {}
   };
@@ -1078,6 +1113,9 @@ function setupDataChannels(targetId) {
     renderRawBlob(event.data);
   };
 }
+
+let isRenderingFrame = false;
+let pendingBlob = null;
 
 function renderBase64Frame(b64) {
   if (!isConnected) openViewer();
@@ -1112,27 +1150,58 @@ function renderRawBlob(blobData) {
     lastFpsTime = now;
   }
 
+  if (isRenderingFrame) {
+    pendingBlob = blobData;
+    return;
+  }
+
+  isRenderingFrame = true;
   const blob = new Blob([blobData], { type: 'image/jpeg' });
-  createImageBitmap(blob).then((imgBitmap) => {
-    if (canvas.width !== imgBitmap.width || canvas.height !== imgBitmap.height) {
-      canvas.width = imgBitmap.width;
-      canvas.height = imgBitmap.height;
-    }
-    ctx.drawImage(imgBitmap, 0, 0);
-    imgBitmap.close();
-  }).catch(() => {
-    const img = new Image();
-    const url = URL.createObjectURL(blob);
-    img.onload = () => {
-      if (canvas.width !== img.width || canvas.height !== img.height) {
-        canvas.width = img.width;
-        canvas.height = img.height;
+  
+  if (window.createImageBitmap) {
+    createImageBitmap(blob).then((imgBitmap) => {
+      if (canvas.width !== imgBitmap.width || canvas.height !== imgBitmap.height) {
+        canvas.width = imgBitmap.width;
+        canvas.height = imgBitmap.height;
       }
-      ctx.drawImage(img, 0, 0);
-      URL.revokeObjectURL(url);
-    };
-    img.src = url;
-  });
+      ctx.drawImage(imgBitmap, 0, 0);
+      imgBitmap.close();
+      isRenderingFrame = false;
+      if (pendingBlob) {
+        const next = pendingBlob;
+        pendingBlob = null;
+        renderRawBlob(next);
+      }
+    }).catch(() => {
+      fallbackRenderImage(blob);
+    });
+  } else {
+    fallbackRenderImage(blob);
+  }
+}
+
+function fallbackRenderImage(blob) {
+  const img = new Image();
+  const url = URL.createObjectURL(blob);
+  img.onload = () => {
+    if (canvas.width !== img.width || canvas.height !== img.height) {
+      canvas.width = img.width;
+      canvas.height = img.height;
+    }
+    ctx.drawImage(img, 0, 0);
+    URL.revokeObjectURL(url);
+    isRenderingFrame = false;
+    if (pendingBlob) {
+      const next = pendingBlob;
+      pendingBlob = null;
+      renderRawBlob(next);
+    }
+  };
+  img.onerror = () => {
+    URL.revokeObjectURL(url);
+    isRenderingFrame = false;
+  };
+  img.src = url;
 }
 
 function sendControl(ctrlObj) {
@@ -1180,16 +1249,22 @@ function openViewer() {
 }
 
 function closeViewer() {
+  if (!isConnected && viewerContainer.style.display === 'none') return;
   isConnected = false;
   viewerContainer.style.display = 'none';
   if (pingIntervalTimer) {
     clearInterval(pingIntervalTimer);
     pingIntervalTimer = null;
   }
-  if (peerConnection) {
-    try { peerConnection.close(); } catch(e) {}
-    peerConnection = null;
+
+  // 1. Send close packet over input DataChannel first
+  if (inputChannel && inputChannel.readyState === 'open') {
+    try {
+      inputChannel.send(JSON.stringify({ t: 'sys_cmd', cmd: 'close' }));
+    } catch(e) {}
   }
+
+  // 2. Send close action over Signaling WS
   if (signalingWS && signalingWS.readyState === WebSocket.OPEN && currentTargetId) {
     signalingWS.send(JSON.stringify({
       action: 'close',
@@ -1197,6 +1272,21 @@ function closeViewer() {
       targetId: currentTargetId
     }));
   }
+
+  // 3. Close WebRTC channels & peer connection
+  if (inputChannel) {
+    try { inputChannel.close(); } catch(e) {}
+    inputChannel = null;
+  }
+  if (videoChannel) {
+    try { videoChannel.close(); } catch(e) {}
+    videoChannel = null;
+  }
+  if (peerConnection) {
+    try { peerConnection.close(); } catch(e) {}
+    peerConnection = null;
+  }
+
   if (document.fullscreenElement) {
     document.exitFullscreen().catch(() => {});
   }
@@ -1205,6 +1295,7 @@ function closeViewer() {
   // Switch back to client view tab
   switchTab('client');
   resetConnectButton();
+  fetchSessionStatus();
 }
 
 function resetConnectButton() {
@@ -1563,6 +1654,18 @@ window.addEventListener('DOMContentLoaded', () => {
 
 window.addEventListener('beforeunload', () => {
   try {
+    if (isConnected && currentTargetId) {
+      if (inputChannel && inputChannel.readyState === 'open') {
+        inputChannel.send(JSON.stringify({ t: 'sys_cmd', cmd: 'close' }));
+      }
+      if (signalingWS && signalingWS.readyState === WebSocket.OPEN) {
+        signalingWS.send(JSON.stringify({
+          action: 'close',
+          id: currentClientSessionId,
+          targetId: currentTargetId
+        }));
+      }
+    }
     navigator.sendBeacon('/api/app-close');
   } catch (e) {}
 });

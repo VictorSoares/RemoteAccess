@@ -115,10 +115,18 @@ func (h *HostSession) HandleRemoteOffer(targetID string, sdpStr string) error {
 
 	pc.OnICEConnectionStateChange(func(state pion.ICEConnectionState) {
 		log.Printf("[Host] ICE P2P State: %s (Relay WSS ativo em paralelo)", state.String())
+		if state == pion.ICEConnectionStateFailed || state == pion.ICEConnectionStateClosed {
+			log.Printf("[Host] ICE connection state is %s, cleaning up session.", state.String())
+			go h.Close()
+		}
 	})
 
 	pc.OnConnectionStateChange(func(state pion.PeerConnectionState) {
 		log.Printf("[Host] PeerConnection State: %s (Relay WSS ativo em paralelo)", state.String())
+		if state == pion.PeerConnectionStateClosed || state == pion.PeerConnectionStateFailed || state == pion.PeerConnectionStateDisconnected {
+			log.Printf("[Host] PeerConnection state is %s, closing host session.", state.String())
+			go h.Close()
+		}
 	})
 
 	pc.OnICECandidate(func(c *pion.ICECandidate) {
@@ -146,8 +154,15 @@ func (h *HostSession) HandleRemoteOffer(targetID string, sdpStr string) error {
 			dc.OnMessage(func(msg pion.DataChannelMessage) {
 				h.HandleControlData(msg.Data)
 			})
+			dc.OnClose(func() {
+				log.Println("[Host] Input DataChannel fechado pelo cliente.")
+				go h.Close()
+			})
 		} else if dc.Label() == "video" {
 			h.videoChannel = dc
+			dc.OnClose(func() {
+				log.Println("[Host] Video DataChannel fechado.")
+			})
 		}
 	})
 
@@ -231,6 +246,9 @@ func (h *HostSession) HandleControlData(data []byte) {
 		}
 	case protocol.TypeSysCommand:
 		switch ctrl.Command {
+		case "close", "disconnect":
+			log.Printf("[Host] Comando de encerramento de sessão recebido do cliente (%s)", h.ClientID)
+			go h.Close()
 		case "lock", "win_l":
 			input.LockWorkstation()
 		case "taskmgr":
@@ -260,6 +278,9 @@ func (h *HostSession) HandleControlData(data []byte) {
 		case "suspend", "sleep":
 			input.SuspendMachine()
 		}
+	case "close":
+		log.Printf("[Host] Mensagem de encerramento direto recebida do cliente (%s)", h.ClientID)
+		go h.Close()
 	case protocol.TypeClipboard:
 		if ctrl.Text != "" {
 			_ = input.SetClipboardTextAndPaste(ctrl.Text)
@@ -385,6 +406,10 @@ func (h *HostSession) StartStreaming() {
 
 				// 1. If WebRTC DataChannel is connected and open, send via Direct P2P (Ultra-low latency, zero server bandwidth)
 				if vChan != nil && vChan.ReadyState() == pion.DataChannelStateOpen {
+					// Guard against buffer bloat / backpressure freeze: skip frame if client has > 256KB unconsumed
+					if vChan.BufferedAmount() > 256*1024 {
+						continue
+					}
 					_ = vChan.Send(frameData)
 				} else if h.OnRelayFrame != nil {
 					// 2. Fallback to WebSocket Relay only when WebRTC P2P DataChannel is not yet connected
@@ -406,6 +431,13 @@ func (h *HostSession) Close() {
 	_ = input.BlockLocalInput(false)
 	h.cancel()
 	h.mu.Lock()
+	if h.inputChannel != nil && h.inputChannel.ReadyState() == pion.DataChannelStateOpen {
+		closeMsg, _ := json.Marshal(protocol.ControlMessage{
+			Type: "close",
+			Text: "Sessão encerrada pelo Host.",
+		})
+		_ = h.inputChannel.Send(closeMsg)
+	}
 	for _, f := range h.activeFiles {
 		if f != nil {
 			_ = f.Close()
