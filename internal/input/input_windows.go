@@ -40,6 +40,11 @@ var (
 	procFlashWindowEx            = user32.NewProc("FlashWindowEx")
 	procFindWindowW              = user32.NewProc("FindWindowW")
 	procMessageBeep              = user32.NewProc("MessageBeep")
+	procShowWindow               = user32.NewProc("ShowWindow")
+	procSetForegroundWindow      = user32.NewProc("SetForegroundWindow")
+	procEnumWindows              = user32.NewProc("EnumWindows")
+	procGetWindowTextW           = user32.NewProc("GetWindowTextW")
+	procSendInput                = user32.NewProc("SendInput")
 
 	activeBoundsMu sync.RWMutex
 	activeBounds   image.Rectangle
@@ -268,6 +273,22 @@ func FlashAppWindow() {
 		fi.DwTimeout = 0
 		procFlashWindowEx.Call(uintptr(unsafe.Pointer(&fi)))
 	}
+}
+
+// BringAppToFront brings the application window to the foreground on the Windows desktop
+func BringAppToFront() {
+	cb := syscall.NewCallback(func(hwnd uintptr, lParam uintptr) uintptr {
+		var buf [256]uint16
+		procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), 256)
+		title := syscall.UTF16ToString(buf[:])
+		if strings.Contains(title, "RemoteAccess") {
+			procShowWindow.Call(hwnd, 9) // SW_RESTORE = 9
+			procSetForegroundWindow.Call(hwnd)
+			return 0 // stop enumeration
+		}
+		return 1 // continue
+	})
+	procEnumWindows.Call(cb, 0)
 }
 
 // PlayNotificationSound plays the native Windows notification chime

@@ -133,16 +133,17 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Enforce minimum window dimensions on resize
-  window.addEventListener('resize', () => {
-    if (window.outerWidth && window.outerWidth < 540) {
-      if (typeof window.resizeTo === 'function') {
-        try { window.resizeTo(540, Math.max(580, window.outerHeight)); } catch(e) {}
+  // Smooth visibility recovery when window is minimized and restored
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      isRenderingFrame = false;
+      if (pendingBlob) {
+        const next = pendingBlob;
+        pendingBlob = null;
+        renderRawBlob(next);
       }
-    }
-    if (window.outerHeight && window.outerHeight < 580) {
-      if (typeof window.resizeTo === 'function') {
-        try { window.resizeTo(Math.max(540, window.outerWidth), 580); } catch(e) {}
+      if (isConnected) {
+        sendControl({ t: 'ping', ts: performance.now() });
       }
     }
   });
@@ -1140,6 +1141,8 @@ function renderBase64Frame(b64) {
   img.src = 'data:image/jpeg;base64,' + b64;
 }
 
+let frameSafetyTimer = null;
+
 function renderRawBlob(blobData) {
   frameCount++;
   const now = performance.now();
@@ -1156,10 +1159,21 @@ function renderRawBlob(blobData) {
   }
 
   isRenderingFrame = true;
+  if (frameSafetyTimer) clearTimeout(frameSafetyTimer);
+  frameSafetyTimer = setTimeout(() => {
+    isRenderingFrame = false;
+    if (pendingBlob) {
+      const next = pendingBlob;
+      pendingBlob = null;
+      renderRawBlob(next);
+    }
+  }, 150);
+
   const blob = new Blob([blobData], { type: 'image/jpeg' });
   
   if (window.createImageBitmap) {
     createImageBitmap(blob).then((imgBitmap) => {
+      if (frameSafetyTimer) clearTimeout(frameSafetyTimer);
       if (canvas.width !== imgBitmap.width || canvas.height !== imgBitmap.height) {
         canvas.width = imgBitmap.width;
         canvas.height = imgBitmap.height;
@@ -1184,6 +1198,7 @@ function fallbackRenderImage(blob) {
   const img = new Image();
   const url = URL.createObjectURL(blob);
   img.onload = () => {
+    if (frameSafetyTimer) clearTimeout(frameSafetyTimer);
     if (canvas.width !== img.width || canvas.height !== img.height) {
       canvas.width = img.width;
       canvas.height = img.height;
@@ -1198,6 +1213,7 @@ function fallbackRenderImage(blob) {
     }
   };
   img.onerror = () => {
+    if (frameSafetyTimer) clearTimeout(frameSafetyTimer);
     URL.revokeObjectURL(url);
     isRenderingFrame = false;
   };

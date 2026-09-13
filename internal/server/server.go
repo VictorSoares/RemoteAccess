@@ -673,6 +673,7 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 					senderName = sess.ClientAlias
 				}
 				s.addChatMessage(senderName, text)
+				input.BringAppToFront()
 				input.FlashAppWindow()
 				input.PlayNotificationSound()
 			}

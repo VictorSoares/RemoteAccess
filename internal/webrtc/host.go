@@ -382,6 +382,7 @@ func (h *HostSession) StartStreaming() {
 		defer ticker.Stop()
 		watchdogTicker := time.NewTicker(1 * time.Second)
 		defer watchdogTicker.Stop()
+		var lastRelayTime time.Time
 
 		for {
 			select {
@@ -413,8 +414,12 @@ func (h *HostSession) StartStreaming() {
 					_ = vChan.Send(frameData)
 				} else if h.OnRelayFrame != nil {
 					// 2. Fallback to WebSocket Relay only when WebRTC P2P DataChannel is not yet connected
-					b64 := base64.StdEncoding.EncodeToString(frameData)
-					h.OnRelayFrame(b64)
+					// Rate limit to max 12 FPS so cloud WebSocket buffer is never congested and ping remains ultra-low
+					if time.Since(lastRelayTime) >= 80*time.Millisecond {
+						lastRelayTime = time.Now()
+						b64 := base64.StdEncoding.EncodeToString(frameData)
+						h.OnRelayFrame(b64)
+					}
 				}
 			}
 		}
