@@ -172,36 +172,70 @@
       background: rgba(255, 255, 255, 0.02);
     }
     .badge-type {
-      padding: 0.25rem 0.6rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 0.25rem 0.55rem;
       border-radius: 6px;
       font-size: 0.75rem;
       font-weight: 700;
+      white-space: nowrap;
+      line-height: 1.2;
     }
     .badge-host {
-      background: rgba(59, 130, 246, 0.2);
+      background: rgba(59, 130, 246, 0.18);
       color: #93c5fd;
-      border: 1px solid rgba(59, 130, 246, 0.4);
+      border: 1px solid rgba(59, 130, 246, 0.35);
     }
     .badge-client {
-      background: rgba(168, 85, 247, 0.2);
+      background: rgba(168, 85, 247, 0.18);
       color: #d8b4fe;
-      border: 1px solid rgba(168, 85, 247, 0.4);
+      border: 1px solid rgba(168, 85, 247, 0.35);
+    }
+    .badge-mon {
+      background: rgba(147, 51, 234, 0.18);
+      color: #c084fc;
+      border: 1px solid rgba(147, 51, 234, 0.35);
     }
     .id-tag {
       font-family: var(--font-mono);
       font-weight: 800;
-      font-size: 1.1rem;
+      font-size: 1.05rem;
       color: #38bdf8;
       letter-spacing: 0.05em;
+    }
+    .pwd-wrapper {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      background: rgba(255, 255, 255, 0.03);
+      padding: 0.2rem 0.35rem 0.2rem 0.55rem;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.07);
     }
     .pwd-tag {
       font-family: var(--font-mono);
       font-weight: 600;
-      font-size: 0.9rem;
-      color: #e2e8f0;
-      background: rgba(255,255,255,0.06);
-      padding: 0.2rem 0.5rem;
-      border-radius: 6px;
+      font-size: 0.85rem;
+      color: #cbd5e1;
+      letter-spacing: 0.12em;
+    }
+    .btn-pwd-icon {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 0.2rem 0.35rem;
+      border-radius: 4px;
+      font-size: 0.8rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+    .btn-pwd-icon:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: #fff;
     }
     .actions-cell {
       display: flex;
@@ -610,6 +644,36 @@
       }
     }
 
+    const revealedPwdMap = {};
+
+    function togglePwd(id, actualPwd) {
+      revealedPwdMap[id] = !revealedPwdMap[id];
+      const el = document.getElementById('pwd-txt-' + id);
+      const btn = document.getElementById('pwd-btn-' + id);
+      if (el && btn) {
+        if (revealedPwdMap[id]) {
+          el.innerText = actualPwd;
+          el.style.letterSpacing = 'normal';
+          btn.innerText = '🙈';
+          btn.title = 'Ocultar Senha';
+        } else {
+          el.innerText = '••••••••';
+          el.style.letterSpacing = '0.12em';
+          btn.innerText = '👁️';
+          btn.title = 'Revelar Senha';
+        }
+      }
+    }
+
+    function copyPwd(pwd) {
+      if (!pwd) return;
+      navigator.clipboard.writeText(pwd).then(() => {
+        alert('Senha copiada para a área de transferência!');
+      }).catch(() => {
+        prompt('Copie a senha:', pwd);
+      });
+    }
+
     function logoutAdmin() {
       adminKey = '';
       localStorage.removeItem('ra_admin_key');
@@ -643,6 +707,10 @@
               ? '<span class="badge-type badge-host">🖥️ HOST</span>' 
               : '<span class="badge-type badge-client">🚀 CLIENTE</span>';
 
+            const monCount = p.monitors || 1;
+            const monBadge = monCount > 1 ? '<span class="badge-type badge-mon">🖥️ ' + monCount + ' Telas</span>' : '';
+            const typeContainer = '<div style="display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap;">' + typeBadge + monBadge + '</div>';
+
             let statusHtml = '<span style="color: #4ade80; font-weight: 700;">🟢 Disponível</span>';
             if (p.blocked) {
               statusHtml = '<span style="color: #f87171; font-weight: 700;">🚫 Bloqueado</span>';
@@ -650,11 +718,21 @@
               statusHtml = '<span style="color: #f87171; font-weight: 700;">🔴 Em Sessão com ' + p.active_target_id + '</span>';
             }
 
-            const pwdDisplay = p.password ? '<span class="pwd-tag">' + p.password + '</span>' : '<span style="color: var(--text-muted);">---</span>';
-            const aliasDisplay = p.alias ? '<strong style="color: #60a5fa;">' + p.alias + '</strong>' : '<span style="color: var(--text-muted); font-style: italic;">Não definido</span>';
+            let pwdDisplay = '<span style="color: var(--text-muted);">---</span>';
+            if (p.password) {
+              const isRevealed = !!revealedPwdMap[p.id];
+              const displayVal = isRevealed ? p.password : '••••••••';
+              const icon = isRevealed ? '🙈' : '👁️';
+              const spacing = isRevealed ? 'normal' : '0.12em';
+              const escapedPwd = p.password.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+              pwdDisplay = '<div class="pwd-wrapper">' +
+                '<span class="pwd-tag" id="pwd-txt-' + p.id + '" style="letter-spacing: ' + spacing + ';">' + displayVal + '</span>' +
+                '<button class="btn-pwd-icon" id="pwd-btn-' + p.id + '" title="Exibir/Ocultar Senha" onclick="togglePwd(\'' + p.id + '\', \'' + escapedPwd + '\')">' + icon + '</button>' +
+                '<button class="btn-pwd-icon" title="Copiar Senha" onclick="copyPwd(\'' + escapedPwd + '\')">📋</button>' +
+              '</div>';
+            }
 
-            const monCount = p.monitors || 1;
-            const monBadge = monCount > 1 ? '<span class="badge-type" style="background: rgba(147, 51, 234, 0.2); color: #c084fc; border: 1px solid rgba(147, 51, 234, 0.4); margin-left: 6px;">🖥️ ' + monCount + ' Telas</span>' : '';
+            const aliasDisplay = p.alias ? '<strong style="color: #60a5fa;">' + p.alias + '</strong>' : '<span style="color: var(--text-muted); font-style: italic;">Não definido</span>';
 
             let actionsHtml = '';
             if (p.is_host) {
@@ -667,7 +745,7 @@
             }
             actionsHtml += '<button class="btn-action btn-kill" onclick="kickPeer(\'' + p.id + '\')">🛑 Kill</button>';
 
-            tr.innerHTML = '<td>' + typeBadge + monBadge + '</td>' +
+            tr.innerHTML = '<td>' + typeContainer + '</td>' +
               '<td>' + aliasDisplay + '</td>' +
               '<td><span class="id-tag">' + formatID(p.id) + '</span></td>' +
               '<td>' + pwdDisplay + '</td>' +
