@@ -1341,11 +1341,11 @@
             };
             img.src = 'data:image/jpeg;base64,' + msg.payload;
           } else if (msg.action === 'close') {
+            closeWebViewer();
             await showModalAlert('Sessão Encerrada', 'A sessão remota foi encerrada pelo computador remoto.', 'ℹ️');
-            closeWebViewer();
           } else if (msg.action === 'error') {
-            await showModalAlert('Erro na Conexão', msg.message || 'Erro de conexão com o computador remoto.', '❌');
             closeWebViewer();
+            await showModalAlert('Erro na Conexão', msg.message || 'Erro de conexão com o computador remoto.', '❌');
           }
         } catch(e) {}
       };
@@ -1478,17 +1478,25 @@
       document.getElementById('web-viewer-container').style.display = 'none';
       if (viewerWS) {
         try {
-          viewerWS.send(JSON.stringify({
-            action: 'close',
-            targetId: currentSessionTarget
-          }));
-          viewerWS.close();
+          if (viewerWS.readyState === WebSocket.OPEN && currentSessionTarget) {
+            viewerWS.send(JSON.stringify({
+              action: 'close',
+              targetId: currentSessionTarget
+            }));
+          }
         } catch(e) {}
+        const wsToClose = viewerWS;
         viewerWS = null;
+        setTimeout(() => {
+          try { wsToClose.close(); } catch(e) {}
+        }, 100);
       }
       if (document.fullscreenElement) {
         document.exitFullscreen().catch(() => {});
       }
+      // Clear canvas
+      vCtx.clearRect(0, 0, vCanvas.width, vCanvas.height);
+      refreshData();
     }
 
     function toggleViewerFullscreen() {

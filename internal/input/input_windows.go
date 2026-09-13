@@ -125,8 +125,9 @@ const (
 	mouseeventfRightup    = 0x0010
 	mouseeventfMiddledown = 0x0020
 	mouseeventfMiddleup   = 0x0040
-	mouseeventfWheel      = 0x0800
-	mouseeventfAbsolute   = 0x8000
+	mouseeventfWheel       = 0x0800
+	mouseeventfVirtualDesk = 0x4000
+	mouseeventfAbsolute    = 0x8000
 
 	keyeventfExtendedkey = 0x0001
 	keyeventfKeyup       = 0x0002
@@ -364,9 +365,32 @@ func MoveMouseAbsolute(ratioX, ratioY float64) error {
 	targetX := originX + int32(ratioX*float64(w))
 	targetY := originY + int32(ratioY*float64(h))
 
+	// Physical placement
 	procSetCursorPos.Call(uintptr(targetX), uintptr(targetY))
-	// Synthesize hardware mouse move event into Windows input subsystem to trigger Taskbar Previews and Hover states
-	procMouseEvent.Call(mouseeventfMove, 0, 0, 0, remoteAccessMagicExtraInfo)
+
+	// Calculate absolute normalized virtual coordinates [0..65535] across virtual desktop
+	vw, _, _ := procGetSystemMetrics.Call(78) // SM_CXVIRTUALSCREEN
+	vh, _, _ := procGetSystemMetrics.Call(79) // SM_CYVIRTUALSCREEN
+	vl, _, _ := procGetSystemMetrics.Call(76) // SM_XVIRTUALSCREEN
+	vt, _, _ := procGetSystemMetrics.Call(77) // SM_YVIRTUALSCREEN
+	if vw == 0 {
+		vw = uintptr(w)
+	}
+	if vh == 0 {
+		vh = uintptr(h)
+	}
+
+	normX := int32(((float64(targetX - int32(vl))) * 65535.0) / float64(vw))
+	normY := int32(((float64(targetY - int32(vt))) * 65535.0) / float64(vh))
+
+	// Synthesize hardware mouse move event with absolute virtual desk flags to trigger Windows DWM taskbar previews and hover states
+	procMouseEvent.Call(
+		uintptr(mouseeventfMove|mouseeventfAbsolute|mouseeventfVirtualDesk),
+		uintptr(normX),
+		uintptr(normY),
+		0,
+		remoteAccessMagicExtraInfo,
+	)
 	return nil
 }
 

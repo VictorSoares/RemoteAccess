@@ -359,11 +359,20 @@ func (h *HostSession) StartStreaming() {
 		defer atomic.StoreInt32(&h.running, 0)
 		ticker := time.NewTicker(time.Second / time.Duration(h.FPS))
 		defer ticker.Stop()
+		watchdogTicker := time.NewTicker(1 * time.Second)
+		defer watchdogTicker.Stop()
 
 		for {
 			select {
 			case <-h.ctx.Done():
 				return
+			case <-watchdogTicker.C:
+				last := atomic.LoadInt64(&h.lastActivity)
+				if last > 0 && time.Now().Unix()-last > 8 {
+					log.Printf("[Host] Cliente (%s) inativo/desconectado por mais de 8s. Encerrando sessão automaticamente.", h.ClientID)
+					go h.Close()
+					return
+				}
 			case <-ticker.C:
 				frameData, err := h.capturer.CaptureFrame()
 				if err != nil {

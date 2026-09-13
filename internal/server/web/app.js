@@ -642,6 +642,8 @@ async function kickActiveSession() {
     if (box) box.style.display = 'none';
     const chatSec = document.getElementById('host-chat-container');
     if (chatSec) chatSec.style.display = 'none';
+    const floatingDrawer = document.getElementById('host-floating-chat-drawer');
+    if (floatingDrawer) floatingDrawer.style.display = 'none';
     const badge = document.getElementById('host-chat-badge');
     if (badge) {
       badge.innerText = '0';
@@ -654,6 +656,7 @@ async function kickActiveSession() {
     hostChatOpen = false;
     lastSeenHostMsgCount = 0;
     hideHostToast();
+    await fetchSessionStatus();
     await showModalAlert('Sessão Encerrada', 'A sessão remota foi desconectada com sucesso.', '✅');
   } catch (err) {
     await showModalAlert('Erro', 'Falha ao encerrar a sessão remota.', '❌');
