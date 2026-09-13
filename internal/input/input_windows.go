@@ -37,6 +37,7 @@ var (
 	procGetCurrentThreadId       = kernel32.NewProc("GetCurrentThreadId")
 	procFlashWindowEx            = user32.NewProc("FlashWindowEx")
 	procFindWindowW              = user32.NewProc("FindWindowW")
+	procMessageBeep              = user32.NewProc("MessageBeep")
 
 	activeBoundsMu sync.RWMutex
 	activeBounds   image.Rectangle
@@ -263,6 +264,13 @@ func FlashAppWindow() {
 		fi.UCount = 5
 		fi.DwTimeout = 0
 		procFlashWindowEx.Call(uintptr(unsafe.Pointer(&fi)))
+	}
+}
+
+// PlayNotificationSound plays the native Windows notification chime
+func PlayNotificationSound() {
+	if procMessageBeep.Find() == nil {
+		procMessageBeep.Call(0x00000040) // MB_ICONASTERISK (Windows Notification / Asterisk sound)
 	}
 }
 

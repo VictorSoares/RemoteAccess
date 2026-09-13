@@ -660,6 +660,7 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 				}
 				s.addChatMessage(senderName, text)
 				input.FlashAppWindow()
+				input.PlayNotificationSound()
 			}
 
 			sess.OnClose = func() {

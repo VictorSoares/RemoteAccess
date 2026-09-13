@@ -411,20 +411,43 @@ async function fetchSessionStatus() {
   } catch (err) {}
 }
 
+let appAudioCtx = null;
+function getAppAudioContext() {
+  if (!appAudioCtx) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (AudioCtx) {
+      appAudioCtx = new AudioCtx();
+    }
+  }
+  if (appAudioCtx && appAudioCtx.state === 'suspended') {
+    appAudioCtx.resume().catch(() => {});
+  }
+  return appAudioCtx;
+}
+
+window.addEventListener('pointerdown', () => { getAppAudioContext(); }, { once: true });
+window.addEventListener('keydown', () => { getAppAudioContext(); }, { once: true });
+
 function playChatChime() {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = getAppAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
+
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(587.33, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.12);
-    gain.gain.setValueAtTime(0.2, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    osc.frequency.setValueAtTime(587.33, now);
+    osc.frequency.setValueAtTime(880, now + 0.09);
+
+    gain.gain.setValueAtTime(0.35, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+
     osc.connect(gain);
     gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.35);
+
+    osc.start(now);
+    osc.stop(now + 0.4);
   } catch(e) {}
 }
 
