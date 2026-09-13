@@ -345,6 +345,31 @@
       align-items: center;
       gap: 6px;
     }
+    .dock-select-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .dock-select {
+      background: rgba(255, 255, 255, 0.08);
+      color: #fff;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      padding: 0.45rem 0.8rem;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      outline: none;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .dock-select:hover {
+      background: rgba(255, 255, 255, 0.14);
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+    .dock-select option {
+      background: #0f172a;
+      color: #fff;
+    }
     #viewer-canvas {
       width: 100%;
       height: 100%;
@@ -508,6 +533,13 @@
     </div>
 
     <div class="web-viewer-dock">
+      <!-- Remote Monitor Switcher -->
+      <div class="dock-select-wrap" title="Alternar Monitor Remoto">
+        <select id="web-viewer-mon-select" class="dock-select" onchange="switchWebViewerMonitor(this.value)">
+          <option value="0">🖥️ Monitor 1</option>
+        </select>
+      </div>
+
       <button class="btn-action" onclick="sendViewerSys('cad')" style="background: rgba(255,255,255,0.1); color: #fff;">⌨️ Ctrl+Alt+Del</button>
       <button class="btn-action" onclick="sendViewerSys('desktop')" style="background: rgba(255,255,255,0.1); color: #fff;">🪟 Win+D</button>
       <button class="btn-action" onclick="sendViewerSys('taskmgr')" style="background: rgba(255,255,255,0.1); color: #fff;">⚡ Tarefas</button>
@@ -621,9 +653,12 @@
             const pwdDisplay = p.password ? '<span class="pwd-tag">' + p.password + '</span>' : '<span style="color: var(--text-muted);">---</span>';
             const aliasDisplay = p.alias ? '<strong style="color: #60a5fa;">' + p.alias + '</strong>' : '<span style="color: var(--text-muted); font-style: italic;">Não definido</span>';
 
+            const monCount = p.monitors || 1;
+            const monBadge = monCount > 1 ? '<span class="badge-type" style="background: rgba(147, 51, 234, 0.2); color: #c084fc; border: 1px solid rgba(147, 51, 234, 0.4); margin-left: 6px;">🖥️ ' + monCount + ' Telas</span>' : '';
+
             let actionsHtml = '';
             if (p.is_host) {
-              actionsHtml += '<button class="btn-action btn-connect-direct" onclick="connectDirect(\'' + p.id + '\', \'' + (p.password || '') + '\')">🚀 Acessar</button>';
+              actionsHtml += '<button class="btn-action btn-connect-direct" onclick="connectDirect(\'' + p.id + '\', \'' + (p.password || '') + '\', ' + monCount + ')">🚀 Acessar</button>';
               if (p.blocked) {
                 actionsHtml += '<button class="btn-action" style="background: rgba(16,185,129,0.2); color: #6ee7b7; border: 1px solid rgba(16,185,129,0.4);" onclick="toggleBlockPeer(\'' + p.id + '\', false)">🔓 Desbloquear</button>';
               } else {
@@ -632,7 +667,7 @@
             }
             actionsHtml += '<button class="btn-action btn-kill" onclick="kickPeer(\'' + p.id + '\')">🛑 Kill</button>';
 
-            tr.innerHTML = '<td>' + typeBadge + '</td>' +
+            tr.innerHTML = '<td>' + typeBadge + monBadge + '</td>' +
               '<td>' + aliasDisplay + '</td>' +
               '<td><span class="id-tag">' + formatID(p.id) + '</span></td>' +
               '<td>' + pwdDisplay + '</td>' +
@@ -716,12 +751,37 @@
       }
     }
 
+    // Monitor Switching Functions
+    function updateWebViewerMonitors(count) {
+      const sel = document.getElementById('web-viewer-mon-select');
+      if (!sel) return;
+      const total = Math.max(1, parseInt(count) || 1);
+      const currentVal = sel.value;
+      sel.innerHTML = '';
+      for (let i = 0; i < total; i++) {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.innerText = '🖥️ Monitor ' + (i + 1);
+        sel.appendChild(opt);
+      }
+      if (currentVal && parseInt(currentVal) < total) {
+        sel.value = currentVal;
+      } else {
+        sel.value = 0;
+      }
+    }
+
+    function switchWebViewerMonitor(monIdx) {
+      sendViewerCtrl({ t: 'mon_switch', mon: parseInt(monIdx) });
+    }
+
     // 1-Click Embedded Direct Remote Access
-    function connectDirect(targetId, targetPwd) {
+    function connectDirect(targetId, targetPwd, monitorsCount) {
       currentSessionTarget = targetId;
       document.getElementById('web-stat-target').innerText = 'Host: ' + formatID(targetId);
       document.getElementById('web-viewer-container').style.display = 'flex';
       viewerConnected = true;
+      updateWebViewerMonitors(monitorsCount || 1);
 
       const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = wsProtocol + '//' + window.location.host + '/ws';
@@ -745,6 +805,16 @@
         try {
           const msg = JSON.parse(event.data);
           if (msg.action === 'data') {
+            if (msg.payload && typeof msg.payload === 'string' && msg.payload.startsWith('{"t":')) {
+              try {
+                const ctrl = JSON.parse(msg.payload);
+                if (ctrl.t === 'init_info' && ctrl.mon) {
+                  updateWebViewerMonitors(ctrl.mon);
+                }
+              } catch(e) {}
+              return;
+            }
+
             vFrameCount++;
             const now = performance.now();
             if (now - vLastFpsTime >= 1000) {

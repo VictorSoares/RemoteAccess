@@ -21,6 +21,7 @@ type SignalingMessage struct {
 	Action    string          `json:"action"`
 	ID        string          `json:"id,omitempty"`
 	Alias     string          `json:"alias,omitempty"`
+	Monitors  int             `json:"monitors,omitempty"`
 	TargetID  string          `json:"targetId,omitempty"`
 	Password  string          `json:"password,omitempty"`
 	SDP       string          `json:"sdp,omitempty"`
@@ -44,6 +45,7 @@ const (
 	TypePong          = "pong"
 	TypeConfig        = "cfg"
 	TypeMonitorSwitch = "mon_switch"
+	TypeInitInfo      = "init_info"
 	TypeChat          = "chat"
 	TypeSysCommand    = "sys_cmd"
 	TypeAuth          = "auth"

@@ -30,6 +30,7 @@ var upgrader = websocket.Upgrader{
 type Peer struct {
 	ID             string          `json:"id"`
 	Alias          string          `json:"alias"`
+	Monitors       int             `json:"monitors"`
 	IsHost         bool            `json:"is_host"`
 	Password       string          `json:"password,omitempty"`
 	RemoteAddr     string          `json:"remote_addr"`
@@ -208,18 +209,22 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 			if msg.Alias != "" {
 				peer.Alias = msg.Alias
 			}
+			if msg.Monitors > 0 {
+				peer.Monitors = msg.Monitors
+			}
 			peer.IsHost = true
 			peer.Password = msg.Password
 			s.peers[msg.ID] = peer
 			s.mu.Unlock()
 
-			s.addLog("Host registrado: %s [Nome: %s] (Pronto para conexões)", msg.ID, peer.Alias)
+			s.addLog("Host registrado: %s [Nome: %s, Monitores: %d] (Pronto para conexões)", msg.ID, peer.Alias, peer.Monitors)
 			_ = conn.WriteJSON(protocol.SignalingMessage{
-				Action:  protocol.ActionStatus,
-				Status:  "registered",
-				Message: "Host registrado com sucesso no Relay",
-				ID:      msg.ID,
-				Alias:   peer.Alias,
+				Action:   protocol.ActionStatus,
+				Status:   "registered",
+				Message:  "Host registrado com sucesso no Relay",
+				ID:       msg.ID,
+				Alias:    peer.Alias,
+				Monitors: peer.Monitors,
 			})
 
 		case protocol.ActionUnregister:
@@ -377,6 +382,7 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 	type PeerInfo struct {
 		ID             string `json:"id"`
 		Alias          string `json:"alias"`
+		Monitors       int    `json:"monitors"`
 		IsHost         bool   `json:"is_host"`
 		Password       string `json:"password,omitempty"`
 		DurationSec    int    `json:"duration_sec"`
@@ -411,9 +417,15 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 			clientCount++
 		}
 
+		mons := p.Monitors
+		if mons <= 0 {
+			mons = 1
+		}
+
 		peerList = append(peerList, PeerInfo{
 			ID:             p.ID,
 			Alias:          p.Alias,
+			Monitors:       mons,
 			IsHost:         p.IsHost,
 			Password:       p.Password,
 			DurationSec:    int(time.Since(p.ConnectedAt).Seconds()),

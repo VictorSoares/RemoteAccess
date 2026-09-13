@@ -216,6 +216,7 @@ func (s *LocalServer) handleSetAlias(w http.ResponseWriter, r *http.Request) {
 			ID:       hostID,
 			Alias:    cleanAlias,
 			Password: hostPwd,
+			Monitors: capture.GetNumDisplays(),
 		})
 	}
 
@@ -282,6 +283,7 @@ func (s *LocalServer) handleSetPassword(w http.ResponseWriter, r *http.Request) 
 			ID:       hostID,
 			Alias:    hostAlias,
 			Password: req.Password,
+			Monitors: capture.GetNumDisplays(),
 		})
 	}
 
@@ -368,15 +370,17 @@ func (s *LocalServer) cloudSignalingLoop() {
 		hostID := s.Config.Data.ID
 		hostAlias := s.Config.Data.Alias
 		hostPwd := s.Config.Data.Password
+		numDisplays := capture.GetNumDisplays()
 		s.mu.Unlock()
 
-		log.Printf("[Nuvem] Conectado com sucesso! Registrado Host ID: %s (Alias: %s)", hostID, hostAlias)
+		log.Printf("[Nuvem] Conectado com sucesso! Registrado Host ID: %s (Alias: %s, Monitores: %d)", hostID, hostAlias, numDisplays)
 
 		err = conn.WriteJSON(protocol.SignalingMessage{
 			Action:   protocol.ActionRegister,
 			ID:       hostID,
 			Alias:    hostAlias,
 			Password: hostPwd,
+			Monitors: numDisplays,
 		})
 		if err != nil {
 			conn.Close()
@@ -441,6 +445,19 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 
 			s.hostSession = sess
 			sess.StartStreaming()
+
+			// Send display count and system info to remote viewer
+			numDisplays := capture.GetNumDisplays()
+			initInfo, _ := json.Marshal(protocol.ControlMessage{
+				Type:    protocol.TypeInitInfo,
+				Monitor: numDisplays,
+			})
+			_ = conn.WriteJSON(protocol.SignalingMessage{
+				Action:   protocol.ActionData,
+				ID:       s.Config.Data.ID,
+				TargetID: senderID,
+				Payload:  string(initInfo),
+			})
 		}
 		s.mu.Unlock()
 
