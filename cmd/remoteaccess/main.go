@@ -74,6 +74,7 @@ func startWindowSizeGuard() {
 	procGetWindowRect := user32.NewProc("GetWindowRect")
 	procSetWindowPos := user32.NewProc("SetWindowPos")
 	procGetWindowTextW := user32.NewProc("GetWindowTextW")
+	procGetClassNameW := user32.NewProc("GetClassNameW")
 	procEnumWindows := user32.NewProc("EnumWindows")
 	procIsWindowVisible := user32.NewProc("IsWindowVisible")
 
@@ -82,7 +83,7 @@ func startWindowSizeGuard() {
 	}
 
 	go func() {
-		ticker := time.NewTicker(35 * time.Millisecond) // ~30Hz smooth physical clamp
+		ticker := time.NewTicker(40 * time.Millisecond) // 25Hz physical clamp
 		defer ticker.Stop()
 
 		isVis := func(h uintptr) bool {
@@ -91,22 +92,31 @@ func startWindowSizeGuard() {
 		}
 
 		var targetHWND uintptr
+		// Allocate callback ONCE outside the loop to avoid exhausting Go runtime callback table
+		findCb := syscall.NewCallback(func(hwnd uintptr, lParam uintptr) uintptr {
+			if !isVis(hwnd) {
+				return 1
+			}
+			var clsBuf [256]uint16
+			procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&clsBuf[0])), 256)
+			cls := syscall.UTF16ToString(clsBuf[:])
+			if cls != "Chrome_WidgetWin_1" {
+				return 1
+			}
+			var buf [256]uint16
+			procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), 256)
+			title := syscall.UTF16ToString(buf[:])
+			if strings.Contains(title, "RemoteAccess") || strings.Contains(title, "127.0.0.1") {
+				targetHWND = hwnd
+				return 0 // found, stop enumerating
+			}
+			return 1
+		})
+
 		for range ticker.C {
 			if targetHWND == 0 || !isVis(targetHWND) {
-				cb := syscall.NewCallback(func(hwnd uintptr, lParam uintptr) uintptr {
-					if !isVis(hwnd) {
-						return 1
-					}
-					var buf [256]uint16
-					procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), 256)
-					title := syscall.UTF16ToString(buf[:])
-					if title != "" && strings.Contains(title, "RemoteAccess") && !strings.Contains(title, "Tray") {
-						targetHWND = hwnd
-						return 0
-					}
-					return 1
-				})
-				procEnumWindows.Call(cb, 0)
+				targetHWND = 0
+				procEnumWindows.Call(findCb, 0)
 			}
 
 			if targetHWND != 0 {

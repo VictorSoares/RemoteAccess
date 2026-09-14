@@ -133,6 +133,23 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  // Enforce minimum window dimensions (540x580) on resize
+  let resizeDebounceTimer = null;
+  window.addEventListener('resize', () => {
+    if (resizeDebounceTimer) clearTimeout(resizeDebounceTimer);
+    resizeDebounceTimer = setTimeout(() => {
+      const minW = 540;
+      const minH = 580;
+      if ((window.outerWidth && window.outerWidth < minW) || (window.outerHeight && window.outerHeight < minH)) {
+        if (typeof window.resizeTo === 'function') {
+          try {
+            window.resizeTo(Math.max(minW, window.outerWidth), Math.max(minH, window.outerHeight));
+          } catch (e) {}
+        }
+      }
+    }, 60);
+  });
+
   // Smooth visibility recovery when window is minimized and restored
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
@@ -1105,9 +1122,44 @@ function setupDataChannels(targetId) {
     } catch (e) {}
   };
 
+  videoChannel.binaryType = 'arraybuffer';
   videoChannel.onmessage = async (event) => {
-    renderRawBlob(event.data);
+    handleVideoPacket(event.data);
   };
+}
+
+let frameAssembly = null;
+
+function handleVideoPacket(data) {
+  if (!isConnected) return;
+  if (data instanceof ArrayBuffer) {
+    if (data.byteLength < 8) return;
+    const view = new DataView(data);
+    const frameId = view.getUint32(0);
+    const chunkIdx = view.getUint16(4);
+    const totalChunks = view.getUint16(6);
+    const chunkData = new Uint8Array(data, 8);
+
+    if (totalChunks <= 1) {
+      renderRawBlob(new Blob([chunkData], { type: 'image/jpeg' }));
+      return;
+    }
+
+    if (!frameAssembly || frameAssembly.id !== frameId) {
+      frameAssembly = { id: frameId, total: totalChunks, count: 0, chunks: new Array(totalChunks) };
+    }
+    if (!frameAssembly.chunks[chunkIdx]) {
+      frameAssembly.chunks[chunkIdx] = chunkData;
+      frameAssembly.count++;
+    }
+    if (frameAssembly.count === totalChunks) {
+      const blob = new Blob(frameAssembly.chunks, { type: 'image/jpeg' });
+      frameAssembly = null;
+      renderRawBlob(blob);
+    }
+  } else if (data instanceof Blob) {
+    renderRawBlob(data);
+  }
 }
 
 let isRenderingFrame = false;
@@ -1167,7 +1219,7 @@ function renderRawBlob(blobData) {
     }
   }, 150);
 
-  const blob = new Blob([blobData], { type: 'image/jpeg' });
+  const blob = (blobData instanceof Blob) ? blobData : new Blob([blobData], { type: 'image/jpeg' });
   
   if (window.createImageBitmap) {
     createImageBitmap(blob).then((imgBitmap) => {
@@ -1354,7 +1406,21 @@ async function openClipboardModal() {
 
 function toggleChatDrawer() {
   const drawer = document.getElementById('chat-drawer');
-  drawer.style.display = drawer.style.display === 'flex' ? 'none' : 'flex';
+  if (!drawer) return;
+  const isOpening = drawer.style.display !== 'flex';
+  drawer.style.display = isOpening ? 'flex' : 'none';
+  if (isOpening) {
+    const input = document.getElementById('chat-input');
+    if (input) {
+      setTimeout(() => {
+        input.focus();
+        input.select();
+      }, 50);
+      setTimeout(() => {
+        input.focus();
+      }, 150);
+    }
+  }
 }
 
 function sendChatMessage(e) {

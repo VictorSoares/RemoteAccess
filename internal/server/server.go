@@ -234,9 +234,16 @@ func (s *LocalServer) handleSessionStatus(w http.ResponseWriter, r *http.Request
 
 func (s *LocalServer) handleKickSession(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	if s.hostSession != nil {
-		clientID := s.hostSession.ClientID
-		hostID := s.Config.Data.ID
+	sess := s.hostSession
+	s.hostSession = nil
+	clientID := ""
+	if sess != nil {
+		clientID = sess.ClientID
+	}
+	hostID := s.Config.Data.ID
+	s.mu.Unlock()
+
+	if sess != nil {
 		if clientID != "" {
 			_ = s.writeCloudJSON(protocol.SignalingMessage{
 				Action:   protocol.ActionClose,
@@ -244,10 +251,8 @@ func (s *LocalServer) handleKickSession(w http.ResponseWriter, r *http.Request) 
 				TargetID: clientID,
 			})
 		}
-		s.hostSession.Close()
-		s.hostSession = nil
+		sess.Close()
 	}
-	s.mu.Unlock()
 
 	s.chatMu.Lock()
 	s.chatMsgs = nil
@@ -674,7 +679,6 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 				}
 				s.addChatMessage(senderName, text)
 				go func() {
-					input.BringAppToFront()
 					input.FlashAppWindow()
 					input.PlayNotificationSound()
 				}()
@@ -737,11 +741,14 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 	case protocol.ActionClose:
 		log.Printf("[Conexão] Sessão remota encerrada via sinalização")
 		s.mu.Lock()
-		if s.hostSession != nil {
-			s.hostSession.Close()
-			s.hostSession = nil
-		}
+		sess := s.hostSession
+		s.hostSession = nil
 		s.mu.Unlock()
+
+		if sess != nil {
+			sess.Close()
+		}
+
 		s.chatMu.Lock()
 		s.chatMsgs = nil
 		s.chatMu.Unlock()

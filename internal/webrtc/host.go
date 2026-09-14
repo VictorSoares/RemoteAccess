@@ -3,6 +3,7 @@ package webrtc
 import (
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -43,6 +44,7 @@ type HostSession struct {
 	running      int32
 	FPS          int
 	Quality      int
+	frameCounter uint32
 	ClientID     string
 	ClientAlias  string
 	ConnectedAt  time.Time
@@ -116,11 +118,19 @@ func (h *HostSession) HandleRemoteOffer(targetID string, sdpStr string) error {
 	h.peerConn = pc
 
 	pc.OnICEConnectionStateChange(func(state pion.ICEConnectionState) {
-		log.Printf("[Host] ICE P2P State: %s (Relay WSS ativo em paralelo)", state.String())
+		log.Printf("[Host] ICE P2P State: %s", state.String())
+		if state == pion.ICEConnectionStateFailed || state == pion.ICEConnectionStateClosed || state == pion.ICEConnectionStateDisconnected {
+			log.Printf("[Host] ICE desconectado (%s). Encerrando sessão host.", state.String())
+			go h.Close()
+		}
 	})
 
 	pc.OnConnectionStateChange(func(state pion.PeerConnectionState) {
-		log.Printf("[Host] PeerConnection State: %s (Relay WSS ativo em paralelo)", state.String())
+		log.Printf("[Host] PeerConnection State: %s", state.String())
+		if state == pion.PeerConnectionStateFailed || state == pion.PeerConnectionStateClosed || state == pion.PeerConnectionStateDisconnected {
+			log.Printf("[Host] PeerConnection desconectado (%s). Encerrando sessão host.", state.String())
+			go h.Close()
+		}
 	})
 
 	pc.OnICECandidate(func(c *pion.ICECandidate) {
@@ -155,7 +165,8 @@ func (h *HostSession) HandleRemoteOffer(targetID string, sdpStr string) error {
 		} else if dc.Label() == "video" {
 			h.videoChannel = dc
 			dc.OnClose(func() {
-				log.Println("[Host] Video DataChannel fechado.")
+				log.Println("[Host] Video DataChannel fechado pelo cliente.")
+				go h.Close()
 			})
 		}
 	})
@@ -393,8 +404,8 @@ func (h *HostSession) StartStreaming() {
 				}
 			case <-watchdogTicker.C:
 				last := atomic.LoadInt64(&h.lastActivity)
-				if last > 0 && time.Now().Unix()-last > 30 {
-					log.Printf("[Host] Cliente (%s) inativo por mais de 30s. Encerrando sessão automaticamente.", h.ClientID)
+				if last > 0 && time.Now().Unix()-last > 5 {
+					log.Printf("[Host] Cliente (%s) inativo por mais de 5s. Encerrando sessão automaticamente.", h.ClientID)
 					go h.Close()
 					return
 				}
@@ -414,7 +425,34 @@ func (h *HostSession) StartStreaming() {
 					if vChan.BufferedAmount() > 1024*1024 {
 						continue
 					}
-					_ = vChan.Send(frameData)
+
+					frameID := atomic.AddUint32(&h.frameCounter, 1)
+					totalLen := len(frameData)
+					const maxChunk = 60 * 1024
+					totalChunks := (totalLen + maxChunk - 1) / maxChunk
+					if totalChunks <= 1 {
+						pkt := make([]byte, 8+totalLen)
+						binary.BigEndian.PutUint32(pkt[0:4], frameID)
+						binary.BigEndian.PutUint16(pkt[4:6], 0)
+						binary.BigEndian.PutUint16(pkt[6:8], 1)
+						copy(pkt[8:], frameData)
+						_ = vChan.Send(pkt)
+					} else {
+						for i := 0; i < totalChunks; i++ {
+							start := i * maxChunk
+							end := start + maxChunk
+							if end > totalLen {
+								end = totalLen
+							}
+							chunkLen := end - start
+							pkt := make([]byte, 8+chunkLen)
+							binary.BigEndian.PutUint32(pkt[0:4], frameID)
+							binary.BigEndian.PutUint16(pkt[4:6], uint16(i))
+							binary.BigEndian.PutUint16(pkt[6:8], uint16(totalChunks))
+							copy(pkt[8:], frameData[start:end])
+							_ = vChan.Send(pkt)
+						}
+					}
 				} else if h.OnRelayFrame != nil {
 					// 2. Fallback to WebSocket Relay only when WebRTC P2P DataChannel is not yet connected
 					// Rate limit to max 12 FPS so cloud WebSocket buffer is never congested and ping remains ultra-low
