@@ -23,6 +23,35 @@ let logsModalOpen = false;
 let pingIntervalTimer = null;
 let sessionPollingTimer = null;
 let isMouseDown = false;
+let externalChatWindow = null;
+const chatBroadcast = ('BroadcastChannel' in window) ? new BroadcastChannel('remoteaccess_chat') : null;
+
+function openExternalChat() {
+  const w = 380;
+  const h = 520;
+  const screenW = (window.screen && window.screen.availWidth) ? window.screen.availWidth : 1280;
+  const screenH = (window.screen && window.screen.availHeight) ? window.screen.availHeight : 720;
+  const left = Math.max(0, screenW - w - 24);
+  const top = Math.max(0, screenH - h - 48);
+
+  if (externalChatWindow && !externalChatWindow.closed) {
+    try {
+      externalChatWindow.focus();
+      return;
+    } catch(e) {}
+  }
+
+  externalChatWindow = window.open(
+    '/chat.html',
+    'RemoteAccessChatPopup',
+    `width=${w},height=${h},left=${left},top=${top},resizable=yes,scrollbars=no,status=no,location=no,toolbar=no,menubar=no`
+  );
+  if (externalChatWindow) {
+    try {
+      externalChatWindow.focus();
+    } catch(e) {}
+  }
+}
 
 // Performance counters
 let frameCount = 0;
@@ -133,22 +162,29 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Enforce minimum window dimensions (540x580) on resize
-  let resizeDebounceTimer = null;
-  window.addEventListener('resize', () => {
-    if (resizeDebounceTimer) clearTimeout(resizeDebounceTimer);
-    resizeDebounceTimer = setTimeout(() => {
-      const minW = 540;
-      const minH = 580;
-      if ((window.outerWidth && window.outerWidth < minW) || (window.outerHeight && window.outerHeight < minH)) {
-        if (typeof window.resizeTo === 'function') {
-          try {
-            window.resizeTo(Math.max(minW, window.outerWidth), Math.max(minH, window.outerHeight));
-          } catch (e) {}
+  // Zero-latency BroadcastChannel for synchronization with external chat popup (chat.html)
+  if (chatBroadcast) {
+    chatBroadcast.onmessage = (event) => {
+      const data = event.data;
+      if (data && data.action === 'send' && data.text) {
+        if (isConnected) {
+          sendControl({ t: 'chat', text: data.text });
+          const container = document.getElementById('chat-messages');
+          if (container) {
+            const msgEl = document.createElement('div');
+            msgEl.style.alignSelf = 'flex-end';
+            msgEl.style.background = 'rgba(59, 130, 246, 0.4)';
+            msgEl.style.padding = '0.4rem 0.75rem';
+            msgEl.style.borderRadius = '8px';
+            msgEl.style.maxWidth = '85%';
+            msgEl.innerHTML = `<strong style="color: #93c5fd; font-size: 0.75rem;">Você</strong><div style="margin-top: 0.15rem;">${data.text}</div>`;
+            container.appendChild(msgEl);
+            container.scrollTop = container.scrollHeight;
+          }
         }
       }
-    }, 60);
-  });
+    };
+  }
 
   // Smooth visibility recovery when window is minimized and restored
   document.addEventListener('visibilitychange', () => {
@@ -517,6 +553,7 @@ function hideHostToast() {
 
 function handleToastClick() {
   hideChatToast();
+  openExternalChat();
   const drawer = document.getElementById('chat-drawer');
   if (drawer) {
     drawer.style.display = 'flex';
@@ -527,6 +564,7 @@ function handleToastClick() {
 
 function handleHostToastClick() {
   hideHostToast();
+  openExternalChat();
   toggleHostFloatingChat(true);
 }
 
@@ -594,7 +632,13 @@ async function refreshHostChat() {
         const isMe = msg.sender.includes('Host') || msg.sender.includes('Você');
         if (!isMe) {
           showChatToast(msg.sender, msg.text);
-          // Auto-open floating chat window for host so customer sees it immediately on bottom-right!
+          // Open external floating chat popup window for host
+          openExternalChat();
+          if (chatBroadcast) {
+            try {
+              chatBroadcast.postMessage({ action: 'receive', sender: msg.sender, text: msg.text });
+            } catch(e) {}
+          }
           toggleHostFloatingChat(true);
           const badge = document.getElementById('host-chat-badge');
           if (badge && !hostChatOpen) {
@@ -609,6 +653,7 @@ async function refreshHostChat() {
 }
 
 function toggleHostChat() {
+  openExternalChat();
   toggleHostFloatingChat();
   const input = document.getElementById('host-floating-chat-input') || document.getElementById('host-chat-input');
   if (input && hostChatOpen) {
@@ -1405,6 +1450,7 @@ async function openClipboardModal() {
 }
 
 function toggleChatDrawer() {
+  openExternalChat();
   const drawer = document.getElementById('chat-drawer');
   if (!drawer) return;
   const isOpening = drawer.style.display !== 'flex';
@@ -1436,23 +1482,33 @@ function sendChatMessage(e) {
 
 function appendChatMessage(sender, text) {
   const container = document.getElementById('chat-messages');
-  const msgEl = document.createElement('div');
   const isMe = sender === 'Você';
-  msgEl.style.alignSelf = isMe ? 'flex-end' : 'flex-start';
-  msgEl.style.background = isMe ? 'rgba(59, 130, 246, 0.4)' : 'rgba(255, 255, 255, 0.1)';
-  msgEl.style.padding = '0.4rem 0.75rem';
-  msgEl.style.borderRadius = '8px';
-  msgEl.style.maxWidth = '85%';
-  msgEl.innerHTML = `<strong style="color: ${isMe ? '#93c5fd' : '#86efac'}; font-size: 0.75rem;">${sender}</strong><div style="margin-top: 0.15rem;">${text}</div>`;
-  container.appendChild(msgEl);
-  container.scrollTop = container.scrollHeight;
+  if (container) {
+    const msgEl = document.createElement('div');
+    msgEl.style.alignSelf = isMe ? 'flex-end' : 'flex-start';
+    msgEl.style.background = isMe ? 'rgba(59, 130, 246, 0.4)' : 'rgba(255, 255, 255, 0.1)';
+    msgEl.style.padding = '0.4rem 0.75rem';
+    msgEl.style.borderRadius = '8px';
+    msgEl.style.maxWidth = '85%';
+    msgEl.innerHTML = `<strong style="color: ${isMe ? '#93c5fd' : '#86efac'}; font-size: 0.75rem;">${sender}</strong><div style="margin-top: 0.15rem;">${text}</div>`;
+    container.appendChild(msgEl);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  // Notificar popup externo via BroadcastChannel
+  if (chatBroadcast) {
+    try {
+      chatBroadcast.postMessage({ action: 'receive', sender: sender, text: text });
+    } catch (e) {}
+  }
 
   const drawer = document.getElementById('chat-drawer');
-  if (drawer.style.display === 'none') {
+  if (drawer && drawer.style.display === 'none') {
     drawer.style.display = 'flex';
   }
 
   if (!isMe) {
+    openExternalChat();
     showChatToast(sender, text);
   }
 }

@@ -77,6 +77,8 @@ func startWindowSizeGuard() {
 	procGetClassNameW := user32.NewProc("GetClassNameW")
 	procEnumWindows := user32.NewProc("EnumWindows")
 	procIsWindowVisible := user32.NewProc("IsWindowVisible")
+	procIsZoomed := user32.NewProc("IsZoomed")
+	procIsIconic := user32.NewProc("IsIconic")
 
 	type rect struct {
 		left, top, right, bottom int32
@@ -106,6 +108,9 @@ func startWindowSizeGuard() {
 			var buf [256]uint16
 			procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), 256)
 			title := syscall.UTF16ToString(buf[:])
+			if strings.Contains(title, "Bate-Papo") || strings.Contains(title, "Chat") {
+				return 1
+			}
 			if strings.Contains(title, "RemoteAccess") || strings.Contains(title, "127.0.0.1") {
 				targetHWND = hwnd
 				return 0 // found, stop enumerating
@@ -120,25 +125,24 @@ func startWindowSizeGuard() {
 			}
 
 			if targetHWND != 0 {
+				isMin, _, _ := procIsIconic.Call(targetHWND)
+				if isMin != 0 {
+					continue
+				}
+				isMax, _, _ := procIsZoomed.Call(targetHWND)
+				if isMax != 0 {
+					continue
+				}
+
 				var r rect
 				ret, _, _ := procGetWindowRect.Call(targetHWND, uintptr(unsafe.Pointer(&r)))
 				if ret != 0 {
 					w := r.right - r.left
 					h := r.bottom - r.top
-					needFix := false
-					newW := w
-					newH := h
-					if w < 540 {
-						newW = 540
-						needFix = true
-					}
-					if h < 580 {
-						newH = 580
-						needFix = true
-					}
-					if needFix {
+					// Lock to crisp fixed resolution (960x720) when not maximized
+					if w != 960 || h != 720 {
 						// SWP_NOMOVE (0x0002) | SWP_NOZORDER (0x0004) | SWP_NOACTIVATE (0x0010)
-						procSetWindowPos.Call(targetHWND, 0, 0, 0, uintptr(newW), uintptr(newH), 0x0002|0x0004|0x0010)
+						procSetWindowPos.Call(targetHWND, 0, 0, 0, 960, 720, 0x0002|0x0004|0x0010)
 					}
 				}
 			}
