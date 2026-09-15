@@ -359,6 +359,11 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 			})
 
 		case protocol.ActionOffer, protocol.ActionAnswer, protocol.ActionCandidate, protocol.ActionData, protocol.ActionClose:
+			// Guard: Drop any large payload packets (video relay blocked - pure P2P only to save server bandwidth)
+			if msg.Action == protocol.ActionData && len(msg.Payload) > 8192 {
+				continue
+			}
+
 			s.mu.RLock()
 			targetPeer, exists := s.peers[msg.TargetID]
 			if !exists {

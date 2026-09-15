@@ -26,6 +26,18 @@ let isMouseDown = false;
 let externalChatWindow = null;
 const chatBroadcast = ('BroadcastChannel' in window) ? new BroadcastChannel('remoteaccess_chat') : null;
 
+let lastUserActivity = Date.now();
+let sessionStartTime = 0;
+let sessionStatsTimer = null;
+
+function recordUserActivity() {
+  lastUserActivity = Date.now();
+  const banner = document.getElementById('inactivity-warning-banner');
+  if (banner && banner.style.display !== 'none') {
+    banner.style.display = 'none';
+  }
+}
+
 function openExternalChat() {
   const w = 380;
   const h = 520;
@@ -1002,16 +1014,12 @@ function connectSignaling() {
                 const rtt = Math.max(1, Math.round(performance.now() - ctrl.ts));
                 const latEl = document.getElementById('stat-latency');
                 if (latEl) latEl.innerText = `⚡ ${rtt} ms`;
-                const badgeEl = document.getElementById('hud-status-badge');
-                if (badgeEl) badgeEl.innerHTML = `<span class="hud-dot" style="background-color: #38bdf8; box-shadow: 0 0 6px #38bdf8;"></span> Nuvem Relay`;
               } else if (ctrl.t === 'chat') {
                 appendChatMessage('Remoto', ctrl.text);
               } else if (ctrl.t === 'init_info' && ctrl.mon) {
                 updateViewerMonitors(ctrl.mon);
               }
             } catch(e) {}
-          } else {
-            renderBase64Frame(msg.payload);
           }
           break;
 
@@ -1095,13 +1103,11 @@ async function connectToRemote(e) {
     console.log('[WebRTC] Connection State:', peerConnection.connectionState);
     if (peerConnection.connectionState === 'connected') {
       const badgeEl = document.getElementById('hud-status-badge');
-      if (badgeEl) badgeEl.innerHTML = `<span class="hud-dot"></span> P2P Direct`;
+      if (badgeEl) badgeEl.innerHTML = `<span class="hud-dot"></span> P2P Direto (Zero Nuvem)`;
       const latEl = document.getElementById('stat-latency');
       if (latEl) latEl.innerText = `⚡ P2P Ativo`;
     } else if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected') {
-      console.log('[WebRTC] P2P direto indisponível, transmitindo via Nuvem Relay.');
-      const badgeEl = document.getElementById('hud-status-badge');
-      if (badgeEl) badgeEl.innerHTML = `<span class="hud-dot" style="background-color: #38bdf8; box-shadow: 0 0 6px #38bdf8;"></span> Nuvem Relay`;
+      console.log('[WebRTC] Conexão P2P encerrada.');
     }
   };
 
@@ -1317,6 +1323,9 @@ function fallbackRenderImage(blob) {
 
 function sendControl(ctrlObj) {
   if (!isConnected) return;
+  if (ctrlObj && ctrlObj.t !== 'ping') {
+    recordUserActivity();
+  }
 
   // Send over WebRTC DataChannel if open (Direct, 0 Server Load, Ultra-low Latency)
   if (inputChannel && inputChannel.readyState === 'open') {
@@ -1343,11 +1352,55 @@ function startPingLoop() {
   }, 1200);
 }
 
+function startSessionStatsLoop() {
+  if (sessionStatsTimer) clearInterval(sessionStatsTimer);
+  sessionStatsTimer = setInterval(() => {
+    if (!isConnected) return;
+
+    // 1. Update session duration timer in HUD (mm:ss or hh:mm:ss)
+    const elapsedSec = Math.floor((Date.now() - sessionStartTime) / 1000);
+    const hrs = Math.floor(elapsedSec / 3600);
+    const mins = Math.floor((elapsedSec % 3600) / 60);
+    const secs = elapsedSec % 60;
+    const timeFormatted = (hrs > 0 ? String(hrs).padStart(2, '0') + ':' : '') +
+                          String(mins).padStart(2, '0') + ':' +
+                          String(secs).padStart(2, '0');
+    const timerEl = document.getElementById('stat-session-time');
+    if (timerEl) timerEl.innerText = `⏱️ ${timeFormatted}`;
+
+    // 2. Check user inactivity (2 minutes limit = 120s)
+    const idleSec = Math.floor((Date.now() - lastUserActivity) / 1000);
+    const banner = document.getElementById('inactivity-warning-banner');
+    const countdownEl = document.getElementById('inactivity-countdown-text');
+
+    if (idleSec >= 90 && idleSec < 120) {
+      const remaining = 120 - idleSec;
+      if (banner) banner.style.display = 'flex';
+      if (countdownEl) {
+        countdownEl.innerText = `Desconectando em ${remaining}s para economizar banda (mova o mouse para continuar)`;
+      }
+    } else if (idleSec < 90) {
+      if (banner && banner.style.display !== 'none') {
+        banner.style.display = 'none';
+      }
+    } else if (idleSec >= 120) {
+      if (banner) banner.style.display = 'none';
+      closeViewer();
+      showModalAlert('Sessão Encerrada por Inatividade', 'A sessão remota foi desconectada automaticamente após 2 minutos de inatividade para economizar banda e recursos.', '⏱️');
+    }
+  }, 1000);
+}
+
 function openViewer() {
   isConnected = true;
+  sessionStartTime = Date.now();
+  lastUserActivity = Date.now();
   viewerContainer.style.display = 'flex';
   resetConnectButton();
   startPingLoop();
+  startSessionStatsLoop();
+  const badgeEl = document.getElementById('hud-status-badge');
+  if (badgeEl) badgeEl.innerHTML = `<span class="hud-dot"></span> P2P Direto (Zero Nuvem)`;
   const dock = document.getElementById('viewer-toolbar');
   if (dock) {
     dock.classList.add('dock-visible');
@@ -1367,6 +1420,12 @@ function closeViewer() {
     clearInterval(pingIntervalTimer);
     pingIntervalTimer = null;
   }
+  if (sessionStatsTimer) {
+    clearInterval(sessionStatsTimer);
+    sessionStatsTimer = null;
+  }
+  const banner = document.getElementById('inactivity-warning-banner');
+  if (banner) banner.style.display = 'none';
 
   // 1. Send close packet over input DataChannel first
   if (inputChannel && inputChannel.readyState === 'open') {

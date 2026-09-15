@@ -287,13 +287,15 @@
     <div id="viewer-tab-handle" class="viewer-tab-handle" title="Mova o mouse aqui para abrir os controles"></div>
     <div id="viewer-toolbar" class="viewer-dock">
       <div class="dock-content">
-        <!-- Integrated Connection HUD Stats (Zero Overlap, Real-time Latency & FPS) -->
+        <!-- Integrated Connection HUD Stats (Zero Overlap, Real-time Latency, FPS & Session Time) -->
         <div class="dock-stats-group">
-          <span class="hud-item" id="hud-status-badge"><span class="hud-dot"></span> P2P Direct</span>
+          <span class="hud-item" id="hud-status-badge"><span class="hud-dot"></span> P2P Direto (Zero Nuvem)</span>
           <span class="hud-sep">|</span>
           <span class="hud-item" id="stat-latency">⚡ 0 ms</span>
           <span class="hud-sep">|</span>
           <span class="hud-item" id="stat-fps">🎥 0 FPS</span>
+          <span class="hud-sep">|</span>
+          <span class="hud-item" id="stat-session-time">⏱️ 00:00</span>
         </div>
 
         <div class="dock-divider"></div>
@@ -365,6 +367,15 @@
     <!-- Viewer Canvas Area -->
     <div id="canvas-wrapper">
       <canvas id="screen-canvas" tabindex="0"></canvas>
+
+      <!-- Inactivity Warning Banner -->
+      <div id="inactivity-warning-banner" class="inactivity-banner" style="display: none;">
+        <span class="inactivity-icon">⚠️</span>
+        <div class="inactivity-text">
+          <strong>Inatividade Detectada</strong>
+          <span id="inactivity-countdown-text">Desconectando em 30s para economizar banda (mova o mouse para continuar)</span>
+        </div>
+      </div>
 
       <!-- In-Session Floating Chat (Viewer) -->
       <div id="chat-drawer" class="chat-drawer" style="display: none;">

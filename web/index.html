@@ -3,145 +3,447 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RemoteAccess Portable - Acesso Remoto Bidirecional</title>
+  <title>RemoteAccess</title>
+  
+  <!-- App Icons for Window Titlebar, Taskbar & Browser Tabs -->
+  <link rel="icon" type="image/png" sizes="256x256" href="icon.png">
+  <link rel="icon" type="image/png" sizes="128x128" href="icon_128.png">
+  <link rel="icon" type="image/png" sizes="48x48" href="icon_48.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="icon_32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="icon_16.png">
+  <link rel="shortcut icon" href="icon.png">
+  <link rel="apple-touch-icon" href="icon.png">
+  
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- Header -->
+  <!-- Top Navigation Header -->
   <header class="app-header">
     <div class="logo">
-      <span>⚡ RemoteAccess</span>
-      <span class="logo-badge">Portátil</span>
+      <div class="logo-icon">⚡</div>
+      <div class="logo-text">
+        <span class="brand-title">RemoteAccess</span>
+        <span class="brand-sub">PORTABLE PRO</span>
+      </div>
     </div>
-    <div class="network-badge">
-      <div id="status-indicator" class="status-dot online"></div>
-      <span id="status-text">Conectado ao Relay</span>
+    
+    <div class="header-actions">
+      <button class="header-btn" id="btn-elevate-header" onclick="handleElevateOrInstall()" title="Instalar / Executar como Administrador para permitir controle total de telas UAC e Gerenciador de Tarefas">
+        <span class="btn-bullet">🛡️</span>
+        <span class="btn-label" id="btn-elevate-label">Modo Admin</span>
+      </button>
+
+      <button class="header-btn" onclick="openSignalingModal()" title="Configurar Servidor de Nuvem (Render / VPS)">
+        <span class="btn-bullet">🌐</span>
+        <span class="btn-label">Servidor Nuvem</span>
+      </button>
+      
+      <button class="header-btn" onclick="toggleLogsModal()" title="Visualizar Logs em Janela Flutuante">
+        <span class="btn-bullet">📜</span>
+        <span class="btn-label">Logs</span>
+      </button>
+      
+      <div class="network-badge" id="cloud-badge">
+        <div id="status-indicator" class="status-dot online"></div>
+        <span id="status-text">Online (Nuvem)</span>
+      </div>
     </div>
   </header>
 
   <!-- Main Container -->
   <main class="container">
-    <!-- Navigation Tabs -->
-    <div class="tabs">
-      <button id="tab-host-btn" class="tab-btn active" onclick="switchTab('host')">
-        🖥️ Esta Máquina (Permitir Controle)
+    <!-- View Switcher Tabs -->
+    <div class="tab-dock">
+      <button id="tab-host-btn" class="tab-item active" onclick="switchTab('host')">
+        <span class="tab-icon">🖥️</span>
+        <div class="tab-info">
+          <span class="tab-name">Este Computador (Cliente)</span>
+          <span class="tab-desc">Permitir acesso remoto</span>
+        </div>
       </button>
-      <button id="tab-client-btn" class="tab-btn" onclick="switchTab('client')">
-        🚀 Computador Remoto (Controlar)
+      
+      <button id="tab-client-btn" class="tab-item" onclick="switchTab('client')">
+        <span class="tab-icon">🚀</span>
+        <div class="tab-info">
+          <span class="tab-name">Controlar Remoto (Host)</span>
+          <span class="tab-desc">Conectar a outra máquina</span>
+        </div>
       </button>
     </div>
 
-    <!-- HOST VIEW: Permitir Acesso a este PC -->
-    <section id="host-view" class="card">
-      <h2 class="card-title">Permitir Controle Remoto</h2>
-      <p class="card-desc">Compartilhe o ID e a Senha abaixo para permitir que outro computador acesse este PC com segurança.</p>
-
-      <div class="id-display-container">
-        <div class="credential-box">
-          <div>
-            <div class="credential-label">Seu ID de Conexão</div>
-            <div id="my-id" class="id-value">--- ---</div>
+    <!-- HOST VIEW (Servidor / Permitir Controle) -->
+    <section id="host-view" class="view-panel">
+      <!-- Live Active Session Alert (Visible when controlled) -->
+      <div id="active-session-box" class="active-session-card" style="display: none;">
+        <div class="session-card-header">
+          <div class="session-alert-left">
+            <div class="pulse-ring"></div>
+            <div>
+              <div class="session-title">SESSÃO REMOTA EM ANDAMENTO</div>
+              <div class="session-details">
+                Controlador: <span id="host-session-client-id" class="highlight-client">---</span> &bull; 
+                Tempo ativo: <span id="host-session-duration" class="highlight-timer">00:00</span> &bull;
+                Modo: <span id="host-session-mode" class="highlight-mode">WebRTC Direct</span>
+              </div>
+            </div>
           </div>
-          <button class="btn-icon" onclick="copyToClipboard('my-id')">📋 Copiar ID</button>
+          <div class="session-card-actions">
+            <button class="btn-chat-toggle" onclick="toggleHostChat()">
+              💬 Bate-Papo <span id="host-chat-badge" class="chat-badge" style="display: none;">0</span>
+            </button>
+            <button class="btn-kill-session" onclick="kickActiveSession()">
+              🛑 Encerrar Acesso
+            </button>
+          </div>
         </div>
 
-        <div class="credential-box">
-          <div>
-            <div class="credential-label">Sua Senha de Acesso</div>
-            <div id="my-pwd" class="pwd-value">••••••••</div>
+        <!-- In-Session Host Chat Body -->
+        <div id="host-chat-container" class="host-chat-section" style="display: none;">
+          <div id="host-chat-messages" class="host-chat-box">
+            <div class="chat-intro">💬 Bate-papo em tempo real com o operador remoto.</div>
           </div>
-          <div style="display: flex; gap: 0.5rem;">
-            <button class="btn-icon" onclick="togglePasswordVisibility()">👁️ Mostrar</button>
-            <button class="btn-icon" onclick="regeneratePassword()">🔄 Nova Senha</button>
-          </div>
+          <form onsubmit="sendHostChatMessage(event)" class="host-chat-form">
+            <input type="text" id="host-chat-input" class="chat-input" placeholder="Digite uma mensagem para o operador..." autocomplete="off">
+            <button type="submit" class="btn-send-chat">Enviar</button>
+          </form>
         </div>
       </div>
 
-      <div class="settings-grid">
-        <div class="form-group">
-          <label class="form-label">Qualidade da Transmissão:</label>
-          <select id="host-quality" class="select-custom" onchange="updateHostConfig()">
-            <option value="50">Econômica (Redes lentas / 4G)</option>
-            <option value="65" selected>Equilibrada (Recomendada)</option>
-            <option value="85">Alta Definição (Rede local / Fibra)</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Taxa de Quadros (FPS):</label>
-          <select id="host-fps" class="select-custom" onchange="updateHostConfig()">
-            <option value="15">15 FPS (Baixo consumo)</option>
-            <option value="30" selected>30 FPS (Padrão Fluido)</option>
-            <option value="60">60 FPS (Ultra Suave)</option>
-          </select>
-        </div>
-      </div>
+      <div class="grid-layout">
+        <!-- Credentials Card -->
+        <div class="card card-credentials">
+          <div class="card-header">
+            <div class="card-title-wrap">
+              <h2 class="card-title">Acesso Não Supervisionado</h2>
+              <span class="card-subtitle">Credenciais permanentes desta máquina (Cliente)</span>
+            </div>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <div id="admin-privilege-badge" class="badge-fixed" style="background: rgba(100, 116, 139, 0.2); border-color: rgba(148, 163, 184, 0.35); color: #cbd5e1;">🛡️ Usuário Padrão</div>
+              <div class="badge-fixed">ID & Senha Fixos</div>
+            </div>
+          </div>
 
-      <div id="active-session-box" style="margin-top: 1.5rem; display: none;" class="credential-box">
-        <div>
-          <div class="credential-label">Sessão Ativa</div>
-          <div id="active-session-text" style="color: #60a5fa; font-weight: 600;">Controlador conectado</div>
+          <div class="credential-grid">
+            <!-- Computer Alias Box -->
+            <div class="cred-box alias-box" style="grid-column: 1 / -1; background: rgba(59, 130, 246, 0.08); border-color: rgba(59, 130, 246, 0.25);">
+              <div class="cred-header">
+                <span class="cred-tag">🏷️ APELIDO / NOME DESTA MÁQUINA</span>
+                <button class="btn-copy-mini btn-edit" onclick="openCustomAliasModal()" title="Alterar Nome Amigável">✏️ Alterar Nome</button>
+              </div>
+              <div class="cred-main">
+                <div id="my-alias" class="id-number" style="font-size: 1.25rem; color: #60a5fa;">Detectando...</div>
+              </div>
+              <div class="cred-hint">Identificação amigável visível no painel do servidor e nos computadores remotos.</div>
+            </div>
+
+            <!-- Fixed ID Box -->
+            <div class="cred-box id-box">
+              <div class="cred-header">
+                <span class="cred-tag">SEU ID PERMANENTE</span>
+                <button class="btn-copy-mini" onclick="copyToClipboard('my-id')" title="Copiar ID">📋 Copiar</button>
+              </div>
+              <div class="cred-main">
+                <div id="my-id" class="id-number">--- ---</div>
+              </div>
+              <div class="cred-hint">Forneça este ID para quem for controlar seu PC.</div>
+            </div>
+
+            <!-- Fixed Password Box -->
+            <div class="cred-box pwd-box">
+              <div class="cred-header">
+                <span class="cred-tag">SENHA DE ACESSO FIXA</span>
+                <div class="pwd-actions">
+                  <button class="btn-copy-mini" onclick="togglePasswordVisibility()" id="btn-pwd-eye" title="Mostrar/Ocultar Senha">👁️ Ver</button>
+                  <button class="btn-copy-mini btn-edit" onclick="openCustomPasswordModal()" title="Personalizar Senha Fixa">✏️ Alterar</button>
+                </div>
+              </div>
+              <div class="cred-main">
+                <div id="my-pwd" class="pwd-number">••••••••</div>
+              </div>
+              <div class="cred-hint">Defina uma senha pessoal para acesso de qualquer lugar.</div>
+            </div>
+          </div>
+
+          <!-- System Hardware Specs -->
+          <div class="sys-info-strip">
+            <div class="info-pill">
+              <span class="pill-label">💻 Hostname:</span>
+              <span id="sys-hostname" class="pill-val">Detectando...</span>
+            </div>
+            <div class="info-pill">
+              <span class="pill-label">🖥️ Monitores:</span>
+              <span id="sys-monitors" class="pill-val">1 Monitor</span>
+            </div>
+            <div class="info-pill">
+              <span class="pill-label">💻 Sistema:</span>
+              <span id="sys-os" class="pill-val">Windows</span>
+            </div>
+            <div class="info-pill" title="Endereço MAC da placa de rede física (utilizado para Wake-on-LAN)">
+              <span class="pill-label">⚡ MAC (WoL):</span>
+              <span id="sys-mac" class="pill-val" style="font-family: var(--font-mono); font-weight: 700; color: #38bdf8;">Detectando...</span>
+            </div>
+          </div>
+
+          <!-- Unattended Access Settings -->
+          <div class="settings-list">
+            <label class="setting-row">
+              <input type="checkbox" id="autostart-toggle" onchange="toggleAutoStart(event)">
+              <div class="setting-text">
+                <div class="setting-title">⚡ Iniciar em segundo plano com o Windows (Auto-start)</div>
+                <div class="setting-desc">Permite acessar este PC a qualquer hora mesmo após reinicializações.</div>
+              </div>
+            </label>
+
+            <label class="setting-row">
+              <input type="checkbox" id="savelog-toggle" onchange="toggleSaveLogFile(event)">
+              <div class="setting-text">
+                <div class="setting-title">📁 Gravar arquivo de log em disco (%APPDATA%\RemoteAccess)</div>
+                <div class="setting-desc">Grava remoteaccess.log para diagnósticos avançados.</div>
+              </div>
+            </label>
+          </div>
         </div>
-        <button class="btn-icon btn-danger" onclick="disconnectHostSession()">🛑 Desconectar</button>
+
+        <!-- Embedded Live Host Terminal / Diagnostics -->
+        <div class="card card-terminal">
+          <div class="card-header">
+            <div class="card-title-wrap">
+              <h2 class="card-title">Console de Eventos</h2>
+              <span class="card-subtitle">Atividade do servidor e conexões ativas</span>
+            </div>
+            <button class="btn-copy-mini" onclick="refreshLogs()">🔄 Atualizar</button>
+          </div>
+          
+          <div id="host-terminal-logs" class="terminal-body">
+            Conectando ao sistema...
+          </div>
+        </div>
       </div>
     </section>
 
-    <!-- CLIENT VIEW: Conectar a outro PC -->
-    <section id="client-view" class="card" style="display: none;">
-      <h2 class="card-title">Controlar Computador Remoto</h2>
-      <p class="card-desc">Digite o ID e a Senha da máquina remota (ex: do trabalho ou de casa) para assumir o controle.</p>
-
-      <form id="connect-form" onsubmit="connectToRemote(event)">
-        <div class="form-group">
-          <label class="form-label" for="target-id">ID do Computador Remoto</label>
-          <input type="text" id="target-id" class="form-input" placeholder="Ex: 849 201" maxlength="10" required>
+    <!-- CLIENT VIEW (Controlar Computador Remoto) -->
+    <section id="client-view" class="view-panel" style="display: none;">
+      <div class="card card-client-form">
+        <div class="card-header">
+          <div class="card-title-wrap">
+            <h2 class="card-title">Acessar Computador Remoto</h2>
+            <span class="card-subtitle">Assuma o controle total de qualquer máquina conectada à nuvem</span>
+          </div>
         </div>
 
-        <div class="form-group">
-          <label class="form-label" for="target-pwd">Senha de Acesso</label>
-          <input type="password" id="target-pwd" class="form-input" placeholder="Digite a senha" required>
-        </div>
+        <form id="connect-form" onsubmit="connectToRemote(event)" class="connect-form">
+          <div class="form-row">
+            <div class="form-group flex-2">
+              <label class="form-label" for="target-id">ID do Computador Remoto</label>
+              <div class="input-wrap">
+                <span class="input-icon">💻</span>
+                <input type="text" id="target-id" class="form-input" placeholder="Ex: 573 221" maxlength="10" required autocomplete="off">
+              </div>
+            </div>
 
-        <button type="submit" id="btn-connect" class="btn-primary">
-          <span>🚀 Conectar e Assumir Controle</span>
-        </button>
-      </form>
+            <div class="form-group flex-2">
+              <label class="form-label" for="target-pwd">Senha de Acesso</label>
+              <div class="input-wrap">
+                <span class="input-icon">🔒</span>
+                <input type="password" id="target-pwd" class="form-input" placeholder="Digite a senha" required autocomplete="current-password">
+              </div>
+            </div>
+          </div>
 
-      <!-- Conexões Recentes -->
-      <div class="recent-section">
-        <div class="recent-title">Conexões Salvas / Recentes</div>
-        <div id="recent-list" class="recent-list">
-          <span style="font-size: 0.85rem; color: var(--text-muted);">Nenhuma conexão recente ainda.</span>
+          <button type="submit" id="btn-connect" class="btn-connect-primary">
+            <span>🚀 Conectar e Assumir Controle</span>
+          </button>
+        </form>
+
+        <!-- Saved / Recent Devices -->
+        <div class="recent-devices-section">
+          <div class="recent-header">
+            <span class="recent-title">COMPUTADORES RECENTES (1 CLIQUE PARA RECONECTAR)</span>
+          </div>
+          <div id="recent-list" class="recent-grid">
+            <span class="empty-state-text">Nenhum computador salvo recentemente.</span>
+          </div>
         </div>
       </div>
     </section>
   </main>
 
-  <!-- Fullscreen Remote Desktop Viewer -->
+  <!-- Logs Modal -->
+  <div id="logs-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title">📜 Logs do Sistema em Tempo Real</div>
+        <button class="btn-close-modal" onclick="toggleLogsModal()">✕</button>
+      </div>
+      <div id="logs-container" class="terminal-body modal-terminal">
+        Carregando logs...
+      </div>
+    </div>
+  </div>
+
+  <!-- FULLSCREEN REMOTE DESKTOP VIEWER -->
   <div id="viewer-container">
-    <div id="viewer-toolbar">
-      <span class="stat-tag" id="stat-latency">⚡ -- ms</span>
-      <span class="stat-tag" id="stat-fps">🎥 -- fps</span>
-      
-      <button class="toolbar-btn" onclick="sendSpecialKey('ctrl_alt_del')" title="Enviar Ctrl+Alt+Del">
-        ⌨️ Ctrl+Alt+Del
-      </button>
-      <button class="toolbar-btn" onclick="sendSpecialKey('win_d')" title="Mostrar Área de Trabalho">
-        🪟 Win+D
-      </button>
-      <button class="toolbar-btn" onclick="sendSpecialKey('alt_tab')" title="Alternar Janelas">
-        📑 Alt+Tab
-      </button>
-      <button class="toolbar-btn" onclick="toggleFullscreen()" title="Alternar Tela Cheia">
-        ⛶ Tela Cheia
-      </button>
-      <button class="toolbar-btn btn-close" onclick="closeViewer()" title="Fechar Conexão">
-        🛑 Desconectar
-      </button>
+    <!-- Floating Action Toolbar (Centered Top Pill Dock with Integrated Stats) -->
+    <div id="viewer-tab-handle" class="viewer-tab-handle" title="Mova o mouse aqui para abrir os controles"></div>
+    <div id="viewer-toolbar" class="viewer-dock">
+      <div class="dock-content">
+        <!-- Integrated Connection HUD Stats (Zero Overlap, Real-time Latency, FPS & Session Time) -->
+        <div class="dock-stats-group">
+          <span class="hud-item" id="hud-status-badge"><span class="hud-dot"></span> P2P Direto (Zero Nuvem)</span>
+          <span class="hud-sep">|</span>
+          <span class="hud-item" id="stat-latency">⚡ 0 ms</span>
+          <span class="hud-sep">|</span>
+          <span class="hud-item" id="stat-fps">🎥 0 FPS</span>
+          <span class="hud-sep">|</span>
+          <span class="hud-item" id="stat-session-time">⏱️ 00:00</span>
+        </div>
+
+        <div class="dock-divider"></div>
+
+        <!-- Monitor Switcher -->
+        <div class="dock-select-wrap" id="viewer-mon-wrap" title="Alternar Monitor">
+          <select id="viewer-monitor-select" class="dock-select" onchange="switchRemoteMonitor(this.value)">
+            <option value="0">🖥️ Mon 1</option>
+          </select>
+        </div>
+
+        <!-- Quality Preset -->
+        <div class="dock-select-wrap" title="Ajustar Qualidade">
+          <select id="viewer-quality-select" class="dock-select" onchange="setViewerQuality(this.value)">
+            <option value="speed">⚡ 60 FPS</option>
+            <option value="balanced" selected>⚖️ 30 FPS</option>
+            <option value="hd">💎 HD</option>
+          </select>
+        </div>
+
+        <!-- Unified Power & Security Actions Dropdown -->
+        <div class="dock-select-wrap" title="Ações de Energia e Sistema">
+          <select id="viewer-power-select" class="dock-select" onchange="handlePowerDropdown(this.value)">
+            <option value="" disabled selected>⚡ Energia</option>
+            <option value="lock">🔒 Bloquear PC (Win+L)</option>
+            <option value="reboot">🔄 Reiniciar PC</option>
+            <option value="suspend">🌙 Suspender / Repouso</option>
+            <option value="shutdown">🛑 Desligar PC</option>
+          </select>
+        </div>
+
+        <div class="dock-divider"></div>
+
+        <!-- Quick Actions -->
+        <button class="dock-btn" onclick="sendSystemAction('cad')" title="Enviar Ctrl+Alt+Del">
+          ⌨️ <span class="dock-label">CAD</span>
+        </button>
+        <button class="dock-btn" onclick="sendSystemAction('taskmgr')" title="Abrir Gerenciador de Tarefas">
+          ⚡ <span class="dock-label">Tarefas</span>
+        </button>
+        <button class="dock-btn" onclick="sendSystemAction('desktop')" title="Mostrar Área de Trabalho (Win+D)">
+          ❖ <span class="dock-label">Win+D</span>
+        </button>
+        <button class="dock-btn" id="btn-block-input" onclick="toggleBlockInput()" title="Bloquear Mouse e Teclado Físico do Cliente Acessado">
+          🚫 <span class="dock-label">Bloquear Entrada</span>
+        </button>
+        <button class="dock-btn" onclick="openClipboardModal()" title="Colar Texto Remoto">
+          📋 <span class="dock-label">Colar</span>
+        </button>
+        <button class="dock-btn" onclick="triggerFileUpload()" title="Enviar/Colar Arquivo para o Computador Remoto">
+          📁 <span class="dock-label">Arquivo</span>
+        </button>
+        <input type="file" id="viewer-file-input" style="display: none;" multiple onchange="handleViewerFileSelect(this.files)">
+        <button class="dock-btn" onclick="toggleChatDrawer()" title="Chat com o Cliente">
+          💬 <span class="dock-label">Chat</span>
+        </button>
+        <button class="dock-btn" onclick="toggleFullscreen()" title="Alternar Tela Cheia">
+          ⛶ <span class="dock-label">Tela Cheia</span>
+        </button>
+
+        <div class="dock-divider"></div>
+
+        <button class="dock-btn btn-disconnect" onclick="closeViewer()" title="Desconectar e Encerrar">
+          ✕ <span class="dock-label">Sair</span>
+        </button>
+      </div>
     </div>
 
-    <canvas id="screen-canvas"></canvas>
+    <!-- Viewer Canvas Area -->
+    <div id="canvas-wrapper">
+      <canvas id="screen-canvas" tabindex="0"></canvas>
+
+      <!-- Inactivity Warning Banner -->
+      <div id="inactivity-warning-banner" class="inactivity-banner" style="display: none;">
+        <span class="inactivity-icon">⚠️</span>
+        <div class="inactivity-text">
+          <strong>Inatividade Detectada</strong>
+          <span id="inactivity-countdown-text">Desconectando em 30s para economizar banda (mova o mouse para continuar)</span>
+        </div>
+      </div>
+
+      <!-- In-Session Floating Chat (Viewer) -->
+      <div id="chat-drawer" class="chat-drawer" style="display: none;">
+        <div class="chat-header">
+          <span class="chat-title">💬 Bate-Papo com o Cliente</span>
+          <button class="btn-close-chat" onclick="toggleChatDrawer()">✕</button>
+        </div>
+        <div id="chat-messages" class="chat-body">
+          <div class="chat-intro">Sessão de chat conectada com o cliente</div>
+        </div>
+        <form onsubmit="sendChatMessage(event)" class="chat-footer">
+          <input type="text" id="chat-input" class="chat-input" placeholder="Digite uma mensagem..." required autocomplete="off">
+          <button type="submit" class="btn-send-chat">Enviar</button>
+        </form>
+      </div>
+
+      <!-- Floating In-Session Toast Notification for Viewer -->
+      <div id="chat-toast-popup" class="chat-toast-popup" style="display: none;" onclick="handleToastClick()">
+        <div class="chat-toast-icon">💬</div>
+        <div class="chat-toast-content">
+          <div id="chat-toast-title" class="chat-toast-title">Nova Mensagem</div>
+          <div id="chat-toast-text" class="chat-toast-text">...</div>
+        </div>
+        <button class="chat-toast-close" onclick="event.stopPropagation(); hideChatToast()">✕</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floating In-App Chat Drawer for Host/Client (Fixed bottom-right) -->
+  <div id="host-floating-chat-drawer" class="chat-drawer chat-drawer-fixed" style="display: none;">
+    <div class="chat-header">
+      <span class="chat-title">💬 Bate-Papo com o Controlador</span>
+      <button class="btn-close-chat" onclick="toggleHostFloatingChat()">✕</button>
+    </div>
+    <div id="host-floating-chat-messages" class="chat-body">
+      <div class="chat-intro">Sessão de chat conectada com o operador remoto</div>
+    </div>
+    <form onsubmit="sendHostFloatingChatMessage(event)" class="chat-footer">
+      <input type="text" id="host-floating-chat-input" class="chat-input" placeholder="Digite uma mensagem..." required autocomplete="off">
+      <button type="submit" class="btn-send-chat">Enviar</button>
+    </form>
+  </div>
+
+  <!-- Floating Toast Notification for Host/Client View -->
+  <div id="host-toast-popup" class="chat-toast-popup" style="display: none;" onclick="handleHostToastClick()">
+    <div class="chat-toast-icon">💬</div>
+    <div class="chat-toast-content">
+      <div id="host-toast-title" class="chat-toast-title">Nova Mensagem do Controlador</div>
+      <div id="host-toast-text" class="chat-toast-text">...</div>
+    </div>
+    <button class="chat-toast-close" onclick="event.stopPropagation(); hideHostToast()">✕</button>
+  </div>
+
+  <!-- Custom In-App Glassmorphic Dialog Modal (Alert, Confirm, Prompt) -->
+  <div id="app-dialog-modal" class="modal-backdrop" style="display: none; z-index: 200000;">
+    <div class="modal-card dialog-card" style="max-width: 440px; padding: 1.5rem; text-align: center;">
+      <div id="dialog-icon" style="font-size: 2.2rem; margin-bottom: 0.5rem;">⚡</div>
+      <h3 id="dialog-title" style="font-size: 1.15rem; font-weight: 800; margin-bottom: 0.5rem;">Aviso</h3>
+      <p id="dialog-message" style="font-size: 0.88rem; color: var(--text-sub); line-height: 1.5; margin-bottom: 1.25rem;">Mensagem</p>
+      <input type="text" id="dialog-input" class="form-input" style="display: none; width: 100%; margin-bottom: 1.25rem;" autocomplete="off">
+      <div id="dialog-actions" style="display: flex; gap: 0.6rem; justify-content: center;">
+        <button id="dialog-btn-cancel" class="btn-action" style="display: none; background: rgba(255,255,255,0.08); color: #cbd5e1; padding: 0.55rem 1.1rem; border-radius: 8px; font-size: 0.85rem;" onclick="closeAppDialog(false)">Cancelar</button>
+        <button id="dialog-btn-ok" class="btn-action btn-connect-primary" style="padding: 0.55rem 1.4rem; border-radius: 8px; font-size: 0.85rem;" onclick="closeAppDialog(true)">OK</button>
+      </div>
+    </div>
   </div>
 
   <script src="app.js"></script>
 </body>
 </html>
+

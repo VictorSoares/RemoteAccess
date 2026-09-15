@@ -50,10 +50,10 @@ type HostSession struct {
 	ConnectedAt  time.Time
 	activeFiles  map[string]*os.File
 	lastActivity int64
+	lastInputTime int64
 	fpsUpdate    chan int
 	OnStatus     func(status string, msg string)
 	SendSignal   func(msg protocol.SignalingMessage)
-	OnRelayFrame func(jpegBase64 string)
 	OnChat       func(sender string, text string)
 	OnClose      func()
 }
@@ -74,18 +74,19 @@ func NewHostSession(clientID string, clientAlias string, fps int, quality int, s
 	input.SetActiveMonitorBounds(capturer.GetBounds())
 
 	sess := &HostSession{
-		ClientID:     clientID,
-		ClientAlias:  clientAlias,
-		ConnectedAt:  time.Now(),
-		capturer:     capturer,
-		FPS:          fps,
-		Quality:      quality,
-		ctx:          ctx,
-		cancel:       cancel,
-		lastActivity: time.Now().Unix(),
-		fpsUpdate:    make(chan int, 10),
-		activeFiles:  make(map[string]*os.File),
-		SendSignal:   sendSignal,
+		ClientID:      clientID,
+		ClientAlias:   clientAlias,
+		ConnectedAt:   time.Now(),
+		capturer:      capturer,
+		FPS:           fps,
+		Quality:       quality,
+		ctx:           ctx,
+		cancel:        cancel,
+		lastActivity:  time.Now().Unix(),
+		lastInputTime: time.Now().Unix(),
+		fpsUpdate:     make(chan int, 10),
+		activeFiles:   make(map[string]*os.File),
+		SendSignal:    sendSignal,
 	}
 
 	return sess, nil
@@ -224,6 +225,10 @@ func (h *HostSession) HandleControlData(data []byte) {
 	var ctrl protocol.ControlMessage
 	if err := json.Unmarshal(data, &ctrl); err != nil {
 		return
+	}
+
+	if ctrl.Type != "ping" && ctrl.Type != "pong" {
+		atomic.StoreInt64(&h.lastInputTime, time.Now().Unix())
 	}
 
 	switch ctrl.Type {
@@ -391,7 +396,6 @@ func (h *HostSession) StartStreaming() {
 		defer ticker.Stop()
 		watchdogTicker := time.NewTicker(1 * time.Second)
 		defer watchdogTicker.Stop()
-		var lastRelayTime time.Time
 
 		for {
 			select {
@@ -403,63 +407,65 @@ func (h *HostSession) StartStreaming() {
 					log.Printf("[Host] FPS de streaming reconfigurado dinamicamente para %d FPS", newFPS)
 				}
 			case <-watchdogTicker.C:
+				now := time.Now().Unix()
 				last := atomic.LoadInt64(&h.lastActivity)
-				if last > 0 && time.Now().Unix()-last > 5 {
-					log.Printf("[Host] Cliente (%s) inativo por mais de 5s. Encerrando sessão automaticamente.", h.ClientID)
+				if last > 0 && now-last > 5 {
+					log.Printf("[Host] Conexão de rede com cliente (%s) interrompida (>5s sem resposta). Encerrando sessão.", h.ClientID)
+					go h.Close()
+					return
+				}
+
+				lastInput := atomic.LoadInt64(&h.lastInputTime)
+				if lastInput > 0 && now-lastInput > 130 {
+					log.Printf("[Host] Sessão inativa por mais de 2 minutos (nenhum comando do cliente %s). Encerrando para poupar recursos.", h.ClientID)
 					go h.Close()
 					return
 				}
 			case <-ticker.C:
+				h.mu.Lock()
+				vChan := h.videoChannel
+				h.mu.Unlock()
+
+				// Transmit video exclusively via WebRTC P2P DataChannel (100% direct, zero cloud server bandwidth)
+				if vChan == nil || vChan.ReadyState() != pion.DataChannelStateOpen {
+					continue
+				}
+
+				// Guard against buffer bloat / backpressure freeze: skip frame if client has > 1MB unconsumed
+				if vChan.BufferedAmount() > 1024*1024 {
+					continue
+				}
+
 				frameData, err := h.capturer.CaptureFrame()
 				if err != nil {
 					continue
 				}
 
-				h.mu.Lock()
-				vChan := h.videoChannel
-				h.mu.Unlock()
-
-				// 1. If WebRTC DataChannel is connected and open, send via Direct P2P (Ultra-low latency, zero server bandwidth)
-				if vChan != nil && vChan.ReadyState() == pion.DataChannelStateOpen {
-					// Guard against buffer bloat / backpressure freeze: skip frame if client has > 1MB unconsumed
-					if vChan.BufferedAmount() > 1024*1024 {
-						continue
-					}
-
-					frameID := atomic.AddUint32(&h.frameCounter, 1)
-					totalLen := len(frameData)
-					const maxChunk = 60 * 1024
-					totalChunks := (totalLen + maxChunk - 1) / maxChunk
-					if totalChunks <= 1 {
-						pkt := make([]byte, 8+totalLen)
-						binary.BigEndian.PutUint32(pkt[0:4], frameID)
-						binary.BigEndian.PutUint16(pkt[4:6], 0)
-						binary.BigEndian.PutUint16(pkt[6:8], 1)
-						copy(pkt[8:], frameData)
-						_ = vChan.Send(pkt)
-					} else {
-						for i := 0; i < totalChunks; i++ {
-							start := i * maxChunk
-							end := start + maxChunk
-							if end > totalLen {
-								end = totalLen
-							}
-							chunkLen := end - start
-							pkt := make([]byte, 8+chunkLen)
-							binary.BigEndian.PutUint32(pkt[0:4], frameID)
-							binary.BigEndian.PutUint16(pkt[4:6], uint16(i))
-							binary.BigEndian.PutUint16(pkt[6:8], uint16(totalChunks))
-							copy(pkt[8:], frameData[start:end])
-							_ = vChan.Send(pkt)
+				frameID := atomic.AddUint32(&h.frameCounter, 1)
+				totalLen := len(frameData)
+				const maxChunk = 60 * 1024
+				totalChunks := (totalLen + maxChunk - 1) / maxChunk
+				if totalChunks <= 1 {
+					pkt := make([]byte, 8+totalLen)
+					binary.BigEndian.PutUint32(pkt[0:4], frameID)
+					binary.BigEndian.PutUint16(pkt[4:6], 0)
+					binary.BigEndian.PutUint16(pkt[6:8], 1)
+					copy(pkt[8:], frameData)
+					_ = vChan.Send(pkt)
+				} else {
+					for i := 0; i < totalChunks; i++ {
+						start := i * maxChunk
+						end := start + maxChunk
+						if end > totalLen {
+							end = totalLen
 						}
-					}
-				} else if h.OnRelayFrame != nil {
-					// 2. Fallback to WebSocket Relay only when WebRTC P2P DataChannel is not yet connected
-					// Rate limit to max 12 FPS so cloud WebSocket buffer is never congested and ping remains ultra-low
-					if time.Since(lastRelayTime) >= 80*time.Millisecond {
-						lastRelayTime = time.Now()
-						b64 := base64.StdEncoding.EncodeToString(frameData)
-						h.OnRelayFrame(b64)
+						chunkLen := end - start
+						pkt := make([]byte, 8+chunkLen)
+						binary.BigEndian.PutUint32(pkt[0:4], frameID)
+						binary.BigEndian.PutUint16(pkt[4:6], uint16(i))
+						binary.BigEndian.PutUint16(pkt[6:8], uint16(totalChunks))
+						copy(pkt[8:], frameData[start:end])
+						_ = vChan.Send(pkt)
 					}
 				}
 			}

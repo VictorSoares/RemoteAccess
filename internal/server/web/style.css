@@ -1352,3 +1352,52 @@ select option, .dock-select option {
   color: #fff;
 }
 
+/* Inactivity Warning Banner Overlay */
+.inactivity-banner {
+  position: absolute;
+  top: 75px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(239, 68, 68, 0.95);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.7), 0 0 24px rgba(239, 68, 68, 0.5);
+  border-radius: 12px;
+  padding: 0.75rem 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  color: #ffffff;
+  z-index: 250;
+  animation: pulse-banner 1.5s infinite alternate ease-in-out;
+  pointer-events: none;
+}
+
+@keyframes pulse-banner {
+  from { transform: translateX(-50%) scale(1); opacity: 0.95; }
+  to { transform: translateX(-50%) scale(1.02); opacity: 1; }
+}
+
+.inactivity-icon {
+  font-size: 1.6rem;
+}
+
+.inactivity-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.inactivity-text strong {
+  font-size: 0.9rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.inactivity-text span {
+  font-size: 0.82rem;
+  opacity: 0.95;
+  font-weight: 500;
+}
+
+

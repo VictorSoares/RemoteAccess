@@ -661,17 +661,6 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 				return
 			}
 
-			sess.OnRelayFrame = func(jpegBase64 string) {
-				go func(b64 string) {
-					_ = s.writeCloudJSON(protocol.SignalingMessage{
-						Action:   protocol.ActionData,
-						ID:       s.Config.Data.ID,
-						TargetID: senderID,
-						Payload:  b64,
-					})
-				}(jpegBase64)
-			}
-
 			sess.OnChat = func(sender string, text string) {
 				senderName := "Controlador"
 				if sess.ClientAlias != "" {
