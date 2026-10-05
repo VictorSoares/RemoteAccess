@@ -29,6 +29,9 @@ var defaultICEServers = []pion.ICEServer{
 			"stun:stun4.l.google.com:19302",
 			"stun:stun.cloudflare.com:3478",
 			"stun:global.stun.twilio.com:3478",
+			"stun:stun.nextcloud.com:443",
+			"stun:stun.matrix.org:3478",
+			"stun:stun.voip.blackberry.com:3478",
 		},
 	},
 }
@@ -375,6 +378,7 @@ func (h *HostSession) SendControl(ctrl protocol.ControlMessage) {
 	}
 	if h.inputChannel != nil && h.inputChannel.ReadyState() == pion.DataChannelStateOpen {
 		_ = h.inputChannel.Send(data)
+		return
 	}
 	if h.SendSignal != nil {
 		h.SendSignal(protocol.SignalingMessage{
