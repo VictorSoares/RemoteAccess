@@ -1147,7 +1147,7 @@
     }
 
     async function refreshData() {
-      if (!checkAuth()) return;
+      if (!checkAuth() || viewerConnected) return;
 
       try {
         const res = await fetch('/api/stats?key=' + encodeURIComponent(adminKey));
@@ -2121,7 +2121,7 @@
     });
 
     refreshData();
-    setInterval(refreshData, 3000);
+    setInterval(refreshData, 10000);
   </script>
 </body>
 </html>
