@@ -1,6 +1,10 @@
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/binary"
+	"encoding/json"
+	"fmt"
+)
 
 // Signaling Action Types
 const (
@@ -80,4 +84,26 @@ type ControlMessage struct {
 	FileSize int64   `json:"file_size,omitempty"`
 	Chunk    string  `json:"chunk,omitempty"`
 	Seq      int     `json:"seq,omitempty"`
+}
+
+// EncodeVideoChunk prepends an 8-byte header [uint32 frameID, uint16 chunkIndex, uint16 totalChunks] to the chunk payload
+func EncodeVideoChunk(frameID uint32, chunkIdx, totalChunks uint16, payload []byte) []byte {
+	buf := make([]byte, 8+len(payload))
+	binary.BigEndian.PutUint32(buf[0:4], frameID)
+	binary.BigEndian.PutUint16(buf[4:6], chunkIdx)
+	binary.BigEndian.PutUint16(buf[6:8], totalChunks)
+	copy(buf[8:], payload)
+	return buf
+}
+
+// DecodeVideoChunk extracts the 8-byte header and payload from a video packet
+func DecodeVideoChunk(data []byte) (frameID uint32, chunkIdx, totalChunks uint16, payload []byte, err error) {
+	if len(data) < 8 {
+		return 0, 0, 0, nil, fmt.Errorf("packet too short (%d bytes, minimum 8)", len(data))
+	}
+	frameID = binary.BigEndian.Uint32(data[0:4])
+	chunkIdx = binary.BigEndian.Uint16(data[4:6])
+	totalChunks = binary.BigEndian.Uint16(data[6:8])
+	payload = data[8:]
+	return frameID, chunkIdx, totalChunks, payload, nil
 }

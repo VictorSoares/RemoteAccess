@@ -3,7 +3,6 @@ package webrtc
 import (
 	"context"
 	"encoding/base64"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -458,11 +457,7 @@ func (h *HostSession) StartStreaming() {
 				const maxChunk = 60 * 1024
 				totalChunks := (totalLen + maxChunk - 1) / maxChunk
 				if totalChunks <= 1 {
-					pkt := make([]byte, 8+totalLen)
-					binary.BigEndian.PutUint32(pkt[0:4], frameID)
-					binary.BigEndian.PutUint16(pkt[4:6], 0)
-					binary.BigEndian.PutUint16(pkt[6:8], 1)
-					copy(pkt[8:], frameData)
+					pkt := protocol.EncodeVideoChunk(frameID, 0, 1, frameData)
 					_ = vChan.Send(pkt)
 				} else {
 					for i := 0; i < totalChunks; i++ {
@@ -471,12 +466,7 @@ func (h *HostSession) StartStreaming() {
 						if end > totalLen {
 							end = totalLen
 						}
-						chunkLen := end - start
-						pkt := make([]byte, 8+chunkLen)
-						binary.BigEndian.PutUint32(pkt[0:4], frameID)
-						binary.BigEndian.PutUint16(pkt[4:6], uint16(i))
-						binary.BigEndian.PutUint16(pkt[6:8], uint16(totalChunks))
-						copy(pkt[8:], frameData[start:end])
+						pkt := protocol.EncodeVideoChunk(frameID, uint16(i), uint16(totalChunks), frameData[start:end])
 						_ = vChan.Send(pkt)
 					}
 				}
