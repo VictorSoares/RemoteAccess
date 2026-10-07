@@ -25,6 +25,8 @@ let sessionPollingTimer = null;
 let isMouseDown = false;
 let externalChatWindow = null;
 const chatBroadcast = ('BroadcastChannel' in window) ? new BroadcastChannel('remoteaccess_chat') : null;
+let bytesReceived = 0;
+let totalSessionBytes = 0;
 
 let lastUserActivity = Date.now();
 let sessionStartTime = 0;
@@ -430,7 +432,7 @@ async function fetchSystemInfo() {
   } catch (err) {}
 }
 
-function updateViewerMonitors(count) {
+function updateViewerMonitors(count, activeMon) {
   const monSelect = document.getElementById('viewer-monitor-select');
   if (!monSelect) return;
   const currentVal = monSelect.value;
@@ -442,7 +444,9 @@ function updateViewerMonitors(count) {
     opt.innerText = `🖥️ Monitor ${i + 1}`;
     monSelect.appendChild(opt);
   }
-  if (currentVal && parseInt(currentVal) < total) {
+  if (activeMon !== undefined && parseInt(activeMon) >= 0 && parseInt(activeMon) < total) {
+    monSelect.value = parseInt(activeMon);
+  } else if (currentVal && parseInt(currentVal) < total) {
     monSelect.value = currentVal;
   } else {
     monSelect.value = 0;
@@ -1168,7 +1172,7 @@ function setupDataChannels(targetId) {
       } else if (msg.t === 'chat') {
         appendChatMessage('Remoto', msg.text);
       } else if (msg.t === 'init_info' && msg.mon) {
-        updateViewerMonitors(msg.mon);
+        updateViewerMonitors(msg.mon, msg.active_mon);
       } else if (msg.t === 'close' || (msg.t === 'sys_cmd' && msg.cmd === 'close')) {
         closeViewer();
         showModalAlert('Sessão Encerrada', msg.text || 'A sessão remota foi encerrada pelo computador remoto.', 'ℹ️');
@@ -1187,6 +1191,8 @@ let frameAssembly = null;
 function handleVideoPacket(data) {
   if (!isConnected) return;
   if (data instanceof ArrayBuffer) {
+    bytesReceived += data.byteLength;
+    totalSessionBytes += data.byteLength;
     if (data.byteLength < 8) return;
     const view = new DataView(data);
     const frameId = view.getUint32(0);
@@ -1212,6 +1218,8 @@ function handleVideoPacket(data) {
       renderRawBlob(blob);
     }
   } else if (data instanceof Blob) {
+    bytesReceived += data.size;
+    totalSessionBytes += data.size;
     renderRawBlob(data);
   }
 }
@@ -1227,6 +1235,12 @@ function renderBase64Frame(b64) {
   if (now - lastFpsTime >= 1000) {
     const fpsEl = document.getElementById('stat-fps');
     if (fpsEl) fpsEl.innerText = `🎥 ${frameCount} FPS`;
+    const kbps = bytesReceived / 1024;
+    const bwEl = document.getElementById('stat-bandwidth');
+    if (bwEl) {
+      bwEl.innerText = kbps >= 1024 ? `📊 ${(kbps / 1024).toFixed(1)} MB/s` : `📊 ${Math.round(kbps)} KB/s`;
+    }
+    bytesReceived = 0;
     frameCount = 0;
     lastFpsTime = now;
   }
@@ -1253,6 +1267,12 @@ function renderRawBlob(blobData) {
   if (now - lastFpsTime >= 1000) {
     const fpsEl = document.getElementById('stat-fps');
     if (fpsEl) fpsEl.innerText = `🎥 ${frameCount} FPS`;
+    const kbps = bytesReceived / 1024;
+    const bwEl = document.getElementById('stat-bandwidth');
+    if (bwEl) {
+      bwEl.innerText = kbps >= 1024 ? `📊 ${(kbps / 1024).toFixed(1)} MB/s` : `📊 ${Math.round(kbps)} KB/s`;
+    }
+    bytesReceived = 0;
     frameCount = 0;
     lastFpsTime = now;
   }
@@ -1465,6 +1485,8 @@ function closeViewer() {
   }
   // Clear canvas
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  bytesReceived = 0;
+  totalSessionBytes = 0;
   // Switch back to client view tab
   switchTab('client');
   resetConnectButton();

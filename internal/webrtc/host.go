@@ -159,6 +159,14 @@ func (h *HostSession) HandleRemoteOffer(targetID string, sdpStr string) error {
 
 		if dc.Label() == "input" {
 			h.inputChannel = dc
+			dc.OnOpen(func() {
+				numDisplays := capture.GetNumDisplays()
+				initInfo, _ := json.Marshal(protocol.ControlMessage{
+					Type:    protocol.TypeInitInfo,
+					Monitor: numDisplays,
+				})
+				_ = dc.Send(initInfo)
+			})
 			dc.OnMessage(func(msg pion.DataChannelMessage) {
 				h.HandleControlData(msg.Data)
 			})
