@@ -678,6 +678,48 @@
       border-color: var(--accent);
       box-shadow: 0 0 10px var(--accent-glow);
     }
+    /* Inactivity Warning Banner Overlay */
+    .inactivity-banner {
+      position: absolute;
+      top: 75px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(239, 68, 68, 0.95);
+      backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      box-shadow: 0 14px 40px rgba(0, 0, 0, 0.7), 0 0 24px rgba(239, 68, 68, 0.5);
+      border-radius: 12px;
+      padding: 0.75rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+      color: #ffffff;
+      z-index: 250;
+      animation: pulse-banner 1.5s infinite alternate ease-in-out;
+      pointer-events: none;
+    }
+    @keyframes pulse-banner {
+      from { transform: translateX(-50%) scale(1); opacity: 0.95; }
+      to { transform: translateX(-50%) scale(1.02); opacity: 1; }
+    }
+    .inactivity-icon {
+      font-size: 1.6rem;
+    }
+    .inactivity-text {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+    .inactivity-text strong {
+      font-size: 0.9rem;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+    .inactivity-text span {
+      font-size: 0.82rem;
+      opacity: 0.95;
+      font-weight: 500;
+    }
   </style>
 </head>
 <body>
@@ -830,7 +872,9 @@
     <div class="web-viewer-dock" id="web-viewer-toolbar">
       <!-- Integrated Stats Group -->
       <div style="display: flex; align-items: center; gap: 7px; font-family: var(--font-mono); font-size: 0.74rem; padding: 0 4px; flex-shrink: 0;">
-        <span style="color: #4ade80; font-weight: 700;">● Online</span>
+        <span id="web-stat-mode" style="color: #4ade80; font-weight: 700;">● Online (P2P)</span>
+        <span style="opacity: 0.3;">|</span>
+        <span id="web-stat-timer" style="color: #fbbf24; font-weight: 700;">⏱️ 00:00</span>
         <span style="opacity: 0.3;">|</span>
         <span id="web-stat-lat" style="color: #38bdf8; font-weight: 700;">⚡ 0 ms</span>
         <span style="opacity: 0.3;">|</span>
@@ -900,6 +944,18 @@
         </div>
         <button class="chat-toast-close" onclick="event.stopPropagation(); hideViewerToast()">✕</button>
       </div>
+
+      <!-- Inactivity Warning Banner Overlay -->
+      <div id="web-inactivity-banner" class="inactivity-banner" style="display: none;">
+        <span class="inactivity-icon">⚠️</span>
+        <div class="inactivity-text">
+          <strong>Aviso de Inatividade</strong>
+          <span id="web-inactivity-countdown">A sessão será encerrada em 30 segundos por inatividade.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Custom In-App Glassmorphic Dialog Modal (Alert, Confirm, Prompt) -->
   <div id="app-dialog-modal" class="modal-backdrop" style="display: none;">
     <div class="modal-card dialog-card">
@@ -917,6 +973,17 @@
   <script>
     let adminKey = localStorage.getItem('ra_admin_key') || '';
     let viewerWS = null;
+    let vPeerConnection = null;
+    let vInputChannel = null;
+    let vVideoChannel = null;
+    let vFrameAssembly = null;
+    let vIsRenderingFrame = false;
+    let vPendingBlob = null;
+    let vFrameSafetyTimer = null;
+    let vSessionStartTime = 0;
+    let vSessionTimer = null;
+    let vLastInputTime = Date.now();
+    let vInactivityWatchdog = null;
     let currentSessionTarget = '';
     let viewerConnected = false;
     let vFrameCount = 0;
@@ -1260,13 +1327,168 @@
       sendViewerCtrl({ t: 'mon_switch', mon: parseInt(monIdx) });
     }
 
-    // 1-Click Embedded Direct Remote Access
-    function connectDirect(targetId, targetPwd, monitorsCount) {
+    // User Activity Tracking & Inactivity Timeout Watchdog (2 Minutes)
+    function recordViewerActivity() {
+      vLastInputTime = Date.now();
+      const banner = document.getElementById('web-inactivity-banner');
+      if (banner) banner.style.display = 'none';
+    }
+
+    function startViewerSessionTimers() {
+      vSessionStartTime = Date.now();
+      vLastInputTime = Date.now();
+      if (vSessionTimer) clearInterval(vSessionTimer);
+      vSessionTimer = setInterval(() => {
+        if (!viewerConnected) return;
+        const elapsed = Math.floor((Date.now() - vSessionStartTime) / 1000);
+        const m = Math.floor(elapsed / 60).toString().padStart(2, '0');
+        const s = (elapsed % 60).toString().padStart(2, '0');
+        const timerEl = document.getElementById('web-stat-timer');
+        if (timerEl) timerEl.innerText = `⏱️ ${m}:${s}`;
+      }, 1000);
+
+      if (vInactivityWatchdog) clearInterval(vInactivityWatchdog);
+      vInactivityWatchdog = setInterval(() => {
+        if (!viewerConnected) return;
+        const idleSec = Math.floor((Date.now() - vLastInputTime) / 1000);
+        const banner = document.getElementById('web-inactivity-banner');
+        const countdown = document.getElementById('web-inactivity-countdown');
+
+        if (idleSec >= 120) {
+          closeWebViewer();
+          showModalAlert('Sessão Encerrada', 'A sessão remota foi desconectada automaticamente por atingir o limite de 2 minutos de inatividade.', '⏱️');
+        } else if (idleSec >= 90) {
+          if (banner) banner.style.display = 'flex';
+          const remaining = 120 - idleSec;
+          if (countdown) countdown.innerText = `A sessão será encerrada em ${remaining}s por inatividade. Mova o mouse para continuar.`;
+        } else {
+          if (banner) banner.style.display = 'none';
+        }
+      }, 1000);
+    }
+
+    // Binary WebRTC Video Chunk Reassembly & Canvas Rendering Pipeline
+    function handleViewerVideoPacket(data) {
+      if (!viewerConnected) return;
+      if (data instanceof ArrayBuffer) {
+        if (data.byteLength < 8) return;
+        const view = new DataView(data);
+        const frameId = view.getUint32(0);
+        const chunkIdx = view.getUint16(4);
+        const totalChunks = view.getUint16(6);
+        const chunkData = new Uint8Array(data, 8);
+
+        if (totalChunks <= 1) {
+          renderViewerRawBlob(new Blob([chunkData], { type: 'image/jpeg' }));
+          return;
+        }
+
+        if (!vFrameAssembly || vFrameAssembly.id !== frameId) {
+          vFrameAssembly = { id: frameId, total: totalChunks, count: 0, chunks: new Array(totalChunks) };
+        }
+        if (!vFrameAssembly.chunks[chunkIdx]) {
+          vFrameAssembly.chunks[chunkIdx] = chunkData;
+          vFrameAssembly.count++;
+        }
+        if (vFrameAssembly.count === totalChunks) {
+          const blob = new Blob(vFrameAssembly.chunks, { type: 'image/jpeg' });
+          vFrameAssembly = null;
+          renderViewerRawBlob(blob);
+        }
+      } else if (data instanceof Blob) {
+        renderViewerRawBlob(data);
+      }
+    }
+
+    function renderViewerRawBlob(blobData) {
+      if (!viewerConnected) return;
+
+      vFrameCount++;
+      const now = performance.now();
+      if (now - vLastFpsTime >= 1000) {
+        const fpsEl = document.getElementById('web-stat-fps');
+        if (fpsEl) fpsEl.innerText = `🎥 ${vFrameCount} FPS`;
+        vFrameCount = 0;
+        vLastFpsTime = now;
+      }
+
+      if (vIsRenderingFrame) {
+        vPendingBlob = blobData;
+        return;
+      }
+
+      vIsRenderingFrame = true;
+      if (vFrameSafetyTimer) clearTimeout(vFrameSafetyTimer);
+      vFrameSafetyTimer = setTimeout(() => {
+        vIsRenderingFrame = false;
+        if (vPendingBlob) {
+          const next = vPendingBlob;
+          vPendingBlob = null;
+          renderViewerRawBlob(next);
+        }
+      }, 150);
+
+      const blob = (blobData instanceof Blob) ? blobData : new Blob([blobData], { type: 'image/jpeg' });
+
+      if (window.createImageBitmap) {
+        createImageBitmap(blob).then((imgBitmap) => {
+          if (vFrameSafetyTimer) clearTimeout(vFrameSafetyTimer);
+          if (vCanvas.width !== imgBitmap.width || vCanvas.height !== imgBitmap.height) {
+            vCanvas.width = imgBitmap.width;
+            vCanvas.height = imgBitmap.height;
+          }
+          vCtx.drawImage(imgBitmap, 0, 0);
+          imgBitmap.close();
+          vIsRenderingFrame = false;
+          if (vPendingBlob) {
+            const next = vPendingBlob;
+            vPendingBlob = null;
+            renderViewerRawBlob(next);
+          }
+        }).catch(() => {
+          fallbackRenderViewerImage(blob);
+        });
+      } else {
+        fallbackRenderViewerImage(blob);
+      }
+    }
+
+    function fallbackRenderViewerImage(blob) {
+      const img = new Image();
+      const url = URL.createObjectURL(blob);
+      img.onload = () => {
+        if (vFrameSafetyTimer) clearTimeout(vFrameSafetyTimer);
+        if (vCanvas.width !== img.width || vCanvas.height !== img.height) {
+          vCanvas.width = img.width;
+          vCanvas.height = img.height;
+        }
+        vCtx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+        vIsRenderingFrame = false;
+        if (vPendingBlob) {
+          const next = vPendingBlob;
+          vPendingBlob = null;
+          renderViewerRawBlob(next);
+        }
+      };
+      img.onerror = () => {
+        if (vFrameSafetyTimer) clearTimeout(vFrameSafetyTimer);
+        URL.revokeObjectURL(url);
+        vIsRenderingFrame = false;
+      };
+      img.src = url;
+    }
+
+    // 1-Click Embedded Direct Remote Access (WebRTC P2P)
+    async function connectDirect(targetId, targetPwd, monitorsCount) {
       currentSessionTarget = targetId;
       document.getElementById('web-stat-target').innerText = 'Host: ' + formatID(targetId);
+      const modeEl = document.getElementById('web-stat-mode');
+      if (modeEl) modeEl.innerText = '● Conectando P2P...';
       document.getElementById('web-viewer-container').style.display = 'flex';
       viewerConnected = true;
       updateWebViewerMonitors(monitorsCount || 1);
+      startViewerSessionTimers();
 
       const dock = document.getElementById('web-viewer-toolbar');
       if (dock) {
@@ -1285,27 +1507,140 @@
       if (viewerWS) {
         try { viewerWS.close(); } catch(e) {}
       }
+      if (vPeerConnection) {
+        try { vPeerConnection.close(); } catch(e) {}
+        vPeerConnection = null;
+      }
 
-      if (vPingTimer) clearInterval(vPingTimer);
-      viewerWS = new WebSocket(wsUrl);
-      viewerWS.onopen = () => {
-        viewerWS.send(JSON.stringify({
-          action: 'connect',
-          id: sessionId,
-          targetId: targetId,
-          password: targetPwd,
-          alias: 'Painel Web (Admin)'
-        }));
+      // 1. Setup WebRTC Peer Connection
+      const rtcConfig = {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' },
+          { urls: 'stun:stun2.l.google.com:19302' },
+          { urls: 'stun:stun3.l.google.com:19302' },
+          { urls: 'stun:stun4.l.google.com:19302' },
+          { urls: 'stun:stun.cloudflare.com:3478' },
+          { urls: 'stun:global.stun.twilio.com:3478' },
+          { urls: 'stun:stun.nextcloud.com:443' },
+          { urls: 'stun:stun.matrix.org:3478' },
+          { urls: 'stun:stun.voip.blackberry.com:3478' }
+        ]
+      };
+
+      vPeerConnection = new RTCPeerConnection(rtcConfig);
+      vInputChannel = vPeerConnection.createDataChannel('input', { ordered: true });
+      vVideoChannel = vPeerConnection.createDataChannel('video', { ordered: false, maxPacketLifeTime: 300 });
+      vVideoChannel.binaryType = 'arraybuffer';
+
+      vPeerConnection.oniceconnectionstatechange = () => {
+        console.log('[WebRTC Web Viewer] ICE State:', vPeerConnection.iceConnectionState);
+        if (vPeerConnection.iceConnectionState === 'connected') {
+          if (modeEl) modeEl.innerText = '● Online (P2P Direto)';
+          const latEl = document.getElementById('web-stat-lat');
+          if (latEl) latEl.innerText = '⚡ P2P Ativo';
+        }
+      };
+
+      vPeerConnection.onconnectionstatechange = () => {
+        console.log('[WebRTC Web Viewer] Connection State:', vPeerConnection.connectionState);
+        if (vPeerConnection.connectionState === 'connected') {
+          if (modeEl) modeEl.innerText = '● Online (P2P Direto)';
+          const latEl = document.getElementById('web-stat-lat');
+          if (latEl) latEl.innerText = '⚡ P2P Ativo';
+        }
+      };
+
+      vPeerConnection.onicecandidate = (event) => {
+        if (event.candidate && viewerWS && viewerWS.readyState === WebSocket.OPEN) {
+          viewerWS.send(JSON.stringify({
+            action: 'candidate',
+            id: sessionId,
+            targetId: targetId,
+            candidate: event.candidate.toJSON()
+          }));
+        }
+      };
+
+      vInputChannel.onopen = () => {
+        console.log('[Web Viewer] WebRTC P2P DataChannel Aberto!');
+        if (modeEl) modeEl.innerText = '● Online (P2P Direto)';
         if (vPingTimer) clearInterval(vPingTimer);
         vPingTimer = setInterval(() => {
           sendViewerCtrl({ t: 'ping', ts: performance.now() });
         }, 1200);
       };
 
+      vInputChannel.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.t === 'pong') {
+            const rtt = Math.max(1, Math.round(performance.now() - msg.ts));
+            const latEl = document.getElementById('web-stat-lat');
+            if (latEl) latEl.innerText = '⚡ ' + rtt + ' ms';
+          } else if (msg.t === 'chat') {
+            appendViewerChat('Host', msg.text);
+          } else if (msg.t === 'init_info' && msg.mon) {
+            updateWebViewerMonitors(msg.mon);
+          } else if (msg.t === 'close' || (msg.t === 'sys_cmd' && msg.cmd === 'close')) {
+            closeWebViewer();
+            showModalAlert('Sessão Encerrada', msg.text || 'A sessão remota foi encerrada pelo computador remoto.', 'ℹ️');
+          }
+        } catch(e) {}
+      };
+
+      vVideoChannel.onmessage = (event) => {
+        handleViewerVideoPacket(event.data);
+      };
+
+      // 2. Open Signaling WebSocket & Exchange SDP Offer
+      if (vPingTimer) clearInterval(vPingTimer);
+      viewerWS = new WebSocket(wsUrl);
+
+      viewerWS.onopen = async () => {
+        viewerWS.send(JSON.stringify({
+          action: 'connect',
+          id: sessionId,
+          targetId: targetId,
+          password: targetPwd,
+          alias: 'Painel Web (Navegador)'
+        }));
+
+        if (vPingTimer) clearInterval(vPingTimer);
+        vPingTimer = setInterval(() => {
+          sendViewerCtrl({ t: 'ping', ts: performance.now() });
+        }, 1200);
+
+        try {
+          const offer = await vPeerConnection.createOffer();
+          await vPeerConnection.setLocalDescription(offer);
+          viewerWS.send(JSON.stringify({
+            action: 'offer',
+            id: sessionId,
+            targetId: targetId,
+            password: targetPwd,
+            sdp: offer.sdp
+          }));
+        } catch (err) {
+          console.warn('WebRTC offer error in web dashboard:', err);
+        }
+      };
+
       viewerWS.onmessage = async (event) => {
         try {
           const msg = JSON.parse(event.data);
-          if (msg.action === 'data') {
+          if (msg.action === 'answer') {
+            if (vPeerConnection) {
+              await vPeerConnection.setRemoteDescription(new RTCSessionDescription({
+                type: 'answer',
+                sdp: msg.sdp
+              }));
+            }
+          } else if (msg.action === 'candidate') {
+            if (vPeerConnection && msg.candidate) {
+              await vPeerConnection.addIceCandidate(new RTCIceCandidate(msg.candidate));
+            }
+          } else if (msg.action === 'data') {
             if (msg.payload && typeof msg.payload === 'string' && msg.payload.startsWith('{"t":')) {
               try {
                 const ctrl = JSON.parse(msg.payload);
@@ -1319,29 +1654,10 @@
                   appendViewerChat('Host', ctrl.text);
                 }
               } catch(e) {}
-              return;
             }
-
-            vFrameCount++;
-            const now = performance.now();
-            if (now - vLastFpsTime >= 1000) {
-              document.getElementById('web-stat-fps').innerText = '🎥 ' + vFrameCount + ' FPS';
-              vFrameCount = 0;
-              vLastFpsTime = now;
-            }
-
-            const img = new Image();
-            img.onload = () => {
-              if (vCanvas.width !== img.width || vCanvas.height !== img.height) {
-                vCanvas.width = img.width;
-                vCanvas.height = img.height;
-              }
-              vCtx.drawImage(img, 0, 0);
-            };
-            img.src = 'data:image/jpeg;base64,' + msg.payload;
           } else if (msg.action === 'close') {
             closeWebViewer();
-            await showModalAlert('Sessão Encerrada', 'A sessão remota foi encerrada pelo computador remoto.', 'ℹ️');
+            await showModalAlert('Sessão Encerrada', msg.message || 'A sessão remota foi encerrada pelo computador remoto.', 'ℹ️');
           } else if (msg.action === 'error') {
             closeWebViewer();
             await showModalAlert('Erro na Conexão', msg.message || 'Erro de conexão com o computador remoto.', '❌');
@@ -1474,7 +1790,32 @@
         clearInterval(vPingTimer);
         vPingTimer = null;
       }
+      if (vSessionTimer) {
+        clearInterval(vSessionTimer);
+        vSessionTimer = null;
+      }
+      if (vInactivityWatchdog) {
+        clearInterval(vInactivityWatchdog);
+        vInactivityWatchdog = null;
+      }
+      const banner = document.getElementById('web-inactivity-banner');
+      if (banner) banner.style.display = 'none';
+
       document.getElementById('web-viewer-container').style.display = 'none';
+
+      if (vInputChannel) {
+        try { vInputChannel.close(); } catch(e) {}
+        vInputChannel = null;
+      }
+      if (vVideoChannel) {
+        try { vVideoChannel.close(); } catch(e) {}
+        vVideoChannel = null;
+      }
+      if (vPeerConnection) {
+        try { vPeerConnection.close(); } catch(e) {}
+        vPeerConnection = null;
+      }
+
       if (viewerWS) {
         try {
           if (viewerWS.readyState === WebSocket.OPEN && currentSessionTarget) {
@@ -1495,6 +1836,10 @@
       }
       // Clear canvas
       vCtx.clearRect(0, 0, vCanvas.width, vCanvas.height);
+      vFrameAssembly = null;
+      vPendingBlob = null;
+      vIsRenderingFrame = false;
+      currentSessionTarget = '';
       refreshData();
     }
 
@@ -1508,6 +1853,16 @@
     }
 
     function sendViewerCtrl(obj) {
+      if (!viewerConnected) return;
+      if (obj && obj.t !== 'ping') {
+        recordViewerActivity();
+      }
+      // Send over WebRTC DataChannel if open (Direct P2P, 0 Server Load, Ultra-low Latency)
+      if (vInputChannel && vInputChannel.readyState === 'open') {
+        vInputChannel.send(JSON.stringify(obj));
+        return;
+      }
+      // Fallback: WebSocket relay
       if (viewerWS && viewerWS.readyState === WebSocket.OPEN && currentSessionTarget) {
         viewerWS.send(JSON.stringify({
           action: 'data',
