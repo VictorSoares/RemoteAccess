@@ -54,6 +54,7 @@ type HostSession struct {
 	lastActivity int64
 	lastInputTime int64
 	fpsUpdate    chan int
+	disconnectTimer *time.Timer
 	OnStatus     func(status string, msg string)
 	SendSignal   func(msg protocol.SignalingMessage)
 	OnChat       func(sender string, text string)
@@ -106,6 +107,32 @@ func (h *HostSession) IsActive() bool {
 	}
 }
 
+func (h *HostSession) handleDisconnectGrace(source string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.disconnectTimer != nil {
+		return // Tolerância já em andamento
+	}
+	log.Printf("[Host] %s desconectado temporariamente. Tolerância de reconexão de 4s ativada...", source)
+	h.disconnectTimer = time.AfterFunc(4*time.Second, func() {
+		h.mu.Lock()
+		h.disconnectTimer = nil
+		h.mu.Unlock()
+		log.Printf("[Host] Tempo limite de reconexão esgotado (4s). Encerrando sessão.")
+		h.Close()
+	})
+}
+
+func (h *HostSession) cancelDisconnectGrace() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.disconnectTimer != nil {
+		h.disconnectTimer.Stop()
+		h.disconnectTimer = nil
+		log.Printf("[Host] Conexão P2P restabelecida com sucesso dentro da tolerância!")
+	}
+}
+
 func (h *HostSession) HandleRemoteOffer(targetID string, sdpStr string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -122,16 +149,26 @@ func (h *HostSession) HandleRemoteOffer(targetID string, sdpStr string) error {
 
 	pc.OnICEConnectionStateChange(func(state pion.ICEConnectionState) {
 		log.Printf("[Host] ICE P2P State: %s", state.String())
-		if state == pion.ICEConnectionStateFailed || state == pion.ICEConnectionStateClosed || state == pion.ICEConnectionStateDisconnected {
-			log.Printf("[Host] ICE desconectado (%s). Encerrando sessão host.", state.String())
+		if state == pion.ICEConnectionStateConnected || state == pion.ICEConnectionStateCompleted {
+			h.cancelDisconnectGrace()
+		} else if state == pion.ICEConnectionStateDisconnected {
+			h.handleDisconnectGrace("ICE")
+		} else if state == pion.ICEConnectionStateFailed || state == pion.ICEConnectionStateClosed {
+			h.cancelDisconnectGrace()
+			log.Printf("[Host] ICE desconectado criticamente (%s). Encerrando sessão host.", state.String())
 			go h.Close()
 		}
 	})
 
 	pc.OnConnectionStateChange(func(state pion.PeerConnectionState) {
 		log.Printf("[Host] PeerConnection State: %s", state.String())
-		if state == pion.PeerConnectionStateFailed || state == pion.PeerConnectionStateClosed || state == pion.PeerConnectionStateDisconnected {
-			log.Printf("[Host] PeerConnection desconectado (%s). Encerrando sessão host.", state.String())
+		if state == pion.PeerConnectionStateConnected {
+			h.cancelDisconnectGrace()
+		} else if state == pion.PeerConnectionStateDisconnected {
+			h.handleDisconnectGrace("PeerConnection")
+		} else if state == pion.PeerConnectionStateFailed || state == pion.PeerConnectionStateClosed {
+			h.cancelDisconnectGrace()
+			log.Printf("[Host] PeerConnection desconectado criticamente (%s). Encerrando sessão host.", state.String())
 			go h.Close()
 		}
 	})
@@ -442,8 +479,8 @@ func (h *HostSession) StartStreaming() {
 					continue
 				}
 
-				// Guard against buffer bloat / backpressure freeze: skip frame if client has > 1MB unconsumed
-				if vChan.BufferedAmount() > 1024*1024 {
+				// Guard against buffer bloat / backpressure freeze: skip frame if client has > 256KB unconsumed
+				if vChan.BufferedAmount() > 256*1024 {
 					continue
 				}
 
@@ -485,6 +522,10 @@ func (h *HostSession) Close() {
 	_ = input.BlockLocalInput(false)
 	h.cancel()
 	h.mu.Lock()
+	if h.disconnectTimer != nil {
+		h.disconnectTimer.Stop()
+		h.disconnectTimer = nil
+	}
 	if h.inputChannel != nil && h.inputChannel.ReadyState() == pion.DataChannelStateOpen {
 		closeMsg, _ := json.Marshal(protocol.ControlMessage{
 			Type: "close",

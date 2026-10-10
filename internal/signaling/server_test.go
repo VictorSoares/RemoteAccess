@@ -2,7 +2,9 @@ package signaling
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -96,5 +98,80 @@ func TestServerHistory(t *testing.T) {
 	historyList, ok := histResp["history"].([]interface{})
 	if !ok || len(historyList) == 0 {
 		t.Errorf("Expected non-empty history list")
+	}
+}
+
+func TestServerGzipDashboardAndStats(t *testing.T) {
+	srv := NewServer()
+
+	// 1. Dashboard with Accept-Encoding: gzip
+	reqGz := httptest.NewRequest("GET", "/", nil)
+	reqGz.Header.Set("Accept-Encoding", "gzip")
+	wGz := httptest.NewRecorder()
+	srv.HandleDashboard(wGz, reqGz)
+
+	if wGz.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for dashboard, got %d", wGz.Code)
+	}
+	if enc := wGz.Header().Get("Content-Encoding"); enc != "gzip" {
+		t.Errorf("Expected Content-Encoding: gzip, got %q", enc)
+	}
+
+	// Decompress and verify content equals dashboardHTML
+	gr, err := gzip.NewReader(wGz.Body)
+	if err != nil {
+		t.Fatalf("Failed to create gzip reader: %v", err)
+	}
+	defer gr.Close()
+	decompressed, err := io.ReadAll(gr)
+	if err != nil {
+		t.Fatalf("Failed to read decompressed bytes: %v", err)
+	}
+	if !bytes.Equal(decompressed, dashboardHTML) {
+		t.Errorf("Decompressed dashboard content does not match original dashboardHTML (len %d vs %d)", len(decompressed), len(dashboardHTML))
+	}
+
+	// Verify size reduction: compressed dashboard should be significantly smaller
+	compressedLen := len(getDashboardGzip())
+	originalLen := len(dashboardHTML)
+	if compressedLen >= originalLen {
+		t.Errorf("Expected compressed length (%d) to be smaller than original (%d)", compressedLen, originalLen)
+	}
+
+	// 2. Dashboard without Accept-Encoding: gzip (raw bytes)
+	reqRaw := httptest.NewRequest("GET", "/", nil)
+	wRaw := httptest.NewRecorder()
+	srv.HandleDashboard(wRaw, reqRaw)
+	if wRaw.Header().Get("Content-Encoding") != "" {
+		t.Errorf("Expected no Content-Encoding for raw request, got %q", wRaw.Header().Get("Content-Encoding"))
+	}
+	if !bytes.Equal(wRaw.Body.Bytes(), dashboardHTML) {
+		t.Errorf("Raw response body did not match dashboardHTML")
+	}
+
+	// 3. API Stats with Accept-Encoding: gzip
+	reqStatsGz := httptest.NewRequest("GET", "/api/stats?key="+srv.adminKey, nil)
+	reqStatsGz.Header.Set("Accept-Encoding", "gzip")
+	wStatsGz := httptest.NewRecorder()
+	srv.HandleStats(wStatsGz, reqStatsGz)
+
+	if wStatsGz.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for stats, got %d", wStatsGz.Code)
+	}
+	if enc := wStatsGz.Header().Get("Content-Encoding"); enc != "gzip" {
+		t.Errorf("Expected Content-Encoding: gzip for stats, got %q", enc)
+	}
+
+	grStats, err := gzip.NewReader(wStatsGz.Body)
+	if err != nil {
+		t.Fatalf("Failed to create gzip reader for stats: %v", err)
+	}
+	defer grStats.Close()
+	var statsData map[string]interface{}
+	if err := json.NewDecoder(grStats).Decode(&statsData); err != nil {
+		t.Fatalf("Failed to decode decompressed stats JSON: %v", err)
+	}
+	if _, ok := statsData["host_count"]; !ok {
+		t.Errorf("Expected host_count in decompressed stats")
 	}
 }

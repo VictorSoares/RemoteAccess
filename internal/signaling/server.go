@@ -2,6 +2,8 @@ package signaling
 
 import (
 	_ "embed"
+	"bytes"
+	"compress/gzip"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
@@ -21,6 +23,39 @@ import (
 
 //go:embed web/dashboard.html
 var dashboardHTML []byte
+
+var (
+	dashboardGzOnce sync.Once
+	dashboardHTMLGz []byte
+)
+
+func getDashboardGzip() []byte {
+	dashboardGzOnce.Do(func() {
+		var buf bytes.Buffer
+		gz, err := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+		if err == nil {
+			_, _ = gz.Write(dashboardHTML)
+			_ = gz.Close()
+			dashboardHTMLGz = buf.Bytes()
+		}
+	})
+	return dashboardHTMLGz
+}
+
+func writeJSON(w http.ResponseWriter, r *http.Request, statusCode int, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	if r != nil && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Header().Set("Vary", "Accept-Encoding")
+		w.WriteHeader(statusCode)
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+		_ = json.NewEncoder(gz).Encode(data)
+		return
+	}
+	w.WriteHeader(statusCode)
+	_ = json.NewEncoder(w).Encode(data)
+}
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
@@ -430,17 +465,14 @@ func (s *Server) HandleAuth(w http.ResponseWriter, r *http.Request) {
 			SameSite: http.SameSiteLaxMode,
 			MaxAge:   86400 * 30, // 30 days
 		})
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(w, r, http.StatusOK, map[string]interface{}{
 			"status": "ok",
 			"auth":   true,
 		})
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnauthorized)
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, r, http.StatusUnauthorized, map[string]interface{}{
 		"status":  "error",
 		"message": "Chave de acesso do cluster incorreta.",
 	})
@@ -448,9 +480,7 @@ func (s *Server) HandleAuth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 	if !s.checkAdminAuth(r) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		writeJSON(w, r, http.StatusUnauthorized, map[string]interface{}{
 			"status":  "unauthorized",
 			"message": "Acesso protegido. Informe a chave do cluster.",
 		})
@@ -569,8 +599,7 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, r, http.StatusOK, map[string]interface{}{
 		"status":          "online",
 		"uptime_sec":      int(time.Since(s.startTime).Seconds()),
 		"total_online":    hostCount,
@@ -584,22 +613,27 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) HandleHistory(w http.ResponseWriter, r *http.Request) {
 	if !s.checkAdminAuth(r) {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		writeJSON(w, r, http.StatusUnauthorized, map[string]interface{}{
+			"status":  "unauthorized",
+			"message": "Acesso protegido.",
+		})
 		return
 	}
 
 	s.historyMu.RLock()
 	defer s.historyMu.RUnlock()
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, r, http.StatusOK, map[string]interface{}{
 		"history": s.history,
 	})
 }
 
 func (s *Server) HandleBlockPeer(w http.ResponseWriter, r *http.Request) {
 	if !s.checkAdminAuth(r) {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		writeJSON(w, r, http.StatusUnauthorized, map[string]interface{}{
+			"status":  "unauthorized",
+			"message": "Acesso protegido.",
+		})
 		return
 	}
 
@@ -633,8 +667,7 @@ func (s *Server) HandleBlockPeer(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, r, http.StatusOK, map[string]interface{}{
 		"status":  "ok",
 		"id":      req.ID,
 		"blocked": req.Block,
@@ -644,15 +677,17 @@ func (s *Server) HandleBlockPeer(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) HandleLogs(w http.ResponseWriter, r *http.Request) {
 	if !s.checkAdminAuth(r) {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		writeJSON(w, r, http.StatusUnauthorized, map[string]interface{}{
+			"status":  "unauthorized",
+			"message": "Acesso protegido.",
+		})
 		return
 	}
 
 	s.logsMu.RLock()
 	defer s.logsMu.RUnlock()
 
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+	writeJSON(w, r, http.StatusOK, map[string]interface{}{
 		"logs": s.logs,
 	})
 }
@@ -747,6 +782,16 @@ func (s *Server) HandleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if r != nil && strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+		gzData := getDashboardGzip()
+		if len(gzData) > 0 {
+			w.Header().Set("Content-Encoding", "gzip")
+			w.Header().Set("Vary", "Accept-Encoding")
+			w.Write(gzData)
+			return
+		}
+	}
+
 	w.Write(dashboardHTML)
 }
 

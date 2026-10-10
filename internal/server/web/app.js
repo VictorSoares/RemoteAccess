@@ -1012,12 +1012,24 @@ function connectSignaling() {
 
         case 'data':
           if (typeof msg.payload === 'string' && msg.payload.startsWith('{')) {
+function updateAppLatency(rtt) {
+  const latEl = document.getElementById('stat-latency');
+  if (!latEl) return;
+  latEl.innerText = `⚡ ${rtt} ms`;
+  if (rtt < 50) {
+    latEl.style.color = '#4ade80';
+  } else if (rtt <= 150) {
+    latEl.style.color = '#fbbf24';
+  } else {
+    latEl.style.color = '#f87171';
+  }
+}
+
             try {
               const ctrl = JSON.parse(msg.payload);
               if (ctrl.t === 'pong') {
                 const rtt = Math.max(1, Math.round(performance.now() - ctrl.ts));
-                const latEl = document.getElementById('stat-latency');
-                if (latEl) latEl.innerText = `⚡ ${rtt} ms`;
+                updateAppLatency(rtt);
               } else if (ctrl.t === 'chat') {
                 appendChatMessage('Remoto', ctrl.text);
               } else if (ctrl.t === 'init_info' && ctrl.mon) {
@@ -1102,7 +1114,11 @@ async function connectToRemote(e) {
   peerConnection.oniceconnectionstatechange = () => {
     console.log('[WebRTC] ICE Connection State:', peerConnection.iceConnectionState);
     if (peerConnection.iceConnectionState === 'connected') {
-      document.getElementById('stat-latency').innerText = `⚡ P2P Ativo`;
+      const latEl = document.getElementById('stat-latency');
+      if (latEl) {
+        latEl.innerText = `⚡ P2P Ativo`;
+        latEl.style.color = '#4ade80';
+      }
     }
   };
 
@@ -1112,7 +1128,10 @@ async function connectToRemote(e) {
       const badgeEl = document.getElementById('hud-status-badge');
       if (badgeEl) badgeEl.innerHTML = `<span class="hud-dot"></span> P2P Direto (Zero Nuvem)`;
       const latEl = document.getElementById('stat-latency');
-      if (latEl) latEl.innerText = `⚡ P2P Ativo`;
+      if (latEl) {
+        latEl.innerText = `⚡ P2P Ativo`;
+        latEl.style.color = '#4ade80';
+      }
     } else if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected') {
       console.log('[WebRTC] Conexão P2P encerrada.');
     }
@@ -1165,8 +1184,7 @@ function setupDataChannels(targetId) {
       const msg = JSON.parse(event.data);
       if (msg.t === 'pong') {
         const rtt = Math.max(1, Math.round(performance.now() - msg.ts));
-        const latEl = document.getElementById('stat-latency');
-        if (latEl) latEl.innerText = `⚡ ${rtt} ms`;
+        updateAppLatency(rtt);
         const badgeEl = document.getElementById('hud-status-badge');
         if (badgeEl) badgeEl.innerHTML = `<span class="hud-dot"></span> P2P Direct`;
       } else if (msg.t === 'chat') {

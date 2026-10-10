@@ -57,3 +57,34 @@ func TestHostSessionHandleControlData(t *testing.T) {
 	// 3. Send invalid JSON (must not panic)
 	sess.HandleControlData([]byte("invalid json"))
 }
+
+func TestHostSessionDisconnectGrace(t *testing.T) {
+	sess, err := NewHostSession("client_grace", "TestGrace", 30, 60, nil)
+	if err != nil {
+		t.Fatalf("Failed to create session: %v", err)
+	}
+	defer sess.Close()
+
+	// 1. Trigger disconnect grace
+	sess.handleDisconnectGrace("ICE")
+	sess.mu.Lock()
+	timerActive := sess.disconnectTimer != nil
+	sess.mu.Unlock()
+	if !timerActive {
+		t.Errorf("Expected disconnectTimer to be non-nil after handleDisconnectGrace")
+	}
+
+	// 2. Cancel disconnect grace (reconnected in time)
+	sess.cancelDisconnectGrace()
+	sess.mu.Lock()
+	timerCleared := sess.disconnectTimer == nil
+	sess.mu.Unlock()
+	if !timerCleared {
+		t.Errorf("Expected disconnectTimer to be nil after cancelDisconnectGrace")
+	}
+
+	// 3. Ensure session is still active
+	if !sess.IsActive() {
+		t.Errorf("Expected session to remain active after grace cancel")
+	}
+}

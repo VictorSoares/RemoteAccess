@@ -894,6 +894,15 @@
         </select>
       </div>
 
+      <!-- Quality / FPS Preset Selector -->
+      <div class="dock-select-wrap" title="Ajustar Qualidade e Taxa de Quadros">
+        <select id="web-viewer-quality-select" class="dock-select" onchange="setWebViewerQuality(this.value)">
+          <option value="speed">⚡ 60 FPS</option>
+          <option value="balanced" selected>⚖️ 30 FPS</option>
+          <option value="hd">💎 HD</option>
+        </select>
+      </div>
+
       <!-- Unified Power & Security Actions Dropdown -->
       <div class="dock-select-wrap" title="Ações de Energia e Sistema">
         <select id="web-viewer-power-select" class="dock-select" onchange="handleWebViewerPowerDropdown(this.value)">
@@ -1333,6 +1342,29 @@
       sendViewerCtrl({ t: 'mon_switch', mon: parseInt(monIdx) });
     }
 
+    function setWebViewerQuality(mode) {
+      if (mode === 'speed') {
+        sendViewerCtrl({ t: 'cfg', q: 45, fps: 60 });
+      } else if (mode === 'balanced') {
+        sendViewerCtrl({ t: 'cfg', q: 55, fps: 30 });
+      } else if (mode === 'hd') {
+        sendViewerCtrl({ t: 'cfg', q: 70, fps: 30 });
+      }
+    }
+
+    function updateViewerLatency(rtt) {
+      const latEl = document.getElementById('web-stat-lat');
+      if (!latEl) return;
+      latEl.innerText = '⚡ ' + rtt + ' ms';
+      if (rtt < 50) {
+        latEl.style.color = '#4ade80';
+      } else if (rtt <= 150) {
+        latEl.style.color = '#fbbf24';
+      } else {
+        latEl.style.color = '#f87171';
+      }
+    }
+
     // User Activity Tracking & Inactivity Timeout Watchdog (2 Minutes)
     function recordViewerActivity() {
       vLastInputTime = Date.now();
@@ -1554,7 +1586,10 @@
         if (vPeerConnection.iceConnectionState === 'connected') {
           if (modeEl) modeEl.innerText = '● Online (P2P Direto)';
           const latEl = document.getElementById('web-stat-lat');
-          if (latEl) latEl.innerText = '⚡ P2P Ativo';
+          if (latEl) {
+            latEl.innerText = '⚡ P2P Ativo';
+            latEl.style.color = '#4ade80';
+          }
         }
       };
 
@@ -1563,7 +1598,10 @@
         if (vPeerConnection.connectionState === 'connected') {
           if (modeEl) modeEl.innerText = '● Online (P2P Direto)';
           const latEl = document.getElementById('web-stat-lat');
-          if (latEl) latEl.innerText = '⚡ P2P Ativo';
+          if (latEl) {
+            latEl.innerText = '⚡ P2P Ativo';
+            latEl.style.color = '#4ade80';
+          }
         }
       };
 
@@ -1592,8 +1630,7 @@
           const msg = JSON.parse(event.data);
           if (msg.t === 'pong') {
             const rtt = Math.max(1, Math.round(performance.now() - msg.ts));
-            const latEl = document.getElementById('web-stat-lat');
-            if (latEl) latEl.innerText = '⚡ ' + rtt + ' ms';
+            updateViewerLatency(rtt);
           } else if (msg.t === 'chat') {
             appendViewerChat('Host', msg.text);
           } else if (msg.t === 'init_info' && msg.mon) {
@@ -1664,8 +1701,7 @@
                   updateWebViewerMonitors(ctrl.mon, ctrl.active_mon);
                 } else if (ctrl.t === 'pong') {
                   const rtt = Math.max(1, Math.round(performance.now() - ctrl.ts));
-                  const latEl = document.getElementById('web-stat-lat');
-                  if (latEl) latEl.innerText = '⚡ ' + rtt + ' ms';
+                  updateViewerLatency(rtt);
                 } else if (ctrl.t === 'chat') {
                   appendViewerChat('Host', ctrl.text);
                 }
@@ -1855,6 +1891,8 @@
       vFrameAssembly = null;
       vPendingBlob = null;
       vIsRenderingFrame = false;
+      const qSelect = document.getElementById('web-viewer-quality-select');
+      if (qSelect) qSelect.value = 'balanced';
       currentSessionTarget = '';
       refreshData();
     }
