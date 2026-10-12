@@ -341,6 +341,9 @@
         <button class="dock-btn" onclick="sendSystemAction('desktop')" title="Mostrar Área de Trabalho (Win+D)">
           ❖ <span class="dock-label">Win+D</span>
         </button>
+        <button class="dock-btn" id="btn-toggle-observer" onclick="toggleObserverMode()" title="Alternar entre Controle Ativo e Modo Observador (bloqueia mouse e teclado)">
+          <span id="observer-mode-icon">🖱️</span> <span class="dock-label" id="observer-mode-label">Controlando</span>
+        </button>
         <button class="dock-btn" id="btn-block-input" onclick="toggleBlockInput()" title="Bloquear Mouse e Teclado Físico do Cliente Acessado">
           🚫 <span class="dock-label">Bloquear Entrada</span>
         </button>

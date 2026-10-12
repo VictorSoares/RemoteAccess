@@ -239,6 +239,25 @@ function switchTab(tab) {
 }
 
 let isInputBlocked = false;
+let isObserverMode = false;
+
+function toggleObserverMode() {
+  isObserverMode = !isObserverMode;
+  const btn = document.getElementById('btn-toggle-observer');
+  const icon = document.getElementById('observer-mode-icon');
+  const label = document.getElementById('observer-mode-label');
+  if (!isObserverMode) {
+    if (btn) btn.classList.remove('active');
+    if (icon) icon.innerText = '🖱️';
+    if (label) label.innerText = 'Controlando';
+    if (canvas) canvas.style.cursor = 'crosshair';
+  } else {
+    if (btn) btn.classList.add('active');
+    if (icon) icon.innerText = '👁️';
+    if (label) label.innerText = 'Observador';
+    if (canvas) canvas.style.cursor = 'default';
+  }
+}
 
 async function fetchHostInfo() {
   try {
@@ -648,14 +667,15 @@ async function refreshHostChat() {
         const isMe = msg.sender.includes('Host') || msg.sender.includes('Você');
         if (!isMe) {
           showChatToast(msg.sender, msg.text);
-          // Open external floating chat popup window for host
-          openExternalChat();
+          playChatChime();
+          toggleHostFloatingChat(true);
+          const floatInput = document.getElementById('host-floating-chat-input');
+          if (floatInput) setTimeout(() => floatInput.focus(), 80);
           if (chatBroadcast) {
             try {
               chatBroadcast.postMessage({ action: 'receive', sender: msg.sender, text: msg.text });
             } catch(e) {}
           }
-          toggleHostFloatingChat(true);
           const badge = document.getElementById('host-chat-badge');
           if (badge && !hostChatOpen) {
             badge.innerText = parseInt(badge.innerText || '0') + 1;
@@ -1364,6 +1384,12 @@ function fallbackRenderImage(blob) {
 
 function sendControl(ctrlObj) {
   if (!isConnected) return;
+
+  // In Observer mode, block mouse and keyboard control events
+  if (isObserverMode && ctrlObj && (ctrlObj.t === 'm' || ctrlObj.t === 'md' || ctrlObj.t === 'mu' || ctrlObj.t === 'w' || ctrlObj.t === 'kd' || ctrlObj.t === 'ku')) {
+    return;
+  }
+
   if (ctrlObj && ctrlObj.t !== 'ping') {
     recordUserActivity();
   }
@@ -1373,6 +1399,9 @@ function sendControl(ctrlObj) {
     inputChannel.send(JSON.stringify(ctrlObj));
     return;
   }
+
+  // Strictly prevent sending pings or continuous heartbeats over WebSocket fallback (0 Server Bandwidth)
+  if (ctrlObj.t === 'ping') return;
 
   // Fallback: Send over WebSocket Relay if WebRTC DataChannel is not open
   if (signalingWS && signalingWS.readyState === WebSocket.OPEN && currentTargetId) {
@@ -1505,6 +1534,16 @@ function closeViewer() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   bytesReceived = 0;
   totalSessionBytes = 0;
+  // Reset observer mode
+  isObserverMode = false;
+  const obsBtn = document.getElementById('btn-toggle-observer');
+  if (obsBtn) obsBtn.classList.remove('active');
+  const obsIcon = document.getElementById('observer-mode-icon');
+  if (obsIcon) obsIcon.innerText = '🖱️';
+  const obsLabel = document.getElementById('observer-mode-label');
+  if (obsLabel) obsLabel.innerText = 'Controlando';
+  if (canvas) canvas.style.cursor = 'crosshair';
+
   // Switch back to client view tab
   switchTab('client');
   resetConnectButton();
@@ -1620,13 +1659,13 @@ function setupCanvasEvents() {
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
   canvas.addEventListener('mousemove', (e) => {
-    if (!isConnected) return;
+    if (!isConnected || isObserverMode) return;
     const coords = getCanvasCoords(e);
     sendControl({ t: 'm', x: coords.x, y: coords.y });
   });
 
   canvas.addEventListener('mousedown', (e) => {
-    if (!isConnected) return;
+    if (!isConnected || isObserverMode) return;
     isMouseDown = true;
     const coords = getCanvasCoords(e);
     sendControl({ t: 'm', x: coords.x, y: coords.y });
@@ -1634,13 +1673,13 @@ function setupCanvasEvents() {
   });
 
   window.addEventListener('mouseup', (e) => {
-    if (!isConnected || !isMouseDown) return;
+    if (!isConnected || isObserverMode || !isMouseDown) return;
     isMouseDown = false;
     sendControl({ t: 'mu', b: e.button });
   });
 
   canvas.addEventListener('wheel', (e) => {
-    if (!isConnected) return;
+    if (!isConnected || isObserverMode) return;
     e.preventDefault();
     sendControl({ t: 'w', dy: e.deltaY > 0 ? -120 : 120 });
   }, { passive: false });
@@ -1648,14 +1687,14 @@ function setupCanvasEvents() {
 
 function setupKeyboardEvents() {
   window.addEventListener('keydown', (e) => {
-    if (!isConnected || e.key === 'F12') return;
+    if (!isConnected || isObserverMode || e.key === 'F12') return;
     if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
     e.preventDefault();
     sendControl({ t: 'kd', k: e.key, c: e.code, kc: e.keyCode });
   });
 
   window.addEventListener('keyup', (e) => {
-    if (!isConnected || e.key === 'F12') return;
+    if (!isConnected || isObserverMode || e.key === 'F12') return;
     if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
     e.preventDefault();
     sendControl({ t: 'ku', k: e.key, c: e.code, kc: e.keyCode });

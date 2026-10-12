@@ -58,6 +58,8 @@ const (
 	nifMessage = 0x00000001
 	nifIcon    = 0x00000002
 	nifTip     = 0x00000004
+	nifInfo    = 0x00000010
+	niifInfo   = 0x00000001
 
 	mfString    = 0x00000000
 	mfSeparator = 0x00000800
@@ -319,4 +321,22 @@ func (tm *TrayManager) Remove() {
 		procShellNotifyIconW.Call(nimDelete, uintptr(unsafe.Pointer(&tm.nid)))
 		procPostMessageW.Call(tm.hwnd, wmDestroy, 0, 0)
 	}
+}
+
+// ShowBalloonNotification displays a native Windows system notification / balloon toast from the tray
+func ShowBalloonNotification(title, message string) {
+	if globalTray == nil || globalTray.hwnd == 0 {
+		return
+	}
+	nid := globalTray.nid
+	nid.uFlags |= nifInfo
+	nid.dwInfoFlags = niifInfo
+
+	titleUtf16, _ := syscall.UTF16FromString(title)
+	copy(nid.szInfoTitle[:], titleUtf16)
+
+	msgUtf16, _ := syscall.UTF16FromString(message)
+	copy(nid.szInfo[:], msgUtf16)
+
+	procShellNotifyIconW.Call(nimModify, uintptr(unsafe.Pointer(&nid)))
 }

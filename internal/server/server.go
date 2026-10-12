@@ -20,6 +20,7 @@ import (
 	"remoteaccess/internal/logger"
 	"remoteaccess/internal/protocol"
 	"remoteaccess/internal/signaling"
+	"remoteaccess/internal/tray"
 	webrtcmod "remoteaccess/internal/webrtc"
 	"remoteaccess/internal/wol"
 )
@@ -668,6 +669,8 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 				}
 				s.addChatMessage(senderName, text)
 				go func() {
+					tray.ShowBalloonNotification(fmt.Sprintf("RemoteAccess — Chat (%s)", senderName), text)
+					input.BringAppToFront()
 					input.FlashAppWindow()
 					input.PlayNotificationSound()
 				}()

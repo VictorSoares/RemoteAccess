@@ -63,6 +63,33 @@ async function runVisualTests() {
       throw new Error('Opções de qualidade inválidas ou padrão não selecionado!');
     }
 
+    // Validar botão de Alternância de Controle / Modo Observador (#btn-viewer-control-toggle)
+    const controlToggleBtn = await pageDashboard.$('#btn-viewer-control-toggle');
+    if (!controlToggleBtn) {
+      throw new Error('Elemento #btn-viewer-control-toggle não encontrado na toolbar!');
+    }
+    const initialLabel = await pageDashboard.$eval('#viewer-control-label', el => el.innerText.trim());
+    console.log('[Playwright] Estado inicial do controle (Web Viewer):', initialLabel);
+    if (initialLabel !== 'Controlando') {
+      throw new Error(`Esperado "Controlando", obtido "${initialLabel}"`);
+    }
+
+    // Clicar para ativar Modo Observador
+    await controlToggleBtn.click();
+    const observerLabel = await pageDashboard.$eval('#viewer-control-label', el => el.innerText.trim());
+    console.log('[Playwright] Estado após clique (Modo Observador):', observerLabel);
+    if (observerLabel !== 'Observador') {
+      throw new Error(`Esperado "Observador", obtido "${observerLabel}"`);
+    }
+
+    // Clicar novamente para retornar ao Modo Controlando
+    await controlToggleBtn.click();
+    const restoredLabel = await pageDashboard.$eval('#viewer-control-label', el => el.innerText.trim());
+    console.log('[Playwright] Estado restaurado (Modo Controlando):', restoredLabel);
+    if (restoredLabel !== 'Controlando') {
+      throw new Error(`Esperado "Controlando", obtido "${restoredLabel}"`);
+    }
+
     // Validar cores dinâmicas de latência (RTT)
     // Teste 1: Baixa latência (32ms - Verde #4ade80)
     await pageDashboard.evaluate(() => {
@@ -131,6 +158,31 @@ async function runVisualTests() {
         updateAppLatency(24);
       }
     });
+
+    // Validar botão de Alternância no Desktop Client (#btn-toggle-observer)
+    const appObserverBtn = await pageClient.$('#btn-toggle-observer');
+    if (!appObserverBtn) {
+      throw new Error('Elemento #btn-toggle-observer não encontrado no viewer-toolbar!');
+    }
+    const appInitialLabel = await pageClient.$eval('#observer-mode-label', el => el.innerText.trim());
+    console.log('[Playwright] Estado inicial do controle (Desktop App):', appInitialLabel);
+    if (appInitialLabel !== 'Controlando') {
+      throw new Error(`Esperado "Controlando", obtido "${appInitialLabel}"`);
+    }
+
+    await pageClient.evaluate(() => document.getElementById('btn-toggle-observer').click());
+    const appObserverLabel = await pageClient.$eval('#observer-mode-label', el => el.innerText.trim());
+    console.log('[Playwright] Estado após clique (Desktop App Observador):', appObserverLabel);
+    if (appObserverLabel !== 'Observador') {
+      throw new Error(`Esperado "Observador", obtido "${appObserverLabel}"`);
+    }
+
+    await pageClient.evaluate(() => document.getElementById('btn-toggle-observer').click());
+    const appRestoredLabel = await pageClient.$eval('#observer-mode-label', el => el.innerText.trim());
+    console.log('[Playwright] Estado restaurado (Desktop App Controlando):', appRestoredLabel);
+    if (appRestoredLabel !== 'Controlando') {
+      throw new Error(`Esperado "Controlando", obtido "${appRestoredLabel}"`);
+    }
 
     const appDockElement = await pageClient.$('#viewer-toolbar');
     const appDockScreenshotPath = path.join(artifactDir, 'desktop_viewer_toolbar.png');

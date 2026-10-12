@@ -343,14 +343,22 @@ func SendCtrlAltDel() {
 	OpenTaskManager()
 }
 
-// ShowDesktop minimizes or restores all windows cleanly with zero console windows
+// ShowDesktop minimizes or restores all windows cleanly
 func ShowDesktop() {
-	// Pure Windows Win + D key simulation (zero processes, zero CMD flashes)
-	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey, 0) // Win key down
-	procKeybdEvent.Call(0x44, 0, 0, 0)                    // 'D' key down
-	time.Sleep(35 * time.Millisecond)
-	procKeybdEvent.Call(0x44, 0, keyeventfKeyup, 0)       // 'D' key up
-	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey|keyeventfKeyup, 0) // Win key up
+	// 1. Primary: Windows Shell COM ToggleDesktop (100% reliable, works across UIPI and all window states)
+	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", "(New-Object -ComObject Shell.Application).ToggleDesktop()")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
+	}
+	if err := cmd.Run(); err != nil {
+		// 2. Fallback: Synthesize standard Win + D keystrokes (0x5B is VK_LWIN, 0x44 is 'D'; NO extended key flag)
+		procKeybdEvent.Call(0x5B, 0, 0, 0)
+		procKeybdEvent.Call(0x44, 0, 0, 0)
+		time.Sleep(35 * time.Millisecond)
+		procKeybdEvent.Call(0x44, 0, keyeventfKeyup, 0)
+		procKeybdEvent.Call(0x5B, 0, keyeventfKeyup, 0)
+	}
 }
 
 // MoveMouseAbsolute sets the cursor to an absolute ratio [0.0, 1.0] across the active screen monitor
@@ -497,7 +505,7 @@ func KeyUp(key, code string, keyCode int) error {
 
 func isExtendedKey(vk uint16) bool {
 	switch vk {
-	case 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E, 0x5B, 0x5C, 0x5D:
+	case 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E, 0x5D:
 		return true
 	default:
 		return false

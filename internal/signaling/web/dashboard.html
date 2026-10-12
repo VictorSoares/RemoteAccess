@@ -914,7 +914,8 @@
         </select>
       </div>
 
-      <div style="width: 1px; height: 16px; background: rgba(255,255,255,0.18); margin: 0 2px; flex-shrink: 0;"></div>
+      <!-- Control Mode Toggle (Controle Ativo vs Modo Observador) -->
+      <button id="btn-viewer-control-toggle" class="btn-action" onclick="toggleViewerControl()" title="Alternar entre Controle Ativo e Modo Observador (bloqueia envio de mouse e teclado)" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4);"><span id="viewer-control-icon">🖱️</span> <span id="viewer-control-label">Controlando</span></button>
 
       <!-- Quick Actions -->
       <button class="btn-action" onclick="sendViewerSys('cad')" title="Enviar Ctrl+Alt+Del" style="background: rgba(255,255,255,0.08); color: #fff;">⌨️ CAD</button>
@@ -1004,8 +1005,35 @@
     let vPingTimer = null;
     let viewerToastTimer = null;
     let viewerChatOpen = false;
+    let viewerControlEnabled = true;
     const vCanvas = document.getElementById('viewer-canvas');
     const vCtx = vCanvas.getContext('2d');
+
+    function toggleViewerControl() {
+      viewerControlEnabled = !viewerControlEnabled;
+      const btn = document.getElementById('btn-viewer-control-toggle');
+      const icon = document.getElementById('viewer-control-icon');
+      const label = document.getElementById('viewer-control-label');
+      if (viewerControlEnabled) {
+        if (btn) {
+          btn.style.background = 'rgba(34, 197, 94, 0.2)';
+          btn.style.color = '#4ade80';
+          btn.style.border = '1px solid rgba(34, 197, 94, 0.4)';
+        }
+        if (icon) icon.innerText = '🖱️';
+        if (label) label.innerText = 'Controlando';
+        if (vCanvas) vCanvas.style.cursor = 'crosshair';
+      } else {
+        if (btn) {
+          btn.style.background = 'rgba(245, 158, 11, 0.25)';
+          btn.style.color = '#fbbf24';
+          btn.style.border = '1px solid rgba(245, 158, 11, 0.5)';
+        }
+        if (icon) icon.innerText = '👁️';
+        if (label) label.innerText = 'Observador';
+        if (vCanvas) vCanvas.style.cursor = 'default';
+      }
+    }
 
     // Dialog helper for Custom In-App Glassmorphic Modals
     let dialogResolve = null;
@@ -1894,6 +1922,18 @@
       const qSelect = document.getElementById('web-viewer-quality-select');
       if (qSelect) qSelect.value = 'balanced';
       currentSessionTarget = '';
+      viewerControlEnabled = true;
+      const ctrlBtn = document.getElementById('btn-viewer-control-toggle');
+      if (ctrlBtn) {
+        ctrlBtn.style.background = 'rgba(34, 197, 94, 0.2)';
+        ctrlBtn.style.color = '#4ade80';
+        ctrlBtn.style.border = '1px solid rgba(34, 197, 94, 0.4)';
+      }
+      const ctrlIcon = document.getElementById('viewer-control-icon');
+      if (ctrlIcon) ctrlIcon.innerText = '🖱️';
+      const ctrlLabel = document.getElementById('viewer-control-label');
+      if (ctrlLabel) ctrlLabel.innerText = 'Controlando';
+      if (vCanvas) vCanvas.style.cursor = 'crosshair';
       refreshData();
     }
 
@@ -1908,6 +1948,10 @@
 
     function sendViewerCtrl(obj) {
       if (!viewerConnected) return;
+      // In Observer mode, discard mouse and keyboard inputs immediately
+      if (!viewerControlEnabled && obj && (obj.t === 'm' || obj.t === 'md' || obj.t === 'mu' || obj.t === 'w' || obj.t === 'kd' || obj.t === 'ku')) {
+        return;
+      }
       if (obj && obj.t !== 'ping') {
         recordViewerActivity();
       }
@@ -1916,7 +1960,10 @@
         vInputChannel.send(JSON.stringify(obj));
         return;
       }
-      // Fallback: WebSocket relay
+      // Strictly prevent sending pings or continuous heartbeats over WebSocket fallback (0 Server Bandwidth)
+      if (obj && obj.t === 'ping') return;
+
+      // Fallback: WebSocket relay (only for essential session setup actions)
       if (viewerWS && viewerWS.readyState === WebSocket.OPEN && currentSessionTarget) {
         viewerWS.send(JSON.stringify({
           action: 'data',
@@ -2122,27 +2169,27 @@
       }
     });
     vCanvas.addEventListener('mousemove', (e) => {
-      if (!viewerConnected) return;
+      if (!viewerConnected || !viewerControlEnabled) return;
       const c = getVCoords(e);
       sendViewerCtrl({ t: 'm', x: c.x, y: c.y });
     });
     vCanvas.addEventListener('mousedown', (e) => {
-      if (!viewerConnected) return;
+      if (!viewerConnected || !viewerControlEnabled) return;
       const c = getVCoords(e);
       sendViewerCtrl({ t: 'm', x: c.x, y: c.y });
       sendViewerCtrl({ t: 'md', b: e.button });
     });
     window.addEventListener('mouseup', (e) => {
-      if (!viewerConnected) return;
+      if (!viewerConnected || !viewerControlEnabled) return;
       sendViewerCtrl({ t: 'mu', b: e.button });
     });
     vCanvas.addEventListener('wheel', (e) => {
-      if (!viewerConnected) return;
+      if (!viewerConnected || !viewerControlEnabled) return;
       e.preventDefault();
       sendViewerCtrl({ t: 'w', dy: e.deltaY > 0 ? -120 : 120 });
     }, { passive: false });
     window.addEventListener('keydown', (e) => {
-      if (!viewerConnected || e.key === 'F12') return;
+      if (!viewerConnected || !viewerControlEnabled || e.key === 'F12') return;
       if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'SELECT')) {
         return; // Allow typing in chat input and dialogs!
       }
@@ -2150,7 +2197,7 @@
       sendViewerCtrl({ t: 'kd', k: e.key, c: e.code, kc: e.keyCode });
     });
     window.addEventListener('keyup', (e) => {
-      if (!viewerConnected || e.key === 'F12') return;
+      if (!viewerConnected || !viewerControlEnabled || e.key === 'F12') return;
       if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'SELECT')) {
         return; // Allow typing in chat input and dialogs!
       }

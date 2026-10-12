@@ -9,3 +9,5 @@ func StartTray(hostID string, isAdmin bool, onOpen func(), onAdmin func(), onExi
 }
 
 func (tm *TrayManager) Remove() {}
+
+func ShowBalloonNotification(title, message string) {}
