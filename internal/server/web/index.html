@@ -344,6 +344,15 @@
         <button class="dock-btn" id="btn-toggle-observer" onclick="toggleObserverMode()" title="Alternar entre Controle Ativo e Modo Observador (bloqueia mouse e teclado)">
           <span id="observer-mode-icon">🖱️</span> <span class="dock-label" id="observer-mode-label">Controlando</span>
         </button>
+        <button class="dock-btn" id="btn-toggle-scale" onclick="toggleScreenScale()" title="Alternar Escala (Ajustar vs 100% Original)">
+          🔍 <span class="dock-label" id="scale-mode-label">Ajustar</span>
+        </button>
+        <button class="dock-btn" id="btn-toggle-curtain" onclick="togglePrivacyCurtain()" title="Modo Cortina: Ocultar tela física no host remoto">
+          <span id="curtain-toggle-icon">🕶️</span> <span class="dock-label">Cortina</span>
+        </button>
+        <button class="dock-btn" id="btn-toggle-autolock" onclick="toggleAutoLockOnDisconnect()" title="Bloquear automaticamente o computador remoto ao desconectar">
+          <span id="autolock-toggle-icon">🔓</span> <span class="dock-label" id="autolock-toggle-label">Auto-Lock</span>
+        </button>
         <button class="dock-btn" id="btn-block-input" onclick="toggleBlockInput()" title="Bloquear Mouse e Teclado Físico do Cliente Acessado">
           🚫 <span class="dock-label">Bloquear Entrada</span>
         </button>

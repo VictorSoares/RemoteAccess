@@ -276,6 +276,10 @@ function switchTab(tab) {
 
 let isInputBlocked = false;
 let isObserverMode = false;
+let currentRemoteCursor = 'default';
+let isScale1to1 = false;
+let isCurtainActive = false;
+let isAutoLockActive = false;
 
 function toggleObserverMode() {
   isObserverMode = !isObserverMode;
@@ -286,12 +290,60 @@ function toggleObserverMode() {
     if (btn) btn.classList.remove('active');
     if (icon) icon.innerText = '🖱️';
     if (label) label.innerText = 'Controlando';
-    if (canvas) canvas.style.cursor = 'crosshair';
+    if (canvas) canvas.style.cursor = currentRemoteCursor || 'default';
   } else {
     if (btn) btn.classList.add('active');
     if (icon) icon.innerText = '👁️';
     if (label) label.innerText = 'Observador';
     if (canvas) canvas.style.cursor = 'default';
+  }
+}
+
+function toggleScreenScale() {
+  isScale1to1 = !isScale1to1;
+  const wrapper = document.getElementById('canvas-wrapper');
+  const label = document.getElementById('scale-mode-label');
+  if (isScale1to1) {
+    if (wrapper) wrapper.classList.add('scale-1-1');
+    if (label) label.innerText = '1:1 (Original)';
+    showToast('🔍 Escala 100% (Original) ativada com navegação livre.');
+  } else {
+    if (wrapper) wrapper.classList.remove('scale-1-1');
+    if (label) label.innerText = 'Ajustar';
+    showToast('🔍 Escala ajustada à janela.');
+  }
+}
+
+function togglePrivacyCurtain() {
+  if (!isConnected) return;
+  isCurtainActive = !isCurtainActive;
+  const btn = document.getElementById('btn-toggle-curtain');
+  if (isCurtainActive) {
+    sendControl({ t: 'sys_cmd', cmd: 'curtain_on' });
+    if (btn) btn.classList.add('active');
+    showToast('🕶️ Modo Cortina ATIVADO: Tela física do cliente ocultada.');
+  } else {
+    sendControl({ t: 'sys_cmd', cmd: 'curtain_off' });
+    if (btn) btn.classList.remove('active');
+    showToast('🕶️ Modo Cortina DESATIVADO: Tela física restaurada.');
+  }
+}
+
+function toggleAutoLockOnDisconnect() {
+  if (!isConnected) return;
+  isAutoLockActive = !isAutoLockActive;
+  const btn = document.getElementById('btn-toggle-autolock');
+  const icon = document.getElementById('autolock-toggle-icon');
+  if (isAutoLockActive) {
+    sendControl({ t: 'sys_cmd', cmd: 'autolock_on' });
+    if (btn) btn.classList.add('active');
+    if (icon) icon.innerText = '🔒';
+    showToast('🔒 Auto-Lock ATIVADO: Máquina será bloqueada ao desconectar.');
+  } else {
+    sendControl({ t: 'sys_cmd', cmd: 'autolock_off' });
+    if (btn) btn.classList.remove('active');
+    if (icon) icon.innerText = '🔓';
+    showToast('🔓 Auto-Lock DESATIVADO.');
   }
 }
 
@@ -1312,6 +1364,11 @@ function setupDataChannels(targetId) {
         if (navigator.clipboard && navigator.clipboard.writeText) {
           navigator.clipboard.writeText(msg.text).catch(() => {});
         }
+      } else if (msg.t === 'cursor' && msg.cmd) {
+        currentRemoteCursor = msg.cmd;
+        if (!isObserverMode && canvas) {
+          canvas.style.cursor = currentRemoteCursor;
+        }
       } else if (msg.t === 'close' || (msg.t === 'sys_cmd' && msg.cmd === 'close')) {
         closeViewer();
         showModalAlert('Sessão Encerrada', msg.text || 'A sessão remota foi encerrada pelo computador remoto.', 'ℹ️');
@@ -1641,15 +1698,34 @@ function closeViewer() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   bytesReceived = 0;
   totalSessionBytes = 0;
-  // Reset observer mode
+  // Reset observer mode and cursor
   isObserverMode = false;
+  currentRemoteCursor = 'default';
   const obsBtn = document.getElementById('btn-toggle-observer');
   if (obsBtn) obsBtn.classList.remove('active');
   const obsIcon = document.getElementById('observer-mode-icon');
   if (obsIcon) obsIcon.innerText = '🖱️';
   const obsLabel = document.getElementById('observer-mode-label');
   if (obsLabel) obsLabel.innerText = 'Controlando';
-  if (canvas) canvas.style.cursor = 'crosshair';
+  if (canvas) canvas.style.cursor = 'default';
+
+  // Reset curtain and autolock
+  isCurtainActive = false;
+  const curtBtn = document.getElementById('btn-toggle-curtain');
+  if (curtBtn) curtBtn.classList.remove('active');
+
+  isAutoLockActive = false;
+  const autoLockBtn = document.getElementById('btn-toggle-autolock');
+  if (autoLockBtn) autoLockBtn.classList.remove('active');
+  const autoLockIcon = document.getElementById('autolock-toggle-icon');
+  if (autoLockIcon) autoLockIcon.innerText = '🔓';
+
+  // Reset scale
+  isScale1to1 = false;
+  const wrapper = document.getElementById('canvas-wrapper');
+  if (wrapper) wrapper.classList.remove('scale-1-1');
+  const scaleLabel = document.getElementById('scale-mode-label');
+  if (scaleLabel) scaleLabel.innerText = 'Ajustar';
 
   // Switch back to client view tab
   switchTab('client');

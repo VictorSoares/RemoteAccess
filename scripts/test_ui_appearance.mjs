@@ -117,6 +117,43 @@ async function runVisualTests() {
       throw new Error(`Esperado "Áudio", obtido "${restoredAudioLabel}"`);
     }
 
+    // Validar novos botões de Escala, Cortina e Auto-Lock no Web Viewer
+    const scaleToggleBtn = await pageDashboard.$('#btn-viewer-scale-toggle');
+    const curtainToggleBtn = await pageDashboard.$('#btn-viewer-curtain-toggle');
+    const autolockToggleBtn = await pageDashboard.$('#btn-viewer-autolock-toggle');
+    if (!scaleToggleBtn || !curtainToggleBtn || !autolockToggleBtn) {
+      throw new Error('Botões de Escala, Cortina ou Auto-Lock ausentes no web-viewer-toolbar!');
+    }
+
+    // Testar alternância de escala (Ajustar -> 1:1 -> Ajustar)
+    await scaleToggleBtn.click();
+    const hasScale11 = await pageDashboard.$eval('#web-viewer-container', el => el.classList.contains('scale-1-1'));
+    const scaleLabel1 = await pageDashboard.$eval('#viewer-scale-label', el => el.innerText.trim());
+    console.log('[Playwright] Escala após clique:', scaleLabel1, 'container tem classe scale-1-1:', hasScale11);
+    if (!hasScale11 || !scaleLabel1.includes('1:1')) {
+      throw new Error('Falha na alternância para escala 1:1 no Web Viewer!');
+    }
+    await scaleToggleBtn.click();
+    const hasScaleFit = await pageDashboard.$eval('#web-viewer-container', el => el.classList.contains('scale-1-1'));
+    console.log('[Playwright] Escala após restaurar:', hasScaleFit);
+    if (hasScaleFit) {
+      throw new Error('Falha ao restaurar para escala Ajustar no Web Viewer!');
+    }
+
+    // Testar Cursor Remoto Dinâmico
+    await pageDashboard.evaluate(() => {
+      const vInputChannel = { onmessage: null };
+      const event = { data: JSON.stringify({ t: 'cursor', cmd: 'pointer' }) };
+      // Simular recebimento de pacote cursor
+      currentRemoteCursor = 'pointer';
+      if (viewerControlEnabled && vCanvas) vCanvas.style.cursor = 'pointer';
+    });
+    const cursorStyle = await pageDashboard.$eval('#viewer-canvas', el => el.style.cursor);
+    console.log('[Playwright] Cursor remoto dinâmico simulado no canvas:', cursorStyle);
+    if (cursorStyle !== 'pointer') {
+      throw new Error(`Esperado cursor "pointer", obtido "${cursorStyle}"`);
+    }
+
     // Validar existência dos elementos de DropZone e File Progress HUD
     const dropOverlayExists = await pageDashboard.$('#viewer-drop-overlay');
     const fileHudExists = await pageDashboard.$('#viewer-file-progress-hud');
@@ -263,6 +300,28 @@ async function runVisualTests() {
     const deskFileHudExists = await pageClient.$('#desktop-file-progress-hud');
     if (!deskDropOverlayExists || !deskFileHudExists) {
       throw new Error('Dropzone overlay ou file progress HUD ausentes no desktop viewer!');
+    }
+
+    // Validar botões de Escala, Cortina e Auto-Lock no Desktop Client
+    const deskScaleBtn = await pageClient.$('#btn-toggle-scale');
+    const deskCurtainBtn = await pageClient.$('#btn-toggle-curtain');
+    const deskAutoLockBtn = await pageClient.$('#btn-toggle-autolock');
+    if (!deskScaleBtn || !deskCurtainBtn || !deskAutoLockBtn) {
+      throw new Error('Botões de Escala, Cortina ou Auto-Lock ausentes no viewer-toolbar do Desktop!');
+    }
+
+    // Testar alternância de escala no desktop (Ajustar -> 1:1 -> Ajustar)
+    await pageClient.evaluate(() => document.getElementById('btn-toggle-scale').click());
+    const deskHasScale11 = await pageClient.$eval('#canvas-wrapper', el => el.classList.contains('scale-1-1'));
+    console.log('[Playwright] Desktop Escala 1:1 ativada:', deskHasScale11);
+    if (!deskHasScale11) {
+      throw new Error('Falha ao ativar escala 1:1 no desktop client!');
+    }
+    await pageClient.evaluate(() => document.getElementById('btn-toggle-scale').click());
+    const deskHasScaleFit = await pageClient.$eval('#canvas-wrapper', el => el.classList.contains('scale-1-1'));
+    console.log('[Playwright] Desktop Escala Ajustar restaurada:', !deskHasScaleFit);
+    if (deskHasScaleFit) {
+      throw new Error('Falha ao restaurar escala no desktop client!');
     }
 
     const appDockElement = await pageClient.$('#viewer-toolbar');

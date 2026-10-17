@@ -485,6 +485,20 @@
       cursor: crosshair;
       display: block;
     }
+    #web-viewer-container.scale-1-1 {
+      overflow: auto;
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+    }
+    #web-viewer-container.scale-1-1 #viewer-canvas {
+      width: auto !important;
+      height: auto !important;
+      max-width: none !important;
+      max-height: none !important;
+      object-fit: none !important;
+      flex-shrink: 0;
+    }
     .chat-drawer {
       position: absolute;
       right: 20px;
@@ -787,6 +801,18 @@
       </div>
     </div>
 
+    <!-- Recent Hosts / Address Book Section -->
+    <div class="panel" id="dashboard-recent-section" style="display: none;">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">⭐ Livro de Endereços & Recentes</h2>
+          <span style="font-size: 0.82rem; color: var(--text-muted);">Acesso rápido com 1 clique aos seus computadores favoritos e acessados recentemente.</span>
+        </div>
+      </div>
+      <div id="dashboard-recent-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.75rem; padding: 0.25rem 0;">
+      </div>
+    </div>
+
     <!-- Active Nodes Table -->
     <div class="panel">
       <div class="panel-header">
@@ -916,6 +942,9 @@
 
       <!-- Control Mode Toggle (Controle Ativo vs Modo Observador) -->
       <button id="btn-viewer-control-toggle" class="btn-action" onclick="toggleViewerControl()" title="Alternar entre Controle Ativo e Modo Observador (bloqueia envio de mouse e teclado)" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4);"><span id="viewer-control-icon">🖱️</span> <span id="viewer-control-label">Controlando</span></button>
+      <button id="btn-viewer-scale-toggle" class="btn-action" onclick="toggleViewerScale()" title="Alternar Escala (Ajustar vs 100% Original)" style="background: rgba(255,255,255,0.08); color: #fff;"><span id="viewer-scale-label">🔍 Ajustar</span></button>
+      <button id="btn-viewer-curtain-toggle" class="btn-action" onclick="toggleViewerCurtain()" title="Modo Cortina: Oculta a tela física no host remoto" style="background: rgba(255,255,255,0.08); color: #fff;"><span id="viewer-curtain-icon">🕶️</span> Cortina</button>
+      <button id="btn-viewer-autolock-toggle" class="btn-action" onclick="toggleViewerAutoLock()" title="Bloquear automaticamente o computador remoto ao desconectar" style="background: rgba(255,255,255,0.08); color: #fff;"><span id="viewer-autolock-icon">🔓</span> Auto-Lock</button>
 
       <!-- Quick Actions -->
       <button id="btn-viewer-audio-toggle" class="btn-action" onclick="toggleViewerAudio()" title="Alternar Áudio Remoto" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4);"><span id="viewer-audio-icon">🔊</span> <span id="viewer-audio-label">Áudio</span></button>
@@ -1031,6 +1060,10 @@
     let viewerToastTimer = null;
     let viewerChatOpen = false;
     let viewerControlEnabled = true;
+    let currentRemoteCursor = 'default';
+    let isWebScale1to1 = false;
+    let isWebCurtainActive = false;
+    let isWebAutoLockActive = false;
     const vCanvas = document.getElementById('viewer-canvas');
     const vCtx = vCanvas.getContext('2d');
 
@@ -1047,7 +1080,7 @@
         }
         if (icon) icon.innerText = '🖱️';
         if (label) label.innerText = 'Controlando';
-        if (vCanvas) vCanvas.style.cursor = 'crosshair';
+        if (vCanvas) vCanvas.style.cursor = currentRemoteCursor || 'default';
       } else {
         if (btn) {
           btn.style.background = 'rgba(245, 158, 11, 0.25)';
@@ -1058,6 +1091,151 @@
         if (label) label.innerText = 'Observador';
         if (vCanvas) vCanvas.style.cursor = 'default';
       }
+    }
+
+    function toggleViewerScale() {
+      isWebScale1to1 = !isWebScale1to1;
+      const container = document.getElementById('web-viewer-container');
+      const label = document.getElementById('viewer-scale-label');
+      if (isWebScale1to1) {
+        if (container) container.classList.add('scale-1-1');
+        if (label) label.innerText = '🔍 1:1 (Original)';
+        showViewerToast('🔍 Escala 100% (Original) ativada com navegação livre.');
+      } else {
+        if (container) container.classList.remove('scale-1-1');
+        if (label) label.innerText = '🔍 Ajustar';
+        showViewerToast('🔍 Escala ajustada à janela.');
+      }
+    }
+
+    function toggleViewerCurtain() {
+      isWebCurtainActive = !isWebCurtainActive;
+      const btn = document.getElementById('btn-viewer-curtain-toggle');
+      if (isWebCurtainActive) {
+        sendViewerCtrl({ t: 'sys_cmd', cmd: 'curtain_on' });
+        if (btn) {
+          btn.style.background = 'rgba(168, 85, 247, 0.3)';
+          btn.style.color = '#d8b4fe';
+          btn.style.borderColor = 'rgba(168, 85, 247, 0.5)';
+        }
+        showViewerToast('🕶️ Modo Cortina ATIVADO: Tela física no host ocultada.');
+      } else {
+        sendViewerCtrl({ t: 'sys_cmd', cmd: 'curtain_off' });
+        if (btn) {
+          btn.style.background = 'rgba(255, 255, 255, 0.08)';
+          btn.style.color = '#fff';
+          btn.style.borderColor = 'transparent';
+        }
+        showViewerToast('🕶️ Modo Cortina DESATIVADO: Tela física restaurada.');
+      }
+    }
+
+    function toggleViewerAutoLock() {
+      isWebAutoLockActive = !isWebAutoLockActive;
+      const btn = document.getElementById('btn-viewer-autolock-toggle');
+      const icon = document.getElementById('viewer-autolock-icon');
+      if (isWebAutoLockActive) {
+        sendViewerCtrl({ t: 'sys_cmd', cmd: 'autolock_on' });
+        if (btn) {
+          btn.style.background = 'rgba(239, 68, 68, 0.25)';
+          btn.style.color = '#f87171';
+          btn.style.borderColor = 'rgba(239, 68, 68, 0.45)';
+        }
+        if (icon) icon.innerText = '🔒';
+        showViewerToast('🔒 Auto-Lock ATIVADO: Máquina remota será bloqueada ao sair.');
+      } else {
+        sendViewerCtrl({ t: 'sys_cmd', cmd: 'autolock_off' });
+        if (btn) {
+          btn.style.background = 'rgba(255, 255, 255, 0.08)';
+          btn.style.color = '#fff';
+          btn.style.borderColor = 'transparent';
+        }
+        if (icon) icon.innerText = '🔓';
+        showViewerToast('🔓 Auto-Lock DESATIVADO.');
+      }
+    }
+
+    // Recent Hosts / Address Book Management (localStorage)
+    function loadDashboardRecentHosts() {
+      try {
+        const raw = localStorage.getItem('ra_dashboard_recent_hosts');
+        return raw ? JSON.parse(raw) : [];
+      } catch (e) {
+        return [];
+      }
+    }
+
+    function saveDashboardRecentHost(id, password, alias) {
+      if (!id) return;
+      let list = loadDashboardRecentHosts();
+      const existing = list.find(x => x.id === id);
+      const finalAlias = alias || (existing ? existing.alias : '');
+      const finalPwd = password || (existing ? existing.password : '');
+      list = [{ id: id, password: finalPwd, alias: finalAlias, lastSeen: Date.now() }, ...list.filter(x => x.id !== id)].slice(0, 10);
+      try {
+        localStorage.setItem('ra_dashboard_recent_hosts', JSON.stringify(list));
+      } catch(e) {}
+      renderDashboardRecent();
+    }
+
+    function removeDashboardRecentHost(id) {
+      let list = loadDashboardRecentHosts();
+      list = list.filter(x => x.id !== id);
+      try {
+        localStorage.setItem('ra_dashboard_recent_hosts', JSON.stringify(list));
+      } catch(e) {}
+      renderDashboardRecent();
+    }
+
+    async function editDashboardRecentAlias(id) {
+      let list = loadDashboardRecentHosts();
+      const item = list.find(x => x.id === id);
+      if (!item) return;
+      const name = await showModalPrompt('Apelido Amigável', 'Defina um nome de identificação para este computador (' + formatID(id) + '):', item.alias || '', '✏️');
+      if (name !== null) {
+        item.alias = name.trim();
+        localStorage.setItem('ra_dashboard_recent_hosts', JSON.stringify(list));
+        renderDashboardRecent();
+      }
+    }
+
+    function renderDashboardRecent() {
+      const section = document.getElementById('dashboard-recent-section');
+      const grid = document.getElementById('dashboard-recent-grid');
+      if (!section || !grid) return;
+      const list = loadDashboardRecentHosts();
+      if (list.length === 0) {
+        section.style.display = 'none';
+        return;
+      }
+      section.style.display = 'block';
+      grid.innerHTML = '';
+      list.forEach(item => {
+        const card = document.createElement('div');
+        card.style.cssText = 'background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); border-radius: 10px; padding: 0.75rem 0.9rem; display: flex; flex-direction: column; gap: 0.4rem; transition: all 0.15s ease;';
+        card.onmouseenter = () => { card.style.borderColor = 'rgba(56, 189, 248, 0.4)'; card.style.background = 'rgba(56, 189, 248, 0.05)'; };
+        card.onmouseleave = () => { card.style.borderColor = 'var(--border)'; card.style.background = 'rgba(255, 255, 255, 0.03)'; };
+
+        const displayName = item.alias || 'Computador Remoto';
+        const formattedId = formatID(item.id);
+
+        card.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-weight: 700; font-size: 0.88rem; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${displayName}">💻 ${displayName}</span>
+            <div style="display: flex; gap: 4px;">
+              <button onclick="editDashboardRecentAlias('${item.id}')" title="Alterar Apelido" class="btn-pwd-icon" style="font-size: 0.72rem;">✏️</button>
+              <button onclick="removeDashboardRecentHost('${item.id}')" title="Remover dos Recentes" class="btn-pwd-icon" style="font-size: 0.72rem; color: #f87171;">✕</button>
+            </div>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.2rem;">
+            <span class="id-tag" style="font-size: 0.84rem;">${formattedId}</span>
+            <button onclick="connectDirect('${item.id}', '${item.password || ''}', 1)" class="btn-action btn-connect-direct" style="font-size: 0.75rem; padding: 0.35rem 0.65rem;">
+              🚀 Acessar
+            </button>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
     }
 
     // Dialog helper for Custom In-App Glassmorphic Modals
@@ -1592,6 +1770,7 @@
     // 1-Click Embedded Direct Remote Access (WebRTC P2P)
     async function connectDirect(targetId, targetPwd, monitorsCount) {
       currentSessionTarget = targetId;
+      saveDashboardRecentHost(targetId, targetPwd);
       document.getElementById('web-stat-target').innerText = 'Host: ' + formatID(targetId);
       const modeEl = document.getElementById('web-stat-mode');
       if (modeEl) modeEl.innerText = '● Conectando P2P...';
@@ -1705,6 +1884,11 @@
           } else if (msg.t === 'clip_sync' && msg.text) {
             if (navigator.clipboard && navigator.clipboard.writeText) {
               navigator.clipboard.writeText(msg.text).catch(() => {});
+            }
+          } else if (msg.t === 'cursor' && msg.cmd) {
+            currentRemoteCursor = msg.cmd;
+            if (viewerControlEnabled && vCanvas) {
+              vCanvas.style.cursor = currentRemoteCursor;
             }
           } else if (msg.t === 'close' || (msg.t === 'sys_cmd' && msg.cmd === 'close')) {
             closeWebViewer();
@@ -2032,8 +2216,38 @@
       if (ctrlIcon) ctrlIcon.innerText = '🖱️';
       const ctrlLabel = document.getElementById('viewer-control-label');
       if (ctrlLabel) ctrlLabel.innerText = 'Controlando';
-      if (vCanvas) vCanvas.style.cursor = 'crosshair';
+
+      // Reset curtain
+      isWebCurtainActive = false;
+      const curtBtn = document.getElementById('btn-viewer-curtain-toggle');
+      if (curtBtn) {
+        curtBtn.style.background = 'rgba(255, 255, 255, 0.08)';
+        curtBtn.style.color = '#fff';
+        curtBtn.style.borderColor = 'transparent';
+      }
+
+      // Reset auto-lock
+      isWebAutoLockActive = false;
+      const autoLockBtn = document.getElementById('btn-viewer-autolock-toggle');
+      if (autoLockBtn) {
+        autoLockBtn.style.background = 'rgba(255, 255, 255, 0.08)';
+        autoLockBtn.style.color = '#fff';
+        autoLockBtn.style.borderColor = 'transparent';
+      }
+      const autoLockIcon = document.getElementById('viewer-autolock-icon');
+      if (autoLockIcon) autoLockIcon.innerText = '🔓';
+
+      // Reset scale
+      isWebScale1to1 = false;
+      const webViewerCont = document.getElementById('web-viewer-container');
+      if (webViewerCont) webViewerCont.classList.remove('scale-1-1');
+      const scaleLabel = document.getElementById('viewer-scale-label');
+      if (scaleLabel) scaleLabel.innerText = '🔍 Ajustar';
+
+      currentRemoteCursor = 'default';
+      if (vCanvas) vCanvas.style.cursor = 'default';
       refreshData();
+      renderDashboardRecent();
     }
 
     async function toggleViewerFullscreen() {
@@ -2425,6 +2639,7 @@
       sendViewerCtrl({ t: 'ku', k: e.key, c: e.code, kc: e.keyCode });
     });
 
+    renderDashboardRecent();
     refreshData();
     setInterval(refreshData, 10000);
   </script>

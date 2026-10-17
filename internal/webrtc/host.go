@@ -58,6 +58,7 @@ type HostSession struct {
 	lastInputTime int64
 	lastReceivedClipText string
 	lastSentClipText     string
+	autoLockOnClose      bool
 	fpsUpdate    chan int
 	disconnectTimer *time.Timer
 	OnStatus     func(status string, msg string)
@@ -343,6 +344,22 @@ func (h *HostSession) HandleControlData(data []byte) {
 			_ = input.KeyUp("Meta", "MetaLeft", 91)
 		case "block_input":
 			_ = input.BlockLocalInput(ctrl.Block)
+		case "autolock_on":
+			h.mu.Lock()
+			h.autoLockOnClose = true
+			h.mu.Unlock()
+			log.Printf("[Host] Auto-Lock ao desconectar ATIVADO para cliente (%s)", h.ClientID)
+		case "autolock_off":
+			h.mu.Lock()
+			h.autoLockOnClose = false
+			h.mu.Unlock()
+			log.Printf("[Host] Auto-Lock ao desconectar DESATIVADO para cliente (%s)", h.ClientID)
+		case "curtain_on":
+			_ = input.EnablePrivacyScreen(true)
+			log.Printf("[Host] Modo Cortina (Privacy Screen) ATIVADO pelo cliente (%s)", h.ClientID)
+		case "curtain_off":
+			_ = input.EnablePrivacyScreen(false)
+			log.Printf("[Host] Modo Cortina (Privacy Screen) DESATIVADO pelo cliente (%s)", h.ClientID)
 		case "reboot":
 			_ = input.RebootMachine()
 		case "shutdown":
@@ -350,6 +367,19 @@ func (h *HostSession) HandleControlData(data []byte) {
 		case "suspend", "sleep":
 			input.SuspendMachine()
 		}
+	case protocol.TypeCurtain:
+		if ctrl.Command == "on" || ctrl.Command == "curtain_on" || ctrl.Block {
+			_ = input.EnablePrivacyScreen(true)
+			log.Printf("[Host] Modo Cortina (Privacy Screen) ATIVADO")
+		} else {
+			_ = input.EnablePrivacyScreen(false)
+			log.Printf("[Host] Modo Cortina (Privacy Screen) DESATIVADO")
+		}
+	case protocol.TypeAutoLock:
+		h.mu.Lock()
+		h.autoLockOnClose = (ctrl.Command == "on" || ctrl.Command == "autolock_on" || ctrl.Block)
+		h.mu.Unlock()
+		log.Printf("[Host] Auto-Lock ao desconectar: %v", h.autoLockOnClose)
 	case "close":
 		log.Printf("[Host] Mensagem de encerramento direto recebida do cliente (%s)", h.ClientID)
 		go h.Close()
@@ -498,6 +528,28 @@ func (h *HostSession) StartStreaming() {
 		}
 	}()
 
+	// Start Host dynamic cursor shape monitor (~120ms)
+	go func() {
+		lastCur := ""
+		ticker := time.NewTicker(120 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-h.ctx.Done():
+				return
+			case <-ticker.C:
+				cur := capture.GetActiveCursorType()
+				if cur != lastCur {
+					lastCur = cur
+					h.SendControl(protocol.ControlMessage{
+						Type:    protocol.TypeCursor,
+						Command: cur,
+					})
+				}
+			}
+		}
+	}()
+
 	go func() {
 		defer atomic.StoreInt32(&h.running, 0)
 		ticker := time.NewTicker(time.Second / time.Duration(h.FPS))
@@ -587,8 +639,10 @@ func (h *HostSession) StopStreaming() {
 
 func (h *HostSession) Close() {
 	_ = input.BlockLocalInput(false)
+	_ = input.EnablePrivacyScreen(false) // Always restore physical display when session ends
 	h.cancel()
 	h.mu.Lock()
+	shouldLock := h.autoLockOnClose
 	if h.disconnectTimer != nil {
 		h.disconnectTimer.Stop()
 		h.disconnectTimer = nil
@@ -621,6 +675,11 @@ func (h *HostSession) Close() {
 	onClose := h.OnClose
 	h.OnClose = nil
 	h.mu.Unlock()
+
+	if shouldLock {
+		log.Printf("[Host] Bloqueando estação de trabalho (Auto-Lock on Disconnect)")
+		input.LockWorkstation()
+	}
 
 	if onClose != nil {
 		onClose()

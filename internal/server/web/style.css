@@ -1011,6 +1011,21 @@ select option, .dock-select option {
   display: block;
 }
 
+#canvas-wrapper.scale-1-1 {
+  overflow: auto;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+#canvas-wrapper.scale-1-1 #screen-canvas {
+  max-width: none !important;
+  max-height: none !important;
+  width: auto !important;
+  height: auto !important;
+  object-fit: none !important;
+  flex-shrink: 0;
+}
+
 /* In-Session Chat Drawer */
 .chat-drawer {
   position: absolute;

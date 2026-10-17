@@ -29,7 +29,74 @@ var (
 	procDeleteObject           = gdi32Capture.NewProc("DeleteObject")
 	procDeleteDC               = gdi32Capture.NewProc("DeleteDC")
 	procGetDIBits              = gdi32Capture.NewProc("GetDIBits")
+	procLoadCursorW            = user32Capture.NewProc("LoadCursorW")
 )
+
+const (
+	idcArrow      = 32512
+	idcIBeam      = 32513
+	idcWait       = 32514
+	idcCross      = 32515
+	idcSizeNWSE   = 32642
+	idcSizeNESW   = 32643
+	idcSizeWE     = 32644
+	idcSizeNS     = 32645
+	idcSizeAll    = 32646
+	idcNo         = 32648
+	idcHand       = 32649
+	idcAppStarting= 32650
+)
+
+var (
+	hArrow, _, _       = procLoadCursorW.Call(0, uintptr(idcArrow))
+	hIBeam, _, _       = procLoadCursorW.Call(0, uintptr(idcIBeam))
+	hHand, _, _        = procLoadCursorW.Call(0, uintptr(idcHand))
+	hWait, _, _        = procLoadCursorW.Call(0, uintptr(idcWait))
+	hCross, _, _       = procLoadCursorW.Call(0, uintptr(idcCross))
+	hSizeNWSE, _, _    = procLoadCursorW.Call(0, uintptr(idcSizeNWSE))
+	hSizeNESW, _, _    = procLoadCursorW.Call(0, uintptr(idcSizeNESW))
+	hSizeWE, _, _      = procLoadCursorW.Call(0, uintptr(idcSizeWE))
+	hSizeNS, _, _      = procLoadCursorW.Call(0, uintptr(idcSizeNS))
+	hSizeAll, _, _     = procLoadCursorW.Call(0, uintptr(idcSizeAll))
+	hNo, _, _          = procLoadCursorW.Call(0, uintptr(idcNo))
+	hAppStarting, _, _ = procLoadCursorW.Call(0, uintptr(idcAppStarting))
+)
+
+// GetActiveCursorType inspects the active Windows cursor and returns its CSS cursor name
+func GetActiveCursorType() string {
+	var ci cursorInfo
+	ci.cbSize = uint32(unsafe.Sizeof(ci))
+	ret, _, _ := procGetCursorInfo.Call(uintptr(unsafe.Pointer(&ci)))
+	if ret == 0 || (ci.flags&cursorShowing) == 0 {
+		return "default"
+	}
+	switch ci.hCursor {
+	case hHand:
+		return "pointer"
+	case hIBeam:
+		return "text"
+	case hWait:
+		return "wait"
+	case hAppStarting:
+		return "progress"
+	case hCross:
+		return "crosshair"
+	case hSizeWE:
+		return "ew-resize"
+	case hSizeNS:
+		return "ns-resize"
+	case hSizeNWSE:
+		return "nwse-resize"
+	case hSizeNESW:
+		return "nesw-resize"
+	case hSizeAll:
+		return "move"
+	case hNo:
+		return "not-allowed"
+	default:
+		return "default"
+	}
+}
 
 type point struct {
 	x, y int32

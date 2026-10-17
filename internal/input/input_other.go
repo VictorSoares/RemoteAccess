@@ -22,6 +22,7 @@ func SetClipboardTextAndPaste(text string) error { return nil }
 func SendSAS_CAD() error                       { return nil }
 func OpenTaskManager() error                   { return nil }
 func LockWorkStation() error                   { return nil }
+func LockWorkstation()                         {}
 func SetSuspendState() error                   { return nil }
 func SystemReboot() error                      { return nil }
 func SystemShutdown() error                    { return nil }
@@ -32,3 +33,5 @@ func SwitchWindowAltTab()                      {}
 func BringAppToFront()                         {}
 func InstallHooks()                            {}
 func UninstallHooks()                          {}
+func EnablePrivacyScreen(enable bool) error    { return nil }
+func IsPrivacyScreenEnabled() bool             { return false }

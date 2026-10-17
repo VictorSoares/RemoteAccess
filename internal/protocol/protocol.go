@@ -60,6 +60,9 @@ const (
 	TypeFileStart     = "file_start"
 	TypeFileChunk     = "file_chunk"
 	TypeFileEnd       = "file_end"
+	TypeCursor        = "cursor"
+	TypeCurtain       = "curtain"
+	TypeAutoLock      = "autolock"
 )
 
 // ControlMessage represents mouse, keyboard, monitor, clipboard, chat or system action command

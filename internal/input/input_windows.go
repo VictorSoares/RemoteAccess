@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -19,6 +20,7 @@ var (
 	sasDll                       = syscall.NewLazyDLL("sas.dll")
 	kernel32                     = syscall.NewLazyDLL("kernel32.dll")
 	powrprof                     = syscall.NewLazyDLL("powrprof.dll")
+	gdi32                        = syscall.NewLazyDLL("gdi32.dll")
 	procSetCursorPos             = user32.NewProc("SetCursorPos")
 	procMouseEvent               = user32.NewProc("mouse_event")
 	procKeybdEvent               = user32.NewProc("keybd_event")
@@ -55,6 +57,22 @@ var (
 	procGlobalLock               = kernel32.NewProc("GlobalLock")
 	procGlobalUnlock             = kernel32.NewProc("GlobalUnlock")
 	procRtlMoveMemory            = kernel32.NewProc("RtlMoveMemory")
+	procCreateWindowExW          = user32.NewProc("CreateWindowExW")
+	procDestroyWindow            = user32.NewProc("DestroyWindow")
+	procDefWindowProcW           = user32.NewProc("DefWindowProcW")
+	procRegisterClassExW         = user32.NewProc("RegisterClassExW")
+	procSetWindowDisplayAffinity = user32.NewProc("SetWindowDisplayAffinity")
+	procPostQuitMessage          = user32.NewProc("PostQuitMessage")
+	procPostMessageW             = user32.NewProc("PostMessageW")
+	procTranslateMessage         = user32.NewProc("TranslateMessage")
+	procDispatchMessageW         = user32.NewProc("DispatchMessageW")
+	procBeginPaint               = user32.NewProc("BeginPaint")
+	procEndPaint                 = user32.NewProc("EndPaint")
+	procDrawTextW                = user32.NewProc("DrawTextW")
+	procGetClientRect            = user32.NewProc("GetClientRect")
+	procGetStockObject           = gdi32.NewProc("GetStockObject")
+	procSetTextColor             = gdi32.NewProc("SetTextColor")
+	procSetBkMode                = gdi32.NewProc("SetBkMode")
 
 	activeBoundsMu sync.RWMutex
 	activeBounds   image.Rectangle
@@ -776,4 +794,156 @@ func SetClipboardTextAndPaste(text string) error {
 		procKeybdEvent.Call(0x11, 0, keyeventfKeyup, remoteAccessMagicExtraInfo) // Ctrl up
 	}()
 	return nil
+}
+
+var (
+	privacyMu       sync.Mutex
+	privacyHwnd     uintptr
+	privacyThreadId uint32
+)
+
+// EnablePrivacyScreen toggles the driverless black privacy screen on the physical monitors.
+// Uses SetWindowDisplayAffinity(hwnd, 0x00000011) (WDA_EXCLUDEFROMCAPTURE) so the local physical monitor
+// is blacked out while DXGI desktop duplication continues capturing the underlying desktop cleanly.
+func EnablePrivacyScreen(enable bool) error {
+	privacyMu.Lock()
+	defer privacyMu.Unlock()
+
+	if enable {
+		if privacyHwnd != 0 {
+			return nil
+		}
+		readyCh := make(chan uintptr)
+		go func() {
+			runtime.LockOSThread()
+			defer runtime.UnlockOSThread()
+
+			threadId, _, _ := procGetCurrentThreadId.Call()
+			privacyThreadId = uint32(threadId)
+
+			className, _ := syscall.UTF16PtrFromString("RemoteAccess_Privacy_Curtain")
+			hBlackBrush, _, _ := procGetStockObject.Call(4) // BLACK_BRUSH
+
+			type wndClassExW struct {
+				cbSize        uint32
+				style         uint32
+				lpfnWndProc   uintptr
+				cbClsExtra    int32
+				cbWndExtra    int32
+				hInstance     uintptr
+				hIcon         uintptr
+				hCursor       uintptr
+				hbrBackground uintptr
+				lpszMenuName  *uint16
+				lpszClassName *uint16
+				hIconSm       uintptr
+			}
+
+			wndProcCallback := syscall.NewCallback(func(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
+				switch msg {
+				case 0x000F: // WM_PAINT
+					var ps struct {
+						hdc         uintptr
+						fErase      int32
+						rcPaint     struct{ Left, Top, Right, Bottom int32 }
+						fRestore    int32
+						fIncUpdate  int32
+						rgbReserved [32]byte
+					}
+					hdc, _, _ := procBeginPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
+					if hdc != 0 {
+						procSetTextColor.Call(hdc, 0x00AAAAAA) // Soft light gray
+						procSetBkMode.Call(hdc, 1)            // TRANSPARENT
+						var rc struct{ Left, Top, Right, Bottom int32 }
+						procGetClientRect.Call(hwnd, uintptr(unsafe.Pointer(&rc)))
+						txt, _ := syscall.UTF16FromString("🔒 Sessão de Suporte Remoto em Andamento\nTela física ocultada por privacidade")
+						procDrawTextW.Call(hdc, uintptr(unsafe.Pointer(&txt[0])), uintptr(len(txt)-1), uintptr(unsafe.Pointer(&rc)), 0x01|0x04|0x10)
+						procEndPaint.Call(hwnd, uintptr(unsafe.Pointer(&ps)))
+					}
+					return 0
+				case 0x0002: // WM_DESTROY
+					procPostQuitMessage.Call(0)
+					return 0
+				}
+				ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(msg), wParam, lParam)
+				return ret
+			})
+
+			var wc wndClassExW
+			wc.cbSize = uint32(unsafe.Sizeof(wc))
+			wc.lpfnWndProc = wndProcCallback
+			wc.lpszClassName = className
+			wc.hbrBackground = hBlackBrush
+			procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
+
+			vx, _, _ := procGetSystemMetrics.Call(76) // SM_XVIRTUALSCREEN
+			vy, _, _ := procGetSystemMetrics.Call(77) // SM_YVIRTUALSCREEN
+			vw, _, _ := procGetSystemMetrics.Call(78) // SM_CXVIRTUALSCREEN
+			vh, _, _ := procGetSystemMetrics.Call(79) // SM_CYVIRTUALSCREEN
+
+			title, _ := syscall.UTF16PtrFromString("RemoteAccess Privacy Screen")
+			hwnd, _, _ := procCreateWindowExW.Call(
+				0x00000008|0x00000080, // WS_EX_TOPMOST | WS_EX_TOOLWINDOW
+				uintptr(unsafe.Pointer(className)),
+				uintptr(unsafe.Pointer(title)),
+				0x80000000|0x10000000, // WS_POPUP | WS_VISIBLE
+				vx, vy, vw, vh,
+				0, 0, 0, 0,
+			)
+
+			if hwnd == 0 {
+				readyCh <- 0
+				return
+			}
+
+			// Apply WDA_EXCLUDEFROMCAPTURE (0x00000011) so DWM renders window to physical display,
+			// but DXGI desktop duplication excludes it and captures the actual desktop behind it!
+			procSetWindowDisplayAffinity.Call(hwnd, 0x00000011)
+
+			readyCh <- hwnd
+
+			var msg struct {
+				hwnd    uintptr
+				message uint32
+				wParam  uintptr
+				lParam  uintptr
+				time    uint32
+				pt      struct{ x, y int32 }
+			}
+
+			for {
+				ret, _, _ := procGetMessageW.Call(uintptr(unsafe.Pointer(&msg)), 0, 0, 0)
+				if int32(ret) <= 0 {
+					break
+				}
+				procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
+				procDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
+			}
+		}()
+
+		hwnd := <-readyCh
+		if hwnd == 0 {
+			return fmt.Errorf("failed to create privacy screen window")
+		}
+		privacyHwnd = hwnd
+		return nil
+	}
+
+	if privacyHwnd == 0 {
+		return nil
+	}
+	procPostMessageW.Call(privacyHwnd, 0x0010, 0, 0) // WM_CLOSE
+	if privacyThreadId != 0 {
+		procPostThreadMessageW.Call(uintptr(privacyThreadId), 0x0012, 0, 0) // WM_QUIT
+	}
+	privacyHwnd = 0
+	privacyThreadId = 0
+	return nil
+}
+
+// IsPrivacyScreenEnabled returns whether the physical privacy curtain is currently active
+func IsPrivacyScreenEnabled() bool {
+	privacyMu.Lock()
+	defer privacyMu.Unlock()
+	return privacyHwnd != 0
 }
