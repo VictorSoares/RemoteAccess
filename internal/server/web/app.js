@@ -156,23 +156,56 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Auto-hide top toolbar in viewer mode with top-edge detection
+  // Auto-hide top toolbar in viewer mode: ONLY activates when mouse pauses (dwells) in top-center zone
+  let desktopDockDwellTimer = null;
   window.addEventListener('mousemove', (e) => {
     if (!isConnected) return;
     const dock = document.getElementById('viewer-toolbar');
     if (!dock) return;
-    if (e.clientY <= 55) {
-      dock.classList.add('dock-visible');
-    } else if (e.clientY > 85 && !dock.matches(':hover') && !dock.matches(':focus-within')) {
-      dock.classList.remove('dock-visible');
+
+    const screenWidth = window.innerWidth || document.documentElement.clientWidth || 1280;
+    const centerX = screenWidth / 2;
+    // Strict central trigger zone: 280px wide (±140px from center) and top edge (<= 14px)
+    const inCentralZone = Math.abs(e.clientX - centerX) <= 140 && e.clientY <= 14;
+
+    if (inCentralZone) {
+      if (!desktopDockDwellTimer && !dock.classList.contains('dock-visible')) {
+        desktopDockDwellTimer = setTimeout(() => {
+          dock.classList.add('dock-visible');
+          desktopDockDwellTimer = null;
+        }, 280);
+      }
+    } else {
+      if (desktopDockDwellTimer) {
+        clearTimeout(desktopDockDwellTimer);
+        desktopDockDwellTimer = null;
+      }
+      if (e.clientY > 85 && !dock.matches(':hover') && !dock.matches(':focus-within')) {
+        dock.classList.remove('dock-visible');
+      }
     }
   });
 
   const tabHandle = document.getElementById('viewer-tab-handle');
   if (tabHandle) {
     tabHandle.addEventListener('mouseenter', () => {
+      if (!desktopDockDwellTimer) {
+        desktopDockDwellTimer = setTimeout(() => {
+          const dock = document.getElementById('viewer-toolbar');
+          if (dock) dock.classList.add('dock-visible');
+          desktopDockDwellTimer = null;
+        }, 200);
+      }
+    });
+    tabHandle.addEventListener('mouseleave', () => {
+      if (desktopDockDwellTimer) {
+        clearTimeout(desktopDockDwellTimer);
+        desktopDockDwellTimer = null;
+      }
+    });
+    tabHandle.addEventListener('click', () => {
       const dock = document.getElementById('viewer-toolbar');
-      if (dock) dock.classList.add('dock-visible');
+      if (dock) dock.classList.toggle('dock-visible');
     });
   }
 
@@ -1438,16 +1471,22 @@ function startSessionStatsLoop() {
     const timerEl = document.getElementById('stat-session-time');
     if (timerEl) timerEl.innerText = `⏱️ ${timeFormatted}`;
 
-    // 2. Check user inactivity (2 minutes limit = 120s)
-    const idleSec = Math.floor((Date.now() - lastUserActivity) / 1000);
+    // 2. Check user inactivity (applied only if NOT direct P2P)
+    const isDirectP2P = (inputChannel && inputChannel.readyState === 'open');
     const banner = document.getElementById('inactivity-warning-banner');
+    if (isDirectP2P) {
+      if (banner && banner.style.display !== 'none') banner.style.display = 'none';
+      return;
+    }
+
+    const idleSec = Math.floor((Date.now() - lastUserActivity) / 1000);
     const countdownEl = document.getElementById('inactivity-countdown-text');
 
     if (idleSec >= 90 && idleSec < 120) {
       const remaining = 120 - idleSec;
       if (banner) banner.style.display = 'flex';
       if (countdownEl) {
-        countdownEl.innerText = `Desconectando em ${remaining}s para economizar banda (mova o mouse para continuar)`;
+        countdownEl.innerText = `Desconectando sessão em relay em ${remaining}s para economizar banda (mova o mouse para continuar)`;
       }
     } else if (idleSec < 90) {
       if (banner && banner.style.display !== 'none') {
@@ -1456,7 +1495,7 @@ function startSessionStatsLoop() {
     } else if (idleSec >= 120) {
       if (banner) banner.style.display = 'none';
       closeViewer();
-      showModalAlert('Sessão Encerrada por Inatividade', 'A sessão remota foi desconectada automaticamente após 2 minutos de inatividade para economizar banda e recursos.', '⏱️');
+      showModalAlert('Sessão Encerrada por Inatividade', 'A sessão remota em relay foi desconectada automaticamente após 2 minutos de inatividade para economizar banda do servidor.', '⏱️');
     }
   }, 1000);
 }
@@ -1689,6 +1728,28 @@ function setupKeyboardEvents() {
   window.addEventListener('keydown', (e) => {
     if (!isConnected || isObserverMode || e.key === 'F12') return;
     if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+
+    // Intercept Alt+F4 to prevent closing operator's desktop window
+    if (e.altKey && (e.key === 'F4' || e.keyCode === 115)) {
+      e.preventDefault();
+      sendSystemAction('alt_f4');
+      return;
+    }
+
+    // Intercept Alt+Tab if captured
+    if (e.altKey && (e.key === 'Tab' || e.keyCode === 9)) {
+      e.preventDefault();
+      sendSystemAction('alt_tab');
+      return;
+    }
+
+    // Intercept Win+D / Meta+D
+    if ((e.metaKey || e.key === 'Meta') && (e.key === 'd' || e.key === 'D' || e.keyCode === 68)) {
+      e.preventDefault();
+      sendSystemAction('desktop');
+      return;
+    }
+
     e.preventDefault();
     sendControl({ t: 'kd', k: e.key, c: e.code, kc: e.keyCode });
   });

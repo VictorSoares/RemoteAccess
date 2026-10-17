@@ -361,6 +361,25 @@ func ShowDesktop() {
 	}
 }
 
+// CloseActiveWindow synthesizes Alt+F4 to gracefully close the active foreground window
+func CloseActiveWindow() {
+	procKeybdEvent.Call(0x12, 0, 0, remoteAccessMagicExtraInfo) // Alt down
+	procKeybdEvent.Call(0x73, 0, 0, remoteAccessMagicExtraInfo) // F4 down
+	time.Sleep(40 * time.Millisecond)
+	procKeybdEvent.Call(0x73, 0, keyeventfKeyup, remoteAccessMagicExtraInfo) // F4 up
+	procKeybdEvent.Call(0x12, 0, keyeventfKeyup, remoteAccessMagicExtraInfo) // Alt up
+}
+
+// SwitchWindowAltTab synthesizes Alt+Tab to cycle windows cleanly
+func SwitchWindowAltTab() {
+	procKeybdEvent.Call(0x12, 0, 0, remoteAccessMagicExtraInfo) // Alt down
+	procKeybdEvent.Call(0x09, 0, 0, remoteAccessMagicExtraInfo) // Tab down
+	time.Sleep(50 * time.Millisecond)
+	procKeybdEvent.Call(0x09, 0, keyeventfKeyup, remoteAccessMagicExtraInfo) // Tab up
+	time.Sleep(30 * time.Millisecond)
+	procKeybdEvent.Call(0x12, 0, keyeventfKeyup, remoteAccessMagicExtraInfo) // Alt up
+}
+
 // MoveMouseAbsolute sets the cursor to an absolute ratio [0.0, 1.0] across the active screen monitor
 func MoveMouseAbsolute(ratioX, ratioY float64) error {
 	if ratioX < 0 {

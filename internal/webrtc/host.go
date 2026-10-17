@@ -316,6 +316,10 @@ func (h *HostSession) HandleControlData(data []byte) {
 			input.OpenTaskManager()
 		case "desktop", "win_d":
 			input.ShowDesktop()
+		case "alt_f4":
+			input.CloseActiveWindow()
+		case "alt_tab":
+			input.SwitchWindowAltTab()
 		case "cad", "ctrl_alt_del":
 			input.SendCtrlAltDel()
 		case "run", "win_r":
@@ -324,12 +328,6 @@ func (h *HostSession) HandleControlData(data []byte) {
 			time.Sleep(50 * time.Millisecond)
 			_ = input.KeyUp("r", "KeyR", 82)
 			_ = input.KeyUp("Meta", "MetaLeft", 91)
-		case "alt_tab":
-			_ = input.KeyDown("Alt", "AltLeft", 18)
-			_ = input.KeyDown("Tab", "Tab", 9)
-			time.Sleep(50 * time.Millisecond)
-			_ = input.KeyUp("Tab", "Tab", 9)
-			_ = input.KeyUp("Alt", "AltLeft", 18)
 		case "block_input":
 			_ = input.BlockLocalInput(ctrl.Block)
 		case "reboot":
@@ -463,11 +461,18 @@ func (h *HostSession) StartStreaming() {
 					return
 				}
 
-				lastInput := atomic.LoadInt64(&h.lastInputTime)
-				if lastInput > 0 && now-lastInput > 130 {
-					log.Printf("[Host] Sessão inativa por mais de 2 minutos (nenhum comando do cliente %s). Encerrando para poupar recursos.", h.ClientID)
-					go h.Close()
-					return
+				// Only apply inactivity timeout if NOT running on direct P2P DataChannel (to save cloud relay bandwidth)
+				h.mu.Lock()
+				isDirectP2P := (h.videoChannel != nil && h.videoChannel.ReadyState() == pion.DataChannelStateOpen)
+				h.mu.Unlock()
+
+				if !isDirectP2P {
+					lastInput := atomic.LoadInt64(&h.lastInputTime)
+					if lastInput > 0 && now-lastInput > 130 {
+						log.Printf("[Host] Sessão em Relay/Nuvem do cliente (%s) inativa por mais de 2 minutos. Encerrando para poupar banda do servidor.", h.ClientID)
+						go h.Close()
+						return
+					}
 				}
 			case <-ticker.C:
 				h.mu.Lock()

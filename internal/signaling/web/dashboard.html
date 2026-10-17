@@ -397,20 +397,20 @@
       top: 0;
       left: 50%;
       transform: translateX(-50%);
-      width: 130px;
-      height: 6px;
-      background: rgba(56, 189, 248, 0.6);
-      border-bottom-left-radius: 8px;
-      border-bottom-right-radius: 8px;
-      box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+      width: 140px;
+      height: 4px;
+      background: rgba(56, 189, 248, 0.45);
+      border-bottom-left-radius: 6px;
+      border-bottom-right-radius: 6px;
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.3);
       z-index: 100002;
       cursor: pointer;
       transition: all 0.2s ease;
     }
     .viewer-tab-handle:hover {
-      height: 9px;
+      height: 7px;
       background: #38bdf8;
-      box-shadow: 0 0 16px rgba(56, 189, 248, 0.8);
+      box-shadow: 0 0 14px rgba(56, 189, 248, 0.7);
     }
     .web-viewer-dock {
       position: fixed;
@@ -918,9 +918,11 @@
       <button id="btn-viewer-control-toggle" class="btn-action" onclick="toggleViewerControl()" title="Alternar entre Controle Ativo e Modo Observador (bloqueia envio de mouse e teclado)" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4);"><span id="viewer-control-icon">🖱️</span> <span id="viewer-control-label">Controlando</span></button>
 
       <!-- Quick Actions -->
+      <button class="btn-action" onclick="sendViewerSys('desktop')" title="Mostrar Área de Trabalho (Win+D)" style="background: rgba(255,255,255,0.08); color: #fff;">❖ Win+D</button>
+      <button class="btn-action" onclick="sendViewerSys('alt_tab')" title="Alternar Janela no Computador Remoto (Alt+Tab)" style="background: rgba(255,255,255,0.08); color: #fff;">⎇ Alt+Tab</button>
+      <button class="btn-action" onclick="sendViewerSys('alt_f4')" title="Fechar Janela Ativa no Computador Remoto (Alt+F4)" style="background: rgba(255,255,255,0.08); color: #fff;">⎋ Alt+F4</button>
       <button class="btn-action" onclick="sendViewerSys('cad')" title="Enviar Ctrl+Alt+Del" style="background: rgba(255,255,255,0.08); color: #fff;">⌨️ CAD</button>
       <button class="btn-action" onclick="sendViewerSys('taskmgr')" title="Abrir Gerenciador de Tarefas" style="background: rgba(255,255,255,0.08); color: #fff;">⚡ Tarefas</button>
-      <button class="btn-action" onclick="sendViewerSys('desktop')" title="Mostrar Área de Trabalho" style="background: rgba(255,255,255,0.08); color: #fff;">❖ Win+D</button>
       <button class="btn-action" onclick="openWebClipboardModal()" title="Colar Texto Remoto" style="background: rgba(255,255,255,0.08); color: #fff;">📋 Colar</button>
       <button class="btn-action" onclick="triggerWebFileUpload()" title="Enviar/Colar Arquivo" style="background: rgba(255,255,255,0.08); color: #fff;">📁 Arquivo</button>
       <input type="file" id="web-viewer-file-input" style="display: none;" multiple onchange="handleWebFileSelect(this.files)">
@@ -1416,17 +1418,26 @@
       if (vInactivityWatchdog) clearInterval(vInactivityWatchdog);
       vInactivityWatchdog = setInterval(() => {
         if (!viewerConnected) return;
-        const idleSec = Math.floor((Date.now() - vLastInputTime) / 1000);
+
+        // When connected via direct WebRTC DataChannel (P2P), 0 cloud server bandwidth is used.
+        // Therefore, NO inactivity timeout is applied! Session remains alive uninterrupted.
+        const isDirectP2P = (vInputChannel && vInputChannel.readyState === 'open');
         const banner = document.getElementById('web-inactivity-banner');
+        if (isDirectP2P) {
+          if (banner && banner.style.display !== 'none') banner.style.display = 'none';
+          return;
+        }
+
+        const idleSec = Math.floor((Date.now() - vLastInputTime) / 1000);
         const countdown = document.getElementById('web-inactivity-countdown');
 
         if (idleSec >= 120) {
           closeWebViewer();
-          showModalAlert('Sessão Encerrada', 'A sessão remota foi desconectada automaticamente por atingir o limite de 2 minutos de inatividade.', '⏱️');
+          showModalAlert('Sessão Encerrada', 'A sessão remota em relay foi desconectada automaticamente por atingir o limite de 2 minutos de inatividade para poupar recursos do servidor.', '⏱️');
         } else if (idleSec >= 90) {
           if (banner) banner.style.display = 'flex';
           const remaining = 120 - idleSec;
-          if (countdown) countdown.innerText = `A sessão será encerrada em ${remaining}s por inatividade. Mova o mouse para continuar.`;
+          if (countdown) countdown.innerText = `A sessão em relay será encerrada em ${remaining}s por inatividade. Mova o mouse para continuar.`;
         } else {
           if (banner) banner.style.display = 'none';
         }
@@ -1937,11 +1948,19 @@
       refreshData();
     }
 
-    function toggleViewerFullscreen() {
+    async function toggleViewerFullscreen() {
       const container = document.getElementById('web-viewer-container');
       if (!document.fullscreenElement) {
-        container.requestFullscreen().catch(() => {});
+        try {
+          await container.requestFullscreen();
+          if (navigator.keyboard && navigator.keyboard.lock) {
+            await navigator.keyboard.lock(['AltLeft', 'AltRight', 'Tab', 'Escape', 'MetaLeft', 'MetaRight', 'KeyD', 'F4']);
+          }
+        } catch(e) {}
       } else {
+        if (navigator.keyboard && navigator.keyboard.unlock) {
+          try { navigator.keyboard.unlock(); } catch(e) {}
+        }
         document.exitFullscreen().catch(() => {});
       }
     }
@@ -2073,15 +2092,36 @@
       }
     }
 
-    // Auto-hide toolbar mouse detection in browser web viewer
+    // Auto-hide toolbar mouse detection: ONLY activates when mouse pauses (dwells) in top-center zone
+    let webDockDwellTimer = null;
     window.addEventListener('mousemove', (e) => {
       if (!viewerConnected) return;
       const dock = document.getElementById('web-viewer-toolbar');
       if (!dock) return;
-      if (e.clientY <= 55) {
-        dock.classList.add('dock-visible');
-      } else if (e.clientY > 85 && !dock.matches(':hover') && !dock.matches(':focus-within')) {
-        dock.classList.remove('dock-visible');
+
+      const screenWidth = window.innerWidth || document.documentElement.clientWidth || 1280;
+      const centerX = screenWidth / 2;
+      // Strict central trigger zone: 280px wide (±140px from center) and top edge (<= 14px)
+      const inCentralZone = Math.abs(e.clientX - centerX) <= 140 && e.clientY <= 14;
+
+      if (inCentralZone) {
+        // User must pause/dwell for 280ms in the top center before dock slides down
+        if (!webDockDwellTimer && !dock.classList.contains('dock-visible')) {
+          webDockDwellTimer = setTimeout(() => {
+            dock.classList.add('dock-visible');
+            webDockDwellTimer = null;
+          }, 280);
+        }
+      } else {
+        // Clear dwell timer if mouse leaves central top zone before 280ms
+        if (webDockDwellTimer) {
+          clearTimeout(webDockDwellTimer);
+          webDockDwellTimer = null;
+        }
+        // Retract dock only when cursor is well below toolbar and not hovering it
+        if (e.clientY > 85 && !dock.matches(':hover') && !dock.matches(':focus-within')) {
+          dock.classList.remove('dock-visible');
+        }
       }
     });
 
@@ -2089,8 +2129,23 @@
       const vHandle = document.getElementById('web-viewer-tab-handle');
       if (vHandle) {
         vHandle.addEventListener('mouseenter', () => {
+          if (!webDockDwellTimer) {
+            webDockDwellTimer = setTimeout(() => {
+              const dock = document.getElementById('web-viewer-toolbar');
+              if (dock) dock.classList.add('dock-visible');
+              webDockDwellTimer = null;
+            }, 200);
+          }
+        });
+        vHandle.addEventListener('mouseleave', () => {
+          if (webDockDwellTimer) {
+            clearTimeout(webDockDwellTimer);
+            webDockDwellTimer = null;
+          }
+        });
+        vHandle.addEventListener('click', () => {
           const dock = document.getElementById('web-viewer-toolbar');
-          if (dock) dock.classList.add('dock-visible');
+          if (dock) dock.classList.toggle('dock-visible');
         });
       }
 
@@ -2193,6 +2248,28 @@
       if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'SELECT')) {
         return; // Allow typing in chat input and dialogs!
       }
+
+      // Intercept Alt+F4 to prevent closing operator's browser window
+      if (e.altKey && (e.key === 'F4' || e.keyCode === 115)) {
+        e.preventDefault();
+        sendViewerSys('alt_f4');
+        return;
+      }
+
+      // Intercept Alt+Tab if captured by browser
+      if (e.altKey && (e.key === 'Tab' || e.keyCode === 9)) {
+        e.preventDefault();
+        sendViewerSys('alt_tab');
+        return;
+      }
+
+      // Intercept Win+D / Meta+D if captured by browser
+      if ((e.metaKey || e.key === 'Meta') && (e.key === 'd' || e.key === 'D' || e.keyCode === 68)) {
+        e.preventDefault();
+        sendViewerSys('desktop');
+        return;
+      }
+
       e.preventDefault();
       sendViewerCtrl({ t: 'kd', k: e.key, c: e.code, kc: e.keyCode });
     });

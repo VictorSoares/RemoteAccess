@@ -90,6 +90,14 @@ async function runVisualTests() {
       throw new Error(`Esperado "Controlando", obtido "${restoredLabel}"`);
     }
 
+    // Validar botões de atalhos rápidos de sistema no Web Viewer (Win+D, Alt+Tab, Alt+F4)
+    const hasWinD = await pageDashboard.$eval('#web-viewer-toolbar', el => el.innerHTML.includes('❖ Win+D'));
+    const hasAltTab = await pageDashboard.$eval('#web-viewer-toolbar', el => el.innerHTML.includes('⎇ Alt+Tab'));
+    const hasAltF4 = await pageDashboard.$eval('#web-viewer-toolbar', el => el.innerHTML.includes('⎋ Alt+F4'));
+    console.log('[Playwright] Web Viewer botões de atalhos rápidos:', { hasWinD, hasAltTab, hasAltF4 });
+    if (!hasWinD || !hasAltTab || !hasAltF4) {
+      throw new Error('Atalhos de sistema (Win+D, Alt+Tab, Alt+F4) ausentes no web-viewer-toolbar!');
+    }
     // Validar cores dinâmicas de latência (RTT)
     // Teste 1: Baixa latência (32ms - Verde #4ade80)
     await pageDashboard.evaluate(() => {
