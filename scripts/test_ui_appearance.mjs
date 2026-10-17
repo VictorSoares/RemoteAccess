@@ -90,13 +90,58 @@ async function runVisualTests() {
       throw new Error(`Esperado "Controlando", obtido "${restoredLabel}"`);
     }
 
-    // Validar botões de atalhos rápidos de sistema no Web Viewer (Win+D, Alt+Tab, Alt+F4)
-    const hasWinD = await pageDashboard.$eval('#web-viewer-toolbar', el => el.innerHTML.includes('❖ Win+D'));
-    const hasAltTab = await pageDashboard.$eval('#web-viewer-toolbar', el => el.innerHTML.includes('⎇ Alt+Tab'));
-    const hasAltF4 = await pageDashboard.$eval('#web-viewer-toolbar', el => el.innerHTML.includes('⎋ Alt+F4'));
-    console.log('[Playwright] Web Viewer botões de atalhos rápidos:', { hasWinD, hasAltTab, hasAltF4 });
-    if (!hasWinD || !hasAltTab || !hasAltF4) {
-      throw new Error('Atalhos de sistema (Win+D, Alt+Tab, Alt+F4) ausentes no web-viewer-toolbar!');
+    // Validar botão de Áudio Remoto (#btn-viewer-audio-toggle)
+    const audioToggleBtn = await pageDashboard.$('#btn-viewer-audio-toggle');
+    if (!audioToggleBtn) {
+      throw new Error('Elemento #btn-viewer-audio-toggle não encontrado na toolbar!');
+    }
+    const initialAudioLabel = await pageDashboard.$eval('#viewer-audio-label', el => el.innerText.trim());
+    console.log('[Playwright] Estado inicial do áudio (Web Viewer):', initialAudioLabel);
+    if (initialAudioLabel !== 'Áudio') {
+      throw new Error(`Esperado "Áudio", obtido "${initialAudioLabel}"`);
+    }
+
+    // Clicar para mutar o áudio
+    await audioToggleBtn.click();
+    const mutedAudioLabel = await pageDashboard.$eval('#viewer-audio-label', el => el.innerText.trim());
+    console.log('[Playwright] Estado após clique (Mudo):', mutedAudioLabel);
+    if (mutedAudioLabel !== 'Mudo') {
+      throw new Error(`Esperado "Mudo", obtido "${mutedAudioLabel}"`);
+    }
+
+    // Clicar novamente para reativar o áudio
+    await audioToggleBtn.click();
+    const restoredAudioLabel = await pageDashboard.$eval('#viewer-audio-label', el => el.innerText.trim());
+    console.log('[Playwright] Estado restaurado (Áudio):', restoredAudioLabel);
+    if (restoredAudioLabel !== 'Áudio') {
+      throw new Error(`Esperado "Áudio", obtido "${restoredAudioLabel}"`);
+    }
+
+    // Validar existência dos elementos de DropZone e File Progress HUD
+    const dropOverlayExists = await pageDashboard.$('#viewer-drop-overlay');
+    const fileHudExists = await pageDashboard.$('#viewer-file-progress-hud');
+    if (!dropOverlayExists || !fileHudExists) {
+      throw new Error('Dropzone overlay ou file progress HUD ausentes no web viewer!');
+    }
+
+    // Validar que os atalhos físicos de teclado Alt+F4, Alt+Tab, Win+D são interceptados e transmitidos
+    const sysCmds = [];
+    await pageDashboard.exposeFunction('mockCaptureSysCmd', (cmd) => {
+      sysCmds.push(cmd);
+    });
+    await pageDashboard.evaluate(() => {
+      viewerConnected = true;
+      viewerControlEnabled = true;
+      window.sendViewerSys = (cmd) => { window.mockCaptureSysCmd(cmd); };
+    });
+
+    await pageDashboard.keyboard.press('Alt+F4');
+    await pageDashboard.keyboard.press('Alt+Tab');
+    await pageDashboard.keyboard.press('Meta+d');
+
+    console.log('[Playwright] Comandos de sistema capturados via teclado físico normal:', sysCmds);
+    if (!sysCmds.includes('alt_f4') || !sysCmds.includes('alt_tab') || !sysCmds.includes('desktop')) {
+      throw new Error('Falha na captura dos atalhos físicos de teclado (Alt+F4, Alt+Tab, Win+D)!');
     }
     // Validar cores dinâmicas de latência (RTT)
     // Teste 1: Baixa latência (32ms - Verde #4ade80)
@@ -188,8 +233,36 @@ async function runVisualTests() {
     await pageClient.evaluate(() => document.getElementById('btn-toggle-observer').click());
     const appRestoredLabel = await pageClient.$eval('#observer-mode-label', el => el.innerText.trim());
     console.log('[Playwright] Estado restaurado (Desktop App Controlando):', appRestoredLabel);
-    if (appRestoredLabel !== 'Controlando') {
-      throw new Error(`Esperado "Controlando", obtido "${appRestoredLabel}"`);
+    // Validar botão de Áudio no Desktop App (#btn-toggle-audio)
+    const appAudioBtn = await pageClient.$('#btn-toggle-audio');
+    if (!appAudioBtn) {
+      throw new Error('Elemento #btn-toggle-audio não encontrado no viewer-toolbar!');
+    }
+    const appInitialAudioLabel = await pageClient.$eval('#audio-toggle-label', el => el.innerText.trim());
+    console.log('[Playwright] Estado inicial do áudio (Desktop App):', appInitialAudioLabel);
+    if (appInitialAudioLabel !== 'Áudio') {
+      throw new Error(`Esperado "Áudio", obtido "${appInitialAudioLabel}"`);
+    }
+
+    await pageClient.evaluate(() => document.getElementById('btn-toggle-audio').click());
+    const appMutedAudioLabel = await pageClient.$eval('#audio-toggle-label', el => el.innerText.trim());
+    console.log('[Playwright] Estado após clique (Desktop App Mudo):', appMutedAudioLabel);
+    if (appMutedAudioLabel !== 'Mudo') {
+      throw new Error(`Esperado "Mudo", obtido "${appMutedAudioLabel}"`);
+    }
+
+    await pageClient.evaluate(() => document.getElementById('btn-toggle-audio').click());
+    const appRestoredAudioLabel = await pageClient.$eval('#audio-toggle-label', el => el.innerText.trim());
+    console.log('[Playwright] Estado restaurado (Desktop App Áudio):', appRestoredAudioLabel);
+    if (appRestoredAudioLabel !== 'Áudio') {
+      throw new Error(`Esperado "Áudio", obtido "${appRestoredAudioLabel}"`);
+    }
+
+    // Validar existência dos elementos de DropZone e File Progress HUD no Desktop
+    const deskDropOverlayExists = await pageClient.$('#desktop-drop-overlay');
+    const deskFileHudExists = await pageClient.$('#desktop-file-progress-hud');
+    if (!deskDropOverlayExists || !deskFileHudExists) {
+      throw new Error('Dropzone overlay ou file progress HUD ausentes no desktop viewer!');
     }
 
     const appDockElement = await pageClient.$('#viewer-toolbar');

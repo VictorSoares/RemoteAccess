@@ -46,6 +46,7 @@ const (
 	TypeKeyDown       = "kd"
 	TypeKeyUp         = "ku"
 	TypeClipboard     = "clip"
+	TypeClipSync      = "clip_sync"
 	TypePing          = "ping"
 	TypePong          = "pong"
 	TypeConfig        = "cfg"

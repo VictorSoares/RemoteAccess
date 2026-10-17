@@ -13,9 +13,11 @@ import (
 	"time"
 
 	pion "github.com/pion/webrtc/v3"
+	"remoteaccess/internal/audio"
 	"remoteaccess/internal/capture"
 	"remoteaccess/internal/input"
 	"remoteaccess/internal/protocol"
+	"remoteaccess/internal/tray"
 )
 
 var defaultICEServers = []pion.ICEServer{
@@ -40,6 +42,7 @@ type HostSession struct {
 	peerConn     *pion.PeerConnection
 	inputChannel *pion.DataChannel
 	videoChannel *pion.DataChannel
+	audioChannel *pion.DataChannel
 	capturer     *capture.DXGICapturer
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -53,6 +56,8 @@ type HostSession struct {
 	activeFiles  map[string]*os.File
 	lastActivity int64
 	lastInputTime int64
+	lastReceivedClipText string
+	lastSentClipText     string
 	fpsUpdate    chan int
 	disconnectTimer *time.Timer
 	OnStatus     func(status string, msg string)
@@ -216,6 +221,14 @@ func (h *HostSession) HandleRemoteOffer(targetID string, sdpStr string) error {
 				log.Println("[Host] Video DataChannel fechado pelo cliente.")
 				go h.Close()
 			})
+		} else if dc.Label() == "audio" {
+			h.mu.Lock()
+			h.audioChannel = dc
+			h.mu.Unlock()
+			log.Println("[Host] Audio DataChannel conectado.")
+			dc.OnClose(func() {
+				log.Println("[Host] Audio DataChannel fechado.")
+			})
 		}
 	})
 
@@ -342,6 +355,9 @@ func (h *HostSession) HandleControlData(data []byte) {
 		go h.Close()
 	case protocol.TypeClipboard:
 		if ctrl.Text != "" {
+			h.mu.Lock()
+			h.lastReceivedClipText = ctrl.Text
+			h.mu.Unlock()
 			_ = input.SetClipboardTextAndPaste(ctrl.Text)
 		}
 	case protocol.TypeFileStart:
@@ -387,6 +403,7 @@ func (h *HostSession) HandleControlData(data []byte) {
 			h.mu.Unlock()
 			if exists && f != nil {
 				_ = f.Close()
+				tray.ShowBalloonNotification("RemoteAccess — Arquivo Recebido", fmt.Sprintf("📁 %s\nSalvo em Downloads\\RemoteAccess_Transfers", cleanName))
 				if h.OnChat != nil {
 					h.OnChat("Sistema", fmt.Sprintf("📁 Arquivo recebido: %s (Salvo em Downloads\\RemoteAccess_Transfers)", cleanName))
 				}
@@ -435,6 +452,51 @@ func (h *HostSession) StartStreaming() {
 	if !atomic.CompareAndSwapInt32(&h.running, 0, 1) {
 		return
 	}
+
+	// Start WASAPI loopback audio capture
+	_ = audio.StartLoopbackCapture(h.ctx, func(pcmData []byte) {
+		h.mu.Lock()
+		aChan := h.audioChannel
+		h.mu.Unlock()
+		if aChan != nil && aChan.ReadyState() == pion.DataChannelStateOpen {
+			if aChan.BufferedAmount() <= 64*1024 {
+				_ = aChan.Send(pcmData)
+			}
+		}
+	})
+
+	// Start Host clipboard monitor for bidirectional clipboard synchronization
+	go func() {
+		lastSeq := input.GetClipboardSequence()
+		ticker := time.NewTicker(400 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-h.ctx.Done():
+				return
+			case <-ticker.C:
+				currSeq := input.GetClipboardSequence()
+				if currSeq != lastSeq {
+					lastSeq = currSeq
+					txt, err := input.GetClipboardText()
+					if err == nil && txt != "" {
+						h.mu.Lock()
+						isEcho := (txt == h.lastReceivedClipText || txt == h.lastSentClipText)
+						if !isEcho {
+							h.lastSentClipText = txt
+						}
+						h.mu.Unlock()
+						if !isEcho {
+							h.SendControl(protocol.ControlMessage{
+								Type: protocol.TypeClipSync,
+								Text: txt,
+							})
+						}
+					}
+				}
+			}
+		}
+	}()
 
 	go func() {
 		defer atomic.StoreInt32(&h.running, 0)

@@ -3,7 +3,6 @@
 package input
 
 import (
-	"encoding/base64"
 	"fmt"
 	"image"
 	"os/exec"
@@ -45,6 +44,17 @@ var (
 	procEnumWindows              = user32.NewProc("EnumWindows")
 	procGetWindowTextW           = user32.NewProc("GetWindowTextW")
 	procSendInput                = user32.NewProc("SendInput")
+	procOpenClipboard            = user32.NewProc("OpenClipboard")
+	procCloseClipboard           = user32.NewProc("CloseClipboard")
+	procEmptyClipboard           = user32.NewProc("EmptyClipboard")
+	procGetClipboardData         = user32.NewProc("GetClipboardData")
+	procSetClipboardData         = user32.NewProc("SetClipboardData")
+	procIsClipboardFormatAvailable = user32.NewProc("IsClipboardFormatAvailable")
+	procGetClipboardSequenceNumber = user32.NewProc("GetClipboardSequenceNumber")
+	procGlobalAlloc              = kernel32.NewProc("GlobalAlloc")
+	procGlobalLock               = kernel32.NewProc("GlobalLock")
+	procGlobalUnlock             = kernel32.NewProc("GlobalUnlock")
+	procRtlMoveMemory            = kernel32.NewProc("RtlMoveMemory")
 
 	activeBoundsMu sync.RWMutex
 	activeBounds   image.Rectangle
@@ -65,6 +75,8 @@ const (
 	remoteAccessMagicExtraInfo  = 0x52414343 // "RACC" magic tag to distinguish RemoteAccess inputs
 	flashwAll                   = 0x00000003
 	flashwTimerNoFg             = 0x0000000C
+	cfUnicodeText               = 13
+	gmemMoveable                = 0x0002
 )
 
 type kbdLLHookStruct struct {
@@ -494,8 +506,21 @@ func MouseWheel(deltaY int) error {
 	return nil
 }
 
+// SendUnicodeChar injects a Unicode character directly using keybd_event with KEYEVENTF_UNICODE
+func SendUnicodeChar(r rune) error {
+	procKeybdEvent.Call(0, uintptr(r), uintptr(keyeventfUnicode), remoteAccessMagicExtraInfo)
+	procKeybdEvent.Call(0, uintptr(r), uintptr(keyeventfUnicode|keyeventfKeyup), remoteAccessMagicExtraInfo)
+	return nil
+}
+
 // KeyDown simulates key press
 func KeyDown(key, code string, keyCode int) error {
+	runes := []rune(key)
+	// Check if this is a printable non-ASCII Unicode character (e.g. ç, ã, é, ^, ~, etc.)
+	if len(runes) == 1 && runes[0] > 127 {
+		return SendUnicodeChar(runes[0])
+	}
+
 	vk := resolveVK(key, code, keyCode)
 	if vk != 0 {
 		flags := uintptr(0)
@@ -510,6 +535,12 @@ func KeyDown(key, code string, keyCode int) error {
 
 // KeyUp simulates key release
 func KeyUp(key, code string, keyCode int) error {
+	runes := []rune(key)
+	if len(runes) == 1 && runes[0] > 127 {
+		// Unicode char was already sent atomically (down + up)
+		return nil
+	}
+
 	vk := resolveVK(key, code, keyCode)
 	if vk != 0 {
 		flags := uintptr(keyeventfKeyup)
@@ -637,22 +668,110 @@ func resolveVK(key, code string, keyCode int) uint16 {
 	return 0
 }
 
-// SetClipboardTextAndPaste writes text into the Windows clipboard and synthesizes Ctrl+V to paste into active window
+// SetClipboardText writes Unicode text directly to the Windows clipboard via Win32 API in <1ms (no PowerShell)
+func SetClipboardText(text string) error {
+	if text == "" {
+		return nil
+	}
+	var opened bool
+	for i := 0; i < 5; i++ {
+		r, _, _ := procOpenClipboard.Call(0)
+		if r != 0 {
+			opened = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !opened {
+		return fmt.Errorf("failed to open Windows clipboard")
+	}
+	defer procCloseClipboard.Call()
+
+	procEmptyClipboard.Call()
+
+	utf16Chars, err := syscall.UTF16FromString(text)
+	if err != nil {
+		return err
+	}
+	byteLen := uintptr(len(utf16Chars) * 2)
+
+	hMem, _, _ := procGlobalAlloc.Call(uintptr(gmemMoveable), byteLen)
+	if hMem == 0 {
+		return fmt.Errorf("GlobalAlloc failed")
+	}
+
+	ptr, _, _ := procGlobalLock.Call(hMem)
+	if ptr == 0 {
+		return fmt.Errorf("GlobalLock failed")
+	}
+
+	procRtlMoveMemory.Call(ptr, uintptr(unsafe.Pointer(&utf16Chars[0])), byteLen)
+	procGlobalUnlock.Call(hMem)
+
+	r, _, _ := procSetClipboardData.Call(uintptr(cfUnicodeText), hMem)
+	if r == 0 {
+		return fmt.Errorf("SetClipboardData failed")
+	}
+	return nil
+}
+
+// GetClipboardText reads Unicode text currently present in the Windows clipboard
+func GetClipboardText() (string, error) {
+	r, _, _ := procIsClipboardFormatAvailable.Call(uintptr(cfUnicodeText))
+	if r == 0 {
+		return "", nil
+	}
+	var opened bool
+	for i := 0; i < 5; i++ {
+		r, _, _ = procOpenClipboard.Call(0)
+		if r != 0 {
+			opened = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !opened {
+		return "", fmt.Errorf("failed to open Windows clipboard")
+	}
+	defer procCloseClipboard.Call()
+
+	hMem, _, _ := procGetClipboardData.Call(uintptr(cfUnicodeText))
+	if hMem == 0 {
+		return "", nil
+	}
+
+	ptr, _, _ := procGlobalLock.Call(hMem)
+	if ptr == 0 {
+		return "", fmt.Errorf("GlobalLock failed")
+	}
+	defer procGlobalUnlock.Call(hMem)
+
+	var u16 []uint16
+	p := (*uint16)(unsafe.Pointer(ptr))
+	for *p != 0 {
+		u16 = append(u16, *p)
+		p = (*uint16)(unsafe.Pointer(uintptr(unsafe.Pointer(p)) + 2))
+	}
+	return syscall.UTF16ToString(u16), nil
+}
+
+// GetClipboardSequence returns the current clipboard sequence number for change detection
+func GetClipboardSequence() uint32 {
+	seq, _, _ := procGetClipboardSequenceNumber.Call()
+	return uint32(seq)
+}
+
+// SetClipboardTextAndPaste writes text into Windows clipboard natively in <1ms and synthesizes Ctrl+V
 func SetClipboardTextAndPaste(text string) error {
 	if text == "" {
 		return nil
 	}
 	go func() {
-		b64 := base64.StdEncoding.EncodeToString([]byte(text))
-		script := fmt.Sprintf(`[System.Windows.Forms.Clipboard]::SetText([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('%s')))`, b64)
-		cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Add-Type -AssemblyName System.Windows.Forms; "+script)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: 0x08000000}
-		_ = cmd.Run()
-
-		time.Sleep(50 * time.Millisecond)
+		_ = SetClipboardText(text)
+		time.Sleep(20 * time.Millisecond)
 		procKeybdEvent.Call(0x11, 0, 0, remoteAccessMagicExtraInfo) // Ctrl down
 		procKeybdEvent.Call(0x56, 0, 0, remoteAccessMagicExtraInfo) // 'V' down
-		time.Sleep(30 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 		procKeybdEvent.Call(0x56, 0, keyeventfKeyup, remoteAccessMagicExtraInfo) // 'V' up
 		procKeybdEvent.Call(0x11, 0, keyeventfKeyup, remoteAccessMagicExtraInfo) // Ctrl up
 	}()

@@ -14,6 +14,9 @@ let signalingWS = null;
 let peerConnection = null;
 let inputChannel = null;
 let videoChannel = null;
+let audioChannel = null;
+let remoteAudioMuted = false;
+let nextRemoteAudioPlayTime = 0;
 let isConnected = false;
 let currentTab = 'host';
 let pwdVisible = false;
@@ -563,6 +566,62 @@ function getAppAudioContext() {
 
 window.addEventListener('pointerdown', () => { getAppAudioContext(); }, { once: true });
 window.addEventListener('keydown', () => { getAppAudioContext(); }, { once: true });
+
+function toggleRemoteAudio() {
+  remoteAudioMuted = !remoteAudioMuted;
+  const btn = document.getElementById('btn-toggle-audio');
+  const icon = document.getElementById('audio-toggle-icon');
+  const label = document.getElementById('audio-toggle-label');
+  if (remoteAudioMuted) {
+    if (icon) icon.innerText = '🔇';
+    if (label) label.innerText = 'Mudo';
+    if (btn) {
+      btn.style.background = 'rgba(239, 68, 68, 0.2)';
+      btn.style.color = '#f87171';
+      btn.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+    }
+  } else {
+    if (icon) icon.innerText = '🔊';
+    if (label) label.innerText = 'Áudio';
+    if (btn) {
+      btn.style.background = 'rgba(34, 197, 94, 0.2)';
+      btn.style.color = '#4ade80';
+      btn.style.borderColor = 'rgba(34, 197, 94, 0.4)';
+    }
+    getAppAudioContext();
+  }
+}
+
+function handleRemoteAudioData(buffer) {
+  if (remoteAudioMuted) return;
+  const ctx = getAppAudioContext();
+  if (!ctx || ctx.state !== 'running') return;
+
+  const int16 = new Int16Array(buffer);
+  const numFrames = Math.floor(int16.length / 2); // 2 channels stereo
+  if (numFrames === 0) return;
+
+  const audioBuffer = ctx.createBuffer(2, numFrames, 48000);
+  const ch0 = audioBuffer.getChannelData(0);
+  const ch1 = audioBuffer.getChannelData(1);
+
+  for (let i = 0; i < numFrames; i++) {
+    ch0[i] = int16[i * 2] / 32768.0;
+    ch1[i] = int16[i * 2 + 1] / 32768.0;
+  }
+
+  const source = ctx.createBufferSource();
+  source.buffer = audioBuffer;
+  source.connect(ctx.destination);
+
+  const currentTime = ctx.currentTime;
+  if (nextRemoteAudioPlayTime < currentTime) {
+    nextRemoteAudioPlayTime = currentTime + 0.02; // 20ms lead
+  }
+
+  source.start(nextRemoteAudioPlayTime);
+  nextRemoteAudioPlayTime += audioBuffer.duration;
+}
 
 function playChatChime() {
   try {
@@ -1163,6 +1222,11 @@ async function connectToRemote(e) {
   peerConnection = new RTCPeerConnection(config);
   inputChannel = peerConnection.createDataChannel('input', { ordered: true });
   videoChannel = peerConnection.createDataChannel('video', { ordered: false, maxPacketLifeTime: 300 });
+  audioChannel = peerConnection.createDataChannel('audio', { ordered: false, maxPacketLifeTime: 200 });
+  audioChannel.binaryType = 'arraybuffer';
+  audioChannel.onmessage = (event) => {
+    handleRemoteAudioData(event.data);
+  };
 
   peerConnection.oniceconnectionstatechange = () => {
     console.log('[WebRTC] ICE Connection State:', peerConnection.iceConnectionState);
@@ -1244,6 +1308,10 @@ function setupDataChannels(targetId) {
         appendChatMessage('Remoto', msg.text);
       } else if (msg.t === 'init_info' && msg.mon) {
         updateViewerMonitors(msg.mon, msg.active_mon);
+      } else if (msg.t === 'clip_sync' && msg.text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(msg.text).catch(() => {});
+        }
       } else if (msg.t === 'close' || (msg.t === 'sys_cmd' && msg.cmd === 'close')) {
         closeViewer();
         showModalAlert('Sessão Encerrada', msg.text || 'A sessão remota foi encerrada pelo computador remoto.', 'ℹ️');
@@ -1941,7 +2009,22 @@ async function sendFileInChunks(file) {
   const chunkSize = 48 * 1024; // 48KB per chunk
   const totalChunks = Math.ceil(file.size / chunkSize);
 
+  const hud = document.getElementById('desktop-file-progress-hud');
+  const nameEl = document.getElementById('desk-file-name');
+  const pctEl = document.getElementById('desk-file-pct');
+  const barEl = document.getElementById('desk-file-bar');
+  const bytesEl = document.getElementById('desk-file-bytes');
+  const speedEl = document.getElementById('desk-file-speed');
+
+  if (hud) hud.style.display = 'block';
+  if (nameEl) nameEl.innerText = file.name;
+  if (pctEl) pctEl.innerText = '0%';
+  if (barEl) barEl.style.width = '0%';
+
   sendControl({ t: 'file_start', file_name: file.name, file_size: file.size });
+
+  let sentBytes = 0;
+  const startTime = performance.now();
 
   for (let i = 0; i < totalChunks; i++) {
     const start = i * chunkSize;
@@ -1964,23 +2047,51 @@ async function sendFileInChunks(file) {
       seq: i + 1
     });
 
-    await new Promise(r => setTimeout(r, 10));
+    sentBytes += (end - start);
+    const pct = Math.round((sentBytes / file.size) * 100);
+    const elapsedSec = (performance.now() - startTime) / 1000;
+    const speedKB = elapsedSec > 0 ? (sentBytes / 1024 / elapsedSec) : 0;
+    const speedText = speedKB > 1024 ? `${(speedKB / 1024).toFixed(1)} MB/s` : `${Math.round(speedKB)} KB/s`;
+
+    if (pctEl) pctEl.innerText = `${pct}%`;
+    if (barEl) barEl.style.width = `${pct}%`;
+    if (bytesEl) bytesEl.innerText = `${(sentBytes / (1024*1024)).toFixed(1)} / ${(file.size / (1024*1024)).toFixed(1)} MB`;
+    if (speedEl) speedEl.innerText = speedText;
+
+    await new Promise(r => setTimeout(r, 6));
   }
 
   sendControl({ t: 'file_end', file_name: file.name });
-  await showModalAlert('Arquivo Enviado', `Arquivo "${file.name}" transmitido com sucesso para a pasta Downloads\\RemoteAccess_Transfers do computador remoto!`, '📁');
+  if (bytesEl) bytesEl.innerText = '✅ Concluído! Salvo em Downloads\\RemoteAccess_Transfers';
+  if (speedEl) speedEl.innerText = '';
+  setTimeout(() => {
+    if (hud) hud.style.display = 'none';
+  }, 3000);
 }
 
 window.addEventListener('DOMContentLoaded', () => {
   const cWrapper = document.getElementById('canvas-wrapper');
+  const dropOverlay = document.getElementById('desktop-drop-overlay');
   if (cWrapper) {
+    cWrapper.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (dropOverlay) dropOverlay.style.display = 'flex';
+    });
     cWrapper.addEventListener('dragover', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (dropOverlay) dropOverlay.style.display = 'flex';
+    });
+    cWrapper.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (dropOverlay) dropOverlay.style.display = 'none';
     });
     cWrapper.addEventListener('drop', async (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (dropOverlay) dropOverlay.style.display = 'none';
       if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
         for (const file of e.dataTransfer.files) {
           await sendFileInChunks(file);
@@ -1988,6 +2099,18 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  window.addEventListener('paste', (e) => {
+    if (!isConnected || observerMode) return;
+    if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'SELECT')) {
+      return;
+    }
+    const text = (e.clipboardData || window.clipboardData).getData('text');
+    if (text) {
+      e.preventDefault();
+      sendControl({ t: 'clip', text: text });
+    }
+  });
 });
 
 window.addEventListener('beforeunload', () => {

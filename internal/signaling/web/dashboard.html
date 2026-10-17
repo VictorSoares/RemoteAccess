@@ -918,9 +918,7 @@
       <button id="btn-viewer-control-toggle" class="btn-action" onclick="toggleViewerControl()" title="Alternar entre Controle Ativo e Modo Observador (bloqueia envio de mouse e teclado)" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4);"><span id="viewer-control-icon">🖱️</span> <span id="viewer-control-label">Controlando</span></button>
 
       <!-- Quick Actions -->
-      <button class="btn-action" onclick="sendViewerSys('desktop')" title="Mostrar Área de Trabalho (Win+D)" style="background: rgba(255,255,255,0.08); color: #fff;">❖ Win+D</button>
-      <button class="btn-action" onclick="sendViewerSys('alt_tab')" title="Alternar Janela no Computador Remoto (Alt+Tab)" style="background: rgba(255,255,255,0.08); color: #fff;">⎇ Alt+Tab</button>
-      <button class="btn-action" onclick="sendViewerSys('alt_f4')" title="Fechar Janela Ativa no Computador Remoto (Alt+F4)" style="background: rgba(255,255,255,0.08); color: #fff;">⎋ Alt+F4</button>
+      <button id="btn-viewer-audio-toggle" class="btn-action" onclick="toggleViewerAudio()" title="Alternar Áudio Remoto" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4);"><span id="viewer-audio-icon">🔊</span> <span id="viewer-audio-label">Áudio</span></button>
       <button class="btn-action" onclick="sendViewerSys('cad')" title="Enviar Ctrl+Alt+Del" style="background: rgba(255,255,255,0.08); color: #fff;">⌨️ CAD</button>
       <button class="btn-action" onclick="sendViewerSys('taskmgr')" title="Abrir Gerenciador de Tarefas" style="background: rgba(255,255,255,0.08); color: #fff;">⚡ Tarefas</button>
       <button class="btn-action" onclick="openWebClipboardModal()" title="Colar Texto Remoto" style="background: rgba(255,255,255,0.08); color: #fff;">📋 Colar</button>
@@ -933,6 +931,28 @@
 
     <div style="flex: 1; display: flex; align-items: center; justify-content: center; position: relative; width: 100%; height: 100%; overflow: hidden; background: #000;">
       <canvas id="viewer-canvas" tabindex="0"></canvas>
+
+      <!-- Drag & Drop Visual Overlay -->
+      <div id="viewer-drop-overlay" style="display: none; position: absolute; inset: 0; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(8px); z-index: 100; flex-direction: column; align-items: center; justify-content: center; border: 3px dashed #6366f1; border-radius: 12px; margin: 20px; pointer-events: none;">
+        <div style="font-size: 48px; margin-bottom: 12px;">📥</div>
+        <div style="font-size: 18px; font-weight: 600; color: #fff;">Solte os arquivos para transferir</div>
+        <div style="font-size: 13px; color: #94a3b8; margin-top: 4px;">Eles serão salvos diretamente em Downloads\RemoteAccess_Transfers</div>
+      </div>
+
+      <!-- File Transfer Progress HUD -->
+      <div id="viewer-file-progress-hud" style="display: none; position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(12px); border-radius: 10px; padding: 12px 20px; z-index: 101; min-width: 320px; max-width: 480px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <span id="file-prog-name" style="font-size: 13px; font-weight: 600; color: #f8fafc; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">arquivo.ext</span>
+          <span id="file-prog-pct" style="font-size: 12px; color: #38bdf8; font-weight: 600;">0%</span>
+        </div>
+        <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden;">
+          <div id="file-prog-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #6366f1, #38bdf8); transition: width 0.1s ease;"></div>
+        </div>
+        <div id="file-prog-stats" style="font-size: 11px; color: #94a3b8; margin-top: 6px; display: flex; justify-content: space-between;">
+          <span id="file-prog-bytes">Transferindo...</span>
+          <span id="file-prog-speed">0 KB/s</span>
+        </div>
+      </div>
 
       <!-- Floating In-Session Chat Drawer -->
       <div id="viewer-chat-drawer" class="chat-drawer" style="display: none;">
@@ -990,6 +1010,9 @@
     let vPeerConnection = null;
     let vInputChannel = null;
     let vVideoChannel = null;
+    let vAudioChannel = null;
+    let viewerAudioMuted = false;
+    let nextAudioPlayTime = 0;
     let vFrameAssembly = null;
     let vIsRenderingFrame = false;
     let vPendingBlob = null;
@@ -1619,6 +1642,11 @@
       vInputChannel = vPeerConnection.createDataChannel('input', { ordered: true });
       vVideoChannel = vPeerConnection.createDataChannel('video', { ordered: false, maxPacketLifeTime: 300 });
       vVideoChannel.binaryType = 'arraybuffer';
+      vAudioChannel = vPeerConnection.createDataChannel('audio', { ordered: false, maxPacketLifeTime: 200 });
+      vAudioChannel.binaryType = 'arraybuffer';
+      vAudioChannel.onmessage = (event) => {
+        handleViewerAudioData(event.data);
+      };
 
       vPeerConnection.oniceconnectionstatechange = () => {
         console.log('[WebRTC Web Viewer] ICE State:', vPeerConnection.iceConnectionState);
@@ -1674,6 +1702,10 @@
             appendViewerChat('Host', msg.text);
           } else if (msg.t === 'init_info' && msg.mon) {
             updateWebViewerMonitors(msg.mon, msg.active_mon);
+          } else if (msg.t === 'clip_sync' && msg.text) {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(msg.text).catch(() => {});
+            }
           } else if (msg.t === 'close' || (msg.t === 'sys_cmd' && msg.cmd === 'close')) {
             closeWebViewer();
             showModalAlert('Sessão Encerrada', msg.text || 'A sessão remota foi encerrada pelo computador remoto.', 'ℹ️');
@@ -1779,6 +1811,62 @@
 
     window.addEventListener('pointerdown', () => { getViewerAudioContext(); }, { once: true });
     window.addEventListener('keydown', () => { getViewerAudioContext(); }, { once: true });
+
+    function toggleViewerAudio() {
+      viewerAudioMuted = !viewerAudioMuted;
+      const btn = document.getElementById('btn-viewer-audio-toggle');
+      const icon = document.getElementById('viewer-audio-icon');
+      const label = document.getElementById('viewer-audio-label');
+      if (viewerAudioMuted) {
+        if (icon) icon.innerText = '🔇';
+        if (label) label.innerText = 'Mudo';
+        if (btn) {
+          btn.style.background = 'rgba(239, 68, 68, 0.2)';
+          btn.style.color = '#f87171';
+          btn.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+        }
+      } else {
+        if (icon) icon.innerText = '🔊';
+        if (label) label.innerText = 'Áudio';
+        if (btn) {
+          btn.style.background = 'rgba(34, 197, 94, 0.2)';
+          btn.style.color = '#4ade80';
+          btn.style.borderColor = 'rgba(34, 197, 94, 0.4)';
+        }
+        getViewerAudioContext();
+      }
+    }
+
+    function handleViewerAudioData(buffer) {
+      if (viewerAudioMuted) return;
+      const ctx = getViewerAudioContext();
+      if (!ctx || ctx.state !== 'running') return;
+
+      const int16 = new Int16Array(buffer);
+      const numFrames = Math.floor(int16.length / 2); // 2 channels stereo
+      if (numFrames === 0) return;
+
+      const audioBuffer = ctx.createBuffer(2, numFrames, 48000);
+      const ch0 = audioBuffer.getChannelData(0);
+      const ch1 = audioBuffer.getChannelData(1);
+
+      for (let i = 0; i < numFrames; i++) {
+        ch0[i] = int16[i * 2] / 32768.0;
+        ch1[i] = int16[i * 2 + 1] / 32768.0;
+      }
+
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(ctx.destination);
+
+      const currentTime = ctx.currentTime;
+      if (nextAudioPlayTime < currentTime) {
+        nextAudioPlayTime = currentTime + 0.02; // 20ms lead
+      }
+
+      source.start(nextAudioPlayTime);
+      nextAudioPlayTime += audioBuffer.duration;
+    }
 
     function playViewerChime() {
       try {
@@ -2029,7 +2117,22 @@
       const chunkSize = 48 * 1024; // 48KB
       const totalChunks = Math.ceil(file.size / chunkSize);
 
+      const hud = document.getElementById('viewer-file-progress-hud');
+      const nameEl = document.getElementById('file-prog-name');
+      const pctEl = document.getElementById('file-prog-pct');
+      const barEl = document.getElementById('file-prog-bar');
+      const bytesEl = document.getElementById('file-prog-bytes');
+      const speedEl = document.getElementById('file-prog-speed');
+
+      if (hud) hud.style.display = 'block';
+      if (nameEl) nameEl.innerText = file.name;
+      if (pctEl) pctEl.innerText = '0%';
+      if (barEl) barEl.style.width = '0%';
+
       sendViewerCtrl({ t: 'file_start', file_name: file.name, file_size: file.size });
+
+      let sentBytes = 0;
+      const startTime = performance.now();
 
       for (let i = 0; i < totalChunks; i++) {
         const start = i * chunkSize;
@@ -2052,11 +2155,26 @@
           seq: i + 1
         });
 
-        await new Promise(r => setTimeout(r, 10));
+        sentBytes += (end - start);
+        const pct = Math.round((sentBytes / file.size) * 100);
+        const elapsedSec = (performance.now() - startTime) / 1000;
+        const speedKB = elapsedSec > 0 ? (sentBytes / 1024 / elapsedSec) : 0;
+        const speedText = speedKB > 1024 ? `${(speedKB / 1024).toFixed(1)} MB/s` : `${Math.round(speedKB)} KB/s`;
+
+        if (pctEl) pctEl.innerText = `${pct}%`;
+        if (barEl) barEl.style.width = `${pct}%`;
+        if (bytesEl) bytesEl.innerText = `${(sentBytes / (1024*1024)).toFixed(1)} / ${(file.size / (1024*1024)).toFixed(1)} MB`;
+        if (speedEl) speedEl.innerText = speedText;
+
+        await new Promise(r => setTimeout(r, 6));
       }
 
       sendViewerCtrl({ t: 'file_end', file_name: file.name });
-      await showModalAlert('Arquivo Enviado', `Arquivo "${file.name}" transmitido com sucesso para a pasta Downloads\\RemoteAccess_Transfers do computador remoto!`, '📁');
+      if (bytesEl) bytesEl.innerText = '✅ Concluído! Salvo em Downloads\\RemoteAccess_Transfers';
+      if (speedEl) speedEl.innerText = '';
+      setTimeout(() => {
+        if (hud) hud.style.display = 'none';
+      }, 3000);
     }
 
     function handleWebViewerPowerDropdown(action) {
@@ -2209,18 +2327,43 @@
     }
 
     vCanvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    const dropOverlay = document.getElementById('viewer-drop-overlay');
+    vCanvas.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (dropOverlay) dropOverlay.style.display = 'flex';
+    });
     vCanvas.addEventListener('dragover', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (dropOverlay) dropOverlay.style.display = 'flex';
+    });
+    vCanvas.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (dropOverlay) dropOverlay.style.display = 'none';
     });
     vCanvas.addEventListener('drop', async (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (dropOverlay) dropOverlay.style.display = 'none';
       if (!viewerConnected) return;
       if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
         for (const file of e.dataTransfer.files) {
           await sendWebFileInChunks(file);
         }
+      }
+    });
+
+    window.addEventListener('paste', (e) => {
+      if (!viewerConnected || !viewerControlEnabled) return;
+      if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'SELECT')) {
+        return;
+      }
+      const text = (e.clipboardData || window.clipboardData).getData('text');
+      if (text) {
+        e.preventDefault();
+        sendViewerCtrl({ t: 'clip', text: text });
       }
     });
     vCanvas.addEventListener('mousemove', (e) => {
