@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -287,10 +289,22 @@ func (cm *ConfigManager) InstallAsAdmin() error {
 		if err != nil {
 			return fmt.Errorf("falha ao ler executável atual: %w", err)
 		}
+		// Safely terminate any older instance running in target directory (excluding current installer process)
+		myPID := os.Getpid()
+		killCmd := fmt.Sprintf("Get-Process -Name 'RemoteAccess' -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne %d } | Stop-Process -Force", myPID)
+		_ = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", killCmd).Run()
+		time.Sleep(250 * time.Millisecond)
+
 		if err := os.WriteFile(targetExe, inputData, 0755); err != nil {
 			return fmt.Errorf("falha ao copiar executável para %s: %w", targetExe, err)
 		}
 	}
+
+	// Register in Windows Programs & Features (appwiz.cpl)
+	_ = RegisterInUninstall(targetExe, targetDir)
+
+	// Create Start Menu shortcut
+	_ = CreateStartMenuShortcut(targetExe, targetDir)
 
 	// Update executable path
 	cm.executable = targetExe

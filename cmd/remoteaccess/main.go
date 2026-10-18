@@ -22,7 +22,7 @@ import (
 	"remoteaccess/internal/tray"
 )
 
-const version = "1.2.0"
+const version = "2.0.0"
 
 var (
 	kernel32        = syscall.NewLazyDLL("kernel32.dll")
@@ -214,12 +214,37 @@ func main() {
 	noBrowser := flag.Bool("no-browser", false, "Modo silencioso de segundo plano (para inicializacao com Windows)")
 	autostart := flag.Bool("autostart", false, "Ativar inicialização automática com o Windows")
 	installFlag := flag.Bool("install", false, "Instalar no Program Files com privilégios de Administrador")
+	uninstallFlag := flag.Bool("uninstall", false, "Desinstalar o RemoteAccess do sistema")
+	uninstallStage2Flag := flag.Bool("uninstall-stage2", false, "Estágio 2 interno da desinstalação")
+	silentFlag := flag.Bool("silent", false, "Modo silencioso (sem caixas de diálogo)")
 	elevateFlag := flag.Bool("elevate", false, "Reiniciar como Administrador")
 	defaultPwd := flag.String("password", "", "Definir senha padrao")
 	flag.Parse()
 
+	// 0a. Estágio 2 interno da desinstalação
+	if *uninstallStage2Flag {
+		if err := config.UninstallStage2(*silentFlag); err != nil {
+			log.Fatalf("[Desinstalação] Erro no estágio 2: %v", err)
+		}
+		os.Exit(0)
+	}
+
+	// 0b. Desinstalação (disparada pelo Windows / appwiz.cpl ou CLI)
+	if *uninstallFlag {
+		if err := config.Uninstall(*silentFlag); err != nil {
+			log.Fatalf("[Desinstalação] Erro ao desinstalar: %v", err)
+		}
+		os.Exit(0)
+	}
+
 	// 1. If running as installer
 	if *installFlag {
+		if !config.IsAdmin() {
+			if err := config.ElevateSelf("-install"); err != nil {
+				log.Fatalf("[Instalação] Erro ao solicitar elevação: %v", err)
+			}
+			os.Exit(0)
+		}
 		cfg := config.LoadConfig()
 		if err := cfg.InstallAsAdmin(); err != nil {
 			log.Fatalf("[Instalação] Erro ao instalar: %v", err)
