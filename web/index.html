@@ -295,6 +295,8 @@
           <span class="hud-sep">|</span>
           <span class="hud-item" id="stat-fps">🎥 0 FPS</span>
           <span class="hud-sep">|</span>
+          <span class="hud-item" id="stat-bandwidth" style="color: #a78bfa;">📊 0 KB/s</span>
+          <span class="hud-sep">|</span>
           <span class="hud-item" id="stat-session-time">⏱️ 00:00</span>
         </div>
 
@@ -336,8 +338,20 @@
         <button class="dock-btn" onclick="sendSystemAction('taskmgr')" title="Abrir Gerenciador de Tarefas">
           ⚡ <span class="dock-label">Tarefas</span>
         </button>
-        <button class="dock-btn" onclick="sendSystemAction('desktop')" title="Mostrar Área de Trabalho (Win+D)">
-          ❖ <span class="dock-label">Win+D</span>
+        <button class="dock-btn" id="btn-toggle-audio" onclick="toggleRemoteAudio()" title="Alternar Áudio Remoto">
+          <span id="audio-toggle-icon">🔊</span> <span class="dock-label" id="audio-toggle-label">Áudio</span>
+        </button>
+        <button class="dock-btn" id="btn-toggle-observer" onclick="toggleObserverMode()" title="Alternar entre Controle Ativo e Modo Observador (bloqueia mouse e teclado)">
+          <span id="observer-mode-icon">🖱️</span> <span class="dock-label" id="observer-mode-label">Controlando</span>
+        </button>
+        <button class="dock-btn" id="btn-toggle-scale" onclick="toggleScreenScale()" title="Alternar Escala (Ajustar vs 100% Original)">
+          🔍 <span class="dock-label" id="scale-mode-label">Ajustar</span>
+        </button>
+        <button class="dock-btn" id="btn-toggle-curtain" onclick="togglePrivacyCurtain()" title="Modo Cortina: Ocultar tela física no host remoto">
+          <span id="curtain-toggle-icon">🕶️</span> <span class="dock-label">Cortina</span>
+        </button>
+        <button class="dock-btn" id="btn-toggle-autolock" onclick="toggleAutoLockOnDisconnect()" title="Bloquear automaticamente o computador remoto ao desconectar">
+          <span id="autolock-toggle-icon">🔓</span> <span class="dock-label" id="autolock-toggle-label">Auto-Lock</span>
         </button>
         <button class="dock-btn" id="btn-block-input" onclick="toggleBlockInput()" title="Bloquear Mouse e Teclado Físico do Cliente Acessado">
           🚫 <span class="dock-label">Bloquear Entrada</span>
@@ -367,6 +381,28 @@
     <!-- Viewer Canvas Area -->
     <div id="canvas-wrapper">
       <canvas id="screen-canvas" tabindex="0"></canvas>
+
+      <!-- Drag & Drop Visual Overlay -->
+      <div id="desktop-drop-overlay" style="display: none; position: absolute; inset: 0; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(8px); z-index: 100; flex-direction: column; align-items: center; justify-content: center; border: 3px dashed #6366f1; border-radius: 12px; margin: 20px; pointer-events: none;">
+        <div style="font-size: 48px; margin-bottom: 12px;">📥</div>
+        <div style="font-size: 18px; font-weight: 600; color: #fff;">Solte os arquivos para transferir</div>
+        <div style="font-size: 13px; color: #94a3b8; margin-top: 4px;">Eles serão salvos diretamente em Downloads\RemoteAccess_Transfers</div>
+      </div>
+
+      <!-- File Transfer Progress HUD -->
+      <div id="desktop-file-progress-hud" style="display: none; position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(255,255,255,0.15); backdrop-filter: blur(12px); border-radius: 10px; padding: 12px 20px; z-index: 101; min-width: 320px; max-width: 480px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+          <span id="desk-file-name" style="font-size: 13px; font-weight: 600; color: #f8fafc; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">arquivo.ext</span>
+          <span id="desk-file-pct" style="font-size: 12px; color: #38bdf8; font-weight: 600;">0%</span>
+        </div>
+        <div style="width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden;">
+          <div id="desk-file-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #6366f1, #38bdf8); transition: width 0.1s ease;"></div>
+        </div>
+        <div style="font-size: 11px; color: #94a3b8; margin-top: 6px; display: flex; justify-content: space-between;">
+          <span id="desk-file-bytes">Transferindo...</span>
+          <span id="desk-file-speed">0 KB/s</span>
+        </div>
+      </div>
 
       <!-- Inactivity Warning Banner -->
       <div id="inactivity-warning-banner" class="inactivity-banner" style="display: none;">

@@ -776,7 +776,7 @@ func (s *Server) HandleWoL(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) HandleDashboard(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
+	if r.URL.Path != "/" && r.URL.Path != "/dashboard" {
 		http.NotFound(w, r)
 		return
 	}

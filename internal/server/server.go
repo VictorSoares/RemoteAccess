@@ -102,6 +102,9 @@ func (s *LocalServer) Start(port int) error {
 	}
 
 	mux.Handle("/", http.FileServer(http.FS(webContent)))
+	mux.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
+		s.Signaling.HandleDashboard(w, r)
+	})
 
 	mux.HandleFunc("/api/host-info", s.handleHostInfo)
 	mux.HandleFunc("/api/set-alias", s.handleSetAlias)

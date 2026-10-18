@@ -14,6 +14,9 @@ let signalingWS = null;
 let peerConnection = null;
 let inputChannel = null;
 let videoChannel = null;
+let audioChannel = null;
+let remoteAudioMuted = false;
+let nextRemoteAudioPlayTime = 0;
 let isConnected = false;
 let currentTab = 'host';
 let pwdVisible = false;
@@ -25,6 +28,8 @@ let sessionPollingTimer = null;
 let isMouseDown = false;
 let externalChatWindow = null;
 const chatBroadcast = ('BroadcastChannel' in window) ? new BroadcastChannel('remoteaccess_chat') : null;
+let bytesReceived = 0;
+let totalSessionBytes = 0;
 
 let lastUserActivity = Date.now();
 let sessionStartTime = 0;
@@ -154,23 +159,56 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Auto-hide top toolbar in viewer mode with top-edge detection
+  // Auto-hide top toolbar in viewer mode: ONLY activates when mouse pauses (dwells) in top-center zone
+  let desktopDockDwellTimer = null;
   window.addEventListener('mousemove', (e) => {
     if (!isConnected) return;
     const dock = document.getElementById('viewer-toolbar');
     if (!dock) return;
-    if (e.clientY <= 55) {
-      dock.classList.add('dock-visible');
-    } else if (e.clientY > 85 && !dock.matches(':hover') && !dock.matches(':focus-within')) {
-      dock.classList.remove('dock-visible');
+
+    const screenWidth = window.innerWidth || document.documentElement.clientWidth || 1280;
+    const centerX = screenWidth / 2;
+    // Strict central trigger zone: 280px wide (±140px from center) and top edge (<= 14px)
+    const inCentralZone = Math.abs(e.clientX - centerX) <= 140 && e.clientY <= 14;
+
+    if (inCentralZone) {
+      if (!desktopDockDwellTimer && !dock.classList.contains('dock-visible')) {
+        desktopDockDwellTimer = setTimeout(() => {
+          dock.classList.add('dock-visible');
+          desktopDockDwellTimer = null;
+        }, 280);
+      }
+    } else {
+      if (desktopDockDwellTimer) {
+        clearTimeout(desktopDockDwellTimer);
+        desktopDockDwellTimer = null;
+      }
+      if (e.clientY > 85 && !dock.matches(':hover') && !dock.matches(':focus-within')) {
+        dock.classList.remove('dock-visible');
+      }
     }
   });
 
   const tabHandle = document.getElementById('viewer-tab-handle');
   if (tabHandle) {
     tabHandle.addEventListener('mouseenter', () => {
+      if (!desktopDockDwellTimer) {
+        desktopDockDwellTimer = setTimeout(() => {
+          const dock = document.getElementById('viewer-toolbar');
+          if (dock) dock.classList.add('dock-visible');
+          desktopDockDwellTimer = null;
+        }, 200);
+      }
+    });
+    tabHandle.addEventListener('mouseleave', () => {
+      if (desktopDockDwellTimer) {
+        clearTimeout(desktopDockDwellTimer);
+        desktopDockDwellTimer = null;
+      }
+    });
+    tabHandle.addEventListener('click', () => {
       const dock = document.getElementById('viewer-toolbar');
-      if (dock) dock.classList.add('dock-visible');
+      if (dock) dock.classList.toggle('dock-visible');
     });
   }
 
@@ -237,6 +275,77 @@ function switchTab(tab) {
 }
 
 let isInputBlocked = false;
+let isObserverMode = false;
+let currentRemoteCursor = 'default';
+let isScale1to1 = false;
+let isCurtainActive = false;
+let isAutoLockActive = false;
+
+function toggleObserverMode() {
+  isObserverMode = !isObserverMode;
+  const btn = document.getElementById('btn-toggle-observer');
+  const icon = document.getElementById('observer-mode-icon');
+  const label = document.getElementById('observer-mode-label');
+  if (!isObserverMode) {
+    if (btn) btn.classList.remove('active');
+    if (icon) icon.innerText = '🖱️';
+    if (label) label.innerText = 'Controlando';
+    if (canvas) canvas.style.cursor = currentRemoteCursor || 'default';
+  } else {
+    if (btn) btn.classList.add('active');
+    if (icon) icon.innerText = '👁️';
+    if (label) label.innerText = 'Observador';
+    if (canvas) canvas.style.cursor = 'default';
+  }
+}
+
+function toggleScreenScale() {
+  isScale1to1 = !isScale1to1;
+  const wrapper = document.getElementById('canvas-wrapper');
+  const label = document.getElementById('scale-mode-label');
+  if (isScale1to1) {
+    if (wrapper) wrapper.classList.add('scale-1-1');
+    if (label) label.innerText = '1:1 (Original)';
+    showToast('🔍 Escala 100% (Original) ativada com navegação livre.');
+  } else {
+    if (wrapper) wrapper.classList.remove('scale-1-1');
+    if (label) label.innerText = 'Ajustar';
+    showToast('🔍 Escala ajustada à janela.');
+  }
+}
+
+function togglePrivacyCurtain() {
+  if (!isConnected) return;
+  isCurtainActive = !isCurtainActive;
+  const btn = document.getElementById('btn-toggle-curtain');
+  if (isCurtainActive) {
+    sendControl({ t: 'sys_cmd', cmd: 'curtain_on' });
+    if (btn) btn.classList.add('active');
+    showToast('🕶️ Modo Cortina ATIVADO: Tela física do cliente ocultada.');
+  } else {
+    sendControl({ t: 'sys_cmd', cmd: 'curtain_off' });
+    if (btn) btn.classList.remove('active');
+    showToast('🕶️ Modo Cortina DESATIVADO: Tela física restaurada.');
+  }
+}
+
+function toggleAutoLockOnDisconnect() {
+  if (!isConnected) return;
+  isAutoLockActive = !isAutoLockActive;
+  const btn = document.getElementById('btn-toggle-autolock');
+  const icon = document.getElementById('autolock-toggle-icon');
+  if (isAutoLockActive) {
+    sendControl({ t: 'sys_cmd', cmd: 'autolock_on' });
+    if (btn) btn.classList.add('active');
+    if (icon) icon.innerText = '🔒';
+    showToast('🔒 Auto-Lock ATIVADO: Máquina será bloqueada ao desconectar.');
+  } else {
+    sendControl({ t: 'sys_cmd', cmd: 'autolock_off' });
+    if (btn) btn.classList.remove('active');
+    if (icon) icon.innerText = '🔓';
+    showToast('🔓 Auto-Lock DESATIVADO.');
+  }
+}
 
 async function fetchHostInfo() {
   try {
@@ -430,7 +539,7 @@ async function fetchSystemInfo() {
   } catch (err) {}
 }
 
-function updateViewerMonitors(count) {
+function updateViewerMonitors(count, activeMon) {
   const monSelect = document.getElementById('viewer-monitor-select');
   if (!monSelect) return;
   const currentVal = monSelect.value;
@@ -442,7 +551,9 @@ function updateViewerMonitors(count) {
     opt.innerText = `🖥️ Monitor ${i + 1}`;
     monSelect.appendChild(opt);
   }
-  if (currentVal && parseInt(currentVal) < total) {
+  if (activeMon !== undefined && parseInt(activeMon) >= 0 && parseInt(activeMon) < total) {
+    monSelect.value = parseInt(activeMon);
+  } else if (currentVal && parseInt(currentVal) < total) {
     monSelect.value = currentVal;
   } else {
     monSelect.value = 0;
@@ -507,6 +618,62 @@ function getAppAudioContext() {
 
 window.addEventListener('pointerdown', () => { getAppAudioContext(); }, { once: true });
 window.addEventListener('keydown', () => { getAppAudioContext(); }, { once: true });
+
+function toggleRemoteAudio() {
+  remoteAudioMuted = !remoteAudioMuted;
+  const btn = document.getElementById('btn-toggle-audio');
+  const icon = document.getElementById('audio-toggle-icon');
+  const label = document.getElementById('audio-toggle-label');
+  if (remoteAudioMuted) {
+    if (icon) icon.innerText = '🔇';
+    if (label) label.innerText = 'Mudo';
+    if (btn) {
+      btn.style.background = 'rgba(239, 68, 68, 0.2)';
+      btn.style.color = '#f87171';
+      btn.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+    }
+  } else {
+    if (icon) icon.innerText = '🔊';
+    if (label) label.innerText = 'Áudio';
+    if (btn) {
+      btn.style.background = 'rgba(34, 197, 94, 0.2)';
+      btn.style.color = '#4ade80';
+      btn.style.borderColor = 'rgba(34, 197, 94, 0.4)';
+    }
+    getAppAudioContext();
+  }
+}
+
+function handleRemoteAudioData(buffer) {
+  if (remoteAudioMuted) return;
+  const ctx = getAppAudioContext();
+  if (!ctx || ctx.state !== 'running') return;
+
+  const int16 = new Int16Array(buffer);
+  const numFrames = Math.floor(int16.length / 2); // 2 channels stereo
+  if (numFrames === 0) return;
+
+  const audioBuffer = ctx.createBuffer(2, numFrames, 48000);
+  const ch0 = audioBuffer.getChannelData(0);
+  const ch1 = audioBuffer.getChannelData(1);
+
+  for (let i = 0; i < numFrames; i++) {
+    ch0[i] = int16[i * 2] / 32768.0;
+    ch1[i] = int16[i * 2 + 1] / 32768.0;
+  }
+
+  const source = ctx.createBufferSource();
+  source.buffer = audioBuffer;
+  source.connect(ctx.destination);
+
+  const currentTime = ctx.currentTime;
+  if (nextRemoteAudioPlayTime < currentTime) {
+    nextRemoteAudioPlayTime = currentTime + 0.02; // 20ms lead
+  }
+
+  source.start(nextRemoteAudioPlayTime);
+  nextRemoteAudioPlayTime += audioBuffer.duration;
+}
 
 function playChatChime() {
   try {
@@ -644,14 +811,15 @@ async function refreshHostChat() {
         const isMe = msg.sender.includes('Host') || msg.sender.includes('Você');
         if (!isMe) {
           showChatToast(msg.sender, msg.text);
-          // Open external floating chat popup window for host
-          openExternalChat();
+          playChatChime();
+          toggleHostFloatingChat(true);
+          const floatInput = document.getElementById('host-floating-chat-input');
+          if (floatInput) setTimeout(() => floatInput.focus(), 80);
           if (chatBroadcast) {
             try {
               chatBroadcast.postMessage({ action: 'receive', sender: msg.sender, text: msg.text });
             } catch(e) {}
           }
-          toggleHostFloatingChat(true);
           const badge = document.getElementById('host-chat-badge');
           if (badge && !hostChatOpen) {
             badge.innerText = parseInt(badge.innerText || '0') + 1;
@@ -1008,12 +1176,24 @@ function connectSignaling() {
 
         case 'data':
           if (typeof msg.payload === 'string' && msg.payload.startsWith('{')) {
+function updateAppLatency(rtt) {
+  const latEl = document.getElementById('stat-latency');
+  if (!latEl) return;
+  latEl.innerText = `⚡ ${rtt} ms`;
+  if (rtt < 50) {
+    latEl.style.color = '#4ade80';
+  } else if (rtt <= 150) {
+    latEl.style.color = '#fbbf24';
+  } else {
+    latEl.style.color = '#f87171';
+  }
+}
+
             try {
               const ctrl = JSON.parse(msg.payload);
               if (ctrl.t === 'pong') {
                 const rtt = Math.max(1, Math.round(performance.now() - ctrl.ts));
-                const latEl = document.getElementById('stat-latency');
-                if (latEl) latEl.innerText = `⚡ ${rtt} ms`;
+                updateAppLatency(rtt);
               } else if (ctrl.t === 'chat') {
                 appendChatMessage('Remoto', ctrl.text);
               } else if (ctrl.t === 'init_info' && ctrl.mon) {
@@ -1094,11 +1274,20 @@ async function connectToRemote(e) {
   peerConnection = new RTCPeerConnection(config);
   inputChannel = peerConnection.createDataChannel('input', { ordered: true });
   videoChannel = peerConnection.createDataChannel('video', { ordered: false, maxPacketLifeTime: 300 });
+  audioChannel = peerConnection.createDataChannel('audio', { ordered: false, maxPacketLifeTime: 200 });
+  audioChannel.binaryType = 'arraybuffer';
+  audioChannel.onmessage = (event) => {
+    handleRemoteAudioData(event.data);
+  };
 
   peerConnection.oniceconnectionstatechange = () => {
     console.log('[WebRTC] ICE Connection State:', peerConnection.iceConnectionState);
     if (peerConnection.iceConnectionState === 'connected') {
-      document.getElementById('stat-latency').innerText = `⚡ P2P Ativo`;
+      const latEl = document.getElementById('stat-latency');
+      if (latEl) {
+        latEl.innerText = `⚡ P2P Ativo`;
+        latEl.style.color = '#4ade80';
+      }
     }
   };
 
@@ -1108,7 +1297,10 @@ async function connectToRemote(e) {
       const badgeEl = document.getElementById('hud-status-badge');
       if (badgeEl) badgeEl.innerHTML = `<span class="hud-dot"></span> P2P Direto (Zero Nuvem)`;
       const latEl = document.getElementById('stat-latency');
-      if (latEl) latEl.innerText = `⚡ P2P Ativo`;
+      if (latEl) {
+        latEl.innerText = `⚡ P2P Ativo`;
+        latEl.style.color = '#4ade80';
+      }
     } else if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected') {
       console.log('[WebRTC] Conexão P2P encerrada.');
     }
@@ -1161,14 +1353,22 @@ function setupDataChannels(targetId) {
       const msg = JSON.parse(event.data);
       if (msg.t === 'pong') {
         const rtt = Math.max(1, Math.round(performance.now() - msg.ts));
-        const latEl = document.getElementById('stat-latency');
-        if (latEl) latEl.innerText = `⚡ ${rtt} ms`;
+        updateAppLatency(rtt);
         const badgeEl = document.getElementById('hud-status-badge');
         if (badgeEl) badgeEl.innerHTML = `<span class="hud-dot"></span> P2P Direct`;
       } else if (msg.t === 'chat') {
         appendChatMessage('Remoto', msg.text);
       } else if (msg.t === 'init_info' && msg.mon) {
-        updateViewerMonitors(msg.mon);
+        updateViewerMonitors(msg.mon, msg.active_mon);
+      } else if (msg.t === 'clip_sync' && msg.text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(msg.text).catch(() => {});
+        }
+      } else if (msg.t === 'cursor' && msg.cmd) {
+        currentRemoteCursor = msg.cmd;
+        if (!isObserverMode && canvas) {
+          canvas.style.cursor = currentRemoteCursor;
+        }
       } else if (msg.t === 'close' || (msg.t === 'sys_cmd' && msg.cmd === 'close')) {
         closeViewer();
         showModalAlert('Sessão Encerrada', msg.text || 'A sessão remota foi encerrada pelo computador remoto.', 'ℹ️');
@@ -1187,6 +1387,8 @@ let frameAssembly = null;
 function handleVideoPacket(data) {
   if (!isConnected) return;
   if (data instanceof ArrayBuffer) {
+    bytesReceived += data.byteLength;
+    totalSessionBytes += data.byteLength;
     if (data.byteLength < 8) return;
     const view = new DataView(data);
     const frameId = view.getUint32(0);
@@ -1212,6 +1414,8 @@ function handleVideoPacket(data) {
       renderRawBlob(blob);
     }
   } else if (data instanceof Blob) {
+    bytesReceived += data.size;
+    totalSessionBytes += data.size;
     renderRawBlob(data);
   }
 }
@@ -1227,6 +1431,12 @@ function renderBase64Frame(b64) {
   if (now - lastFpsTime >= 1000) {
     const fpsEl = document.getElementById('stat-fps');
     if (fpsEl) fpsEl.innerText = `🎥 ${frameCount} FPS`;
+    const kbps = bytesReceived / 1024;
+    const bwEl = document.getElementById('stat-bandwidth');
+    if (bwEl) {
+      bwEl.innerText = kbps >= 1024 ? `📊 ${(kbps / 1024).toFixed(1)} MB/s` : `📊 ${Math.round(kbps)} KB/s`;
+    }
+    bytesReceived = 0;
     frameCount = 0;
     lastFpsTime = now;
   }
@@ -1253,6 +1463,12 @@ function renderRawBlob(blobData) {
   if (now - lastFpsTime >= 1000) {
     const fpsEl = document.getElementById('stat-fps');
     if (fpsEl) fpsEl.innerText = `🎥 ${frameCount} FPS`;
+    const kbps = bytesReceived / 1024;
+    const bwEl = document.getElementById('stat-bandwidth');
+    if (bwEl) {
+      bwEl.innerText = kbps >= 1024 ? `📊 ${(kbps / 1024).toFixed(1)} MB/s` : `📊 ${Math.round(kbps)} KB/s`;
+    }
+    bytesReceived = 0;
     frameCount = 0;
     lastFpsTime = now;
   }
@@ -1326,6 +1542,12 @@ function fallbackRenderImage(blob) {
 
 function sendControl(ctrlObj) {
   if (!isConnected) return;
+
+  // In Observer mode, block mouse and keyboard control events
+  if (isObserverMode && ctrlObj && (ctrlObj.t === 'm' || ctrlObj.t === 'md' || ctrlObj.t === 'mu' || ctrlObj.t === 'w' || ctrlObj.t === 'kd' || ctrlObj.t === 'ku')) {
+    return;
+  }
+
   if (ctrlObj && ctrlObj.t !== 'ping') {
     recordUserActivity();
   }
@@ -1335,6 +1557,9 @@ function sendControl(ctrlObj) {
     inputChannel.send(JSON.stringify(ctrlObj));
     return;
   }
+
+  // Strictly prevent sending pings or continuous heartbeats over WebSocket fallback (0 Server Bandwidth)
+  if (ctrlObj.t === 'ping') return;
 
   // Fallback: Send over WebSocket Relay if WebRTC DataChannel is not open
   if (signalingWS && signalingWS.readyState === WebSocket.OPEN && currentTargetId) {
@@ -1371,16 +1596,22 @@ function startSessionStatsLoop() {
     const timerEl = document.getElementById('stat-session-time');
     if (timerEl) timerEl.innerText = `⏱️ ${timeFormatted}`;
 
-    // 2. Check user inactivity (2 minutes limit = 120s)
-    const idleSec = Math.floor((Date.now() - lastUserActivity) / 1000);
+    // 2. Check user inactivity (applied only if NOT direct P2P)
+    const isDirectP2P = (inputChannel && inputChannel.readyState === 'open');
     const banner = document.getElementById('inactivity-warning-banner');
+    if (isDirectP2P) {
+      if (banner && banner.style.display !== 'none') banner.style.display = 'none';
+      return;
+    }
+
+    const idleSec = Math.floor((Date.now() - lastUserActivity) / 1000);
     const countdownEl = document.getElementById('inactivity-countdown-text');
 
     if (idleSec >= 90 && idleSec < 120) {
       const remaining = 120 - idleSec;
       if (banner) banner.style.display = 'flex';
       if (countdownEl) {
-        countdownEl.innerText = `Desconectando em ${remaining}s para economizar banda (mova o mouse para continuar)`;
+        countdownEl.innerText = `Desconectando sessão em relay em ${remaining}s para economizar banda (mova o mouse para continuar)`;
       }
     } else if (idleSec < 90) {
       if (banner && banner.style.display !== 'none') {
@@ -1389,7 +1620,7 @@ function startSessionStatsLoop() {
     } else if (idleSec >= 120) {
       if (banner) banner.style.display = 'none';
       closeViewer();
-      showModalAlert('Sessão Encerrada por Inatividade', 'A sessão remota foi desconectada automaticamente após 2 minutos de inatividade para economizar banda e recursos.', '⏱️');
+      showModalAlert('Sessão Encerrada por Inatividade', 'A sessão remota em relay foi desconectada automaticamente após 2 minutos de inatividade para economizar banda do servidor.', '⏱️');
     }
   }, 1000);
 }
@@ -1465,6 +1696,37 @@ function closeViewer() {
   }
   // Clear canvas
   ctx.clearRect(0, 0, canvas.width, canvas.height);
+  bytesReceived = 0;
+  totalSessionBytes = 0;
+  // Reset observer mode and cursor
+  isObserverMode = false;
+  currentRemoteCursor = 'default';
+  const obsBtn = document.getElementById('btn-toggle-observer');
+  if (obsBtn) obsBtn.classList.remove('active');
+  const obsIcon = document.getElementById('observer-mode-icon');
+  if (obsIcon) obsIcon.innerText = '🖱️';
+  const obsLabel = document.getElementById('observer-mode-label');
+  if (obsLabel) obsLabel.innerText = 'Controlando';
+  if (canvas) canvas.style.cursor = 'default';
+
+  // Reset curtain and autolock
+  isCurtainActive = false;
+  const curtBtn = document.getElementById('btn-toggle-curtain');
+  if (curtBtn) curtBtn.classList.remove('active');
+
+  isAutoLockActive = false;
+  const autoLockBtn = document.getElementById('btn-toggle-autolock');
+  if (autoLockBtn) autoLockBtn.classList.remove('active');
+  const autoLockIcon = document.getElementById('autolock-toggle-icon');
+  if (autoLockIcon) autoLockIcon.innerText = '🔓';
+
+  // Reset scale
+  isScale1to1 = false;
+  const wrapper = document.getElementById('canvas-wrapper');
+  if (wrapper) wrapper.classList.remove('scale-1-1');
+  const scaleLabel = document.getElementById('scale-mode-label');
+  if (scaleLabel) scaleLabel.innerText = 'Ajustar';
+
   // Switch back to client view tab
   switchTab('client');
   resetConnectButton();
@@ -1580,13 +1842,13 @@ function setupCanvasEvents() {
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
   canvas.addEventListener('mousemove', (e) => {
-    if (!isConnected) return;
+    if (!isConnected || isObserverMode) return;
     const coords = getCanvasCoords(e);
     sendControl({ t: 'm', x: coords.x, y: coords.y });
   });
 
   canvas.addEventListener('mousedown', (e) => {
-    if (!isConnected) return;
+    if (!isConnected || isObserverMode) return;
     isMouseDown = true;
     const coords = getCanvasCoords(e);
     sendControl({ t: 'm', x: coords.x, y: coords.y });
@@ -1594,13 +1856,13 @@ function setupCanvasEvents() {
   });
 
   window.addEventListener('mouseup', (e) => {
-    if (!isConnected || !isMouseDown) return;
+    if (!isConnected || isObserverMode || !isMouseDown) return;
     isMouseDown = false;
     sendControl({ t: 'mu', b: e.button });
   });
 
   canvas.addEventListener('wheel', (e) => {
-    if (!isConnected) return;
+    if (!isConnected || isObserverMode) return;
     e.preventDefault();
     sendControl({ t: 'w', dy: e.deltaY > 0 ? -120 : 120 });
   }, { passive: false });
@@ -1608,14 +1870,36 @@ function setupCanvasEvents() {
 
 function setupKeyboardEvents() {
   window.addEventListener('keydown', (e) => {
-    if (!isConnected || e.key === 'F12') return;
+    if (!isConnected || isObserverMode || e.key === 'F12') return;
     if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+
+    // Intercept Alt+F4 to prevent closing operator's desktop window
+    if (e.altKey && (e.key === 'F4' || e.keyCode === 115)) {
+      e.preventDefault();
+      sendSystemAction('alt_f4');
+      return;
+    }
+
+    // Intercept Alt+Tab if captured
+    if (e.altKey && (e.key === 'Tab' || e.keyCode === 9)) {
+      e.preventDefault();
+      sendSystemAction('alt_tab');
+      return;
+    }
+
+    // Intercept Win+D / Meta+D
+    if ((e.metaKey || e.key === 'Meta') && (e.key === 'd' || e.key === 'D' || e.keyCode === 68)) {
+      e.preventDefault();
+      sendSystemAction('desktop');
+      return;
+    }
+
     e.preventDefault();
     sendControl({ t: 'kd', k: e.key, c: e.code, kc: e.keyCode });
   });
 
   window.addEventListener('keyup', (e) => {
-    if (!isConnected || e.key === 'F12') return;
+    if (!isConnected || isObserverMode || e.key === 'F12') return;
     if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
     e.preventDefault();
     sendControl({ t: 'ku', k: e.key, c: e.code, kc: e.keyCode });
@@ -1801,7 +2085,22 @@ async function sendFileInChunks(file) {
   const chunkSize = 48 * 1024; // 48KB per chunk
   const totalChunks = Math.ceil(file.size / chunkSize);
 
+  const hud = document.getElementById('desktop-file-progress-hud');
+  const nameEl = document.getElementById('desk-file-name');
+  const pctEl = document.getElementById('desk-file-pct');
+  const barEl = document.getElementById('desk-file-bar');
+  const bytesEl = document.getElementById('desk-file-bytes');
+  const speedEl = document.getElementById('desk-file-speed');
+
+  if (hud) hud.style.display = 'block';
+  if (nameEl) nameEl.innerText = file.name;
+  if (pctEl) pctEl.innerText = '0%';
+  if (barEl) barEl.style.width = '0%';
+
   sendControl({ t: 'file_start', file_name: file.name, file_size: file.size });
+
+  let sentBytes = 0;
+  const startTime = performance.now();
 
   for (let i = 0; i < totalChunks; i++) {
     const start = i * chunkSize;
@@ -1824,23 +2123,51 @@ async function sendFileInChunks(file) {
       seq: i + 1
     });
 
-    await new Promise(r => setTimeout(r, 10));
+    sentBytes += (end - start);
+    const pct = Math.round((sentBytes / file.size) * 100);
+    const elapsedSec = (performance.now() - startTime) / 1000;
+    const speedKB = elapsedSec > 0 ? (sentBytes / 1024 / elapsedSec) : 0;
+    const speedText = speedKB > 1024 ? `${(speedKB / 1024).toFixed(1)} MB/s` : `${Math.round(speedKB)} KB/s`;
+
+    if (pctEl) pctEl.innerText = `${pct}%`;
+    if (barEl) barEl.style.width = `${pct}%`;
+    if (bytesEl) bytesEl.innerText = `${(sentBytes / (1024*1024)).toFixed(1)} / ${(file.size / (1024*1024)).toFixed(1)} MB`;
+    if (speedEl) speedEl.innerText = speedText;
+
+    await new Promise(r => setTimeout(r, 6));
   }
 
   sendControl({ t: 'file_end', file_name: file.name });
-  await showModalAlert('Arquivo Enviado', `Arquivo "${file.name}" transmitido com sucesso para a pasta Downloads\\RemoteAccess_Transfers do computador remoto!`, '📁');
+  if (bytesEl) bytesEl.innerText = '✅ Concluído! Salvo em Downloads\\RemoteAccess_Transfers';
+  if (speedEl) speedEl.innerText = '';
+  setTimeout(() => {
+    if (hud) hud.style.display = 'none';
+  }, 3000);
 }
 
 window.addEventListener('DOMContentLoaded', () => {
   const cWrapper = document.getElementById('canvas-wrapper');
+  const dropOverlay = document.getElementById('desktop-drop-overlay');
   if (cWrapper) {
+    cWrapper.addEventListener('dragenter', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (dropOverlay) dropOverlay.style.display = 'flex';
+    });
     cWrapper.addEventListener('dragover', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (dropOverlay) dropOverlay.style.display = 'flex';
+    });
+    cWrapper.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (dropOverlay) dropOverlay.style.display = 'none';
     });
     cWrapper.addEventListener('drop', async (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (dropOverlay) dropOverlay.style.display = 'none';
       if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
         for (const file of e.dataTransfer.files) {
           await sendFileInChunks(file);
@@ -1848,6 +2175,18 @@ window.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
+  window.addEventListener('paste', (e) => {
+    if (!isConnected || observerMode) return;
+    if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'SELECT')) {
+      return;
+    }
+    const text = (e.clipboardData || window.clipboardData).getData('text');
+    if (text) {
+      e.preventDefault();
+      sendControl({ t: 'clip', text: text });
+    }
+  });
 });
 
 window.addEventListener('beforeunload', () => {
