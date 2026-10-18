@@ -88,6 +88,9 @@
             </div>
           </div>
           <div class="session-card-actions">
+            <button class="btn-control-toggle" id="btn-host-control-toggle" onclick="toggleHostRemoteControl()" title="Pausar ou permitir o controle do mouse e teclado pelo operador">
+              <span id="host-control-icon">🖱️</span> <span id="host-control-label">Desativar Controle</span>
+            </button>
             <button class="btn-chat-toggle" onclick="toggleHostChat()">
               💬 Bate-Papo <span id="host-chat-badge" class="chat-badge" style="display: none;">0</span>
             </button>
@@ -331,17 +334,8 @@
 
         <div class="dock-divider"></div>
 
-        <!-- Quick Actions -->
-        <button class="dock-btn" onclick="sendSystemAction('cad')" title="Enviar Ctrl+Alt+Del">
-          ⌨️ <span class="dock-label">CAD</span>
-        </button>
-        <button class="dock-btn" onclick="sendSystemAction('taskmgr')" title="Abrir Gerenciador de Tarefas">
-          ⚡ <span class="dock-label">Tarefas</span>
-        </button>
-        <button class="dock-btn" id="btn-toggle-audio" onclick="toggleRemoteAudio()" title="Alternar Áudio Remoto">
-          <span id="audio-toggle-icon">🔊</span> <span class="dock-label" id="audio-toggle-label">Áudio</span>
-        </button>
-        <button class="dock-btn" id="btn-toggle-observer" onclick="toggleObserverMode()" title="Alternar entre Controle Ativo e Modo Observador (bloqueia mouse e teclado)">
+        <!-- Control Mode Toggle (Controle Ativo vs Modo Observador) -->
+        <button class="dock-btn btn-control-highlight" id="btn-toggle-observer" onclick="toggleObserverMode()" title="Alternar entre Controle Ativo e Modo Observador (bloqueia envio de mouse e teclado)" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4);">
           <span id="observer-mode-icon">🖱️</span> <span class="dock-label" id="observer-mode-label">Controlando</span>
         </button>
         <button class="dock-btn" id="btn-toggle-scale" onclick="toggleScreenScale()" title="Alternar Escala (Ajustar vs 100% Original)">
@@ -353,8 +347,21 @@
         <button class="dock-btn" id="btn-toggle-autolock" onclick="toggleAutoLockOnDisconnect()" title="Bloquear automaticamente o computador remoto ao desconectar">
           <span id="autolock-toggle-icon">🔓</span> <span class="dock-label" id="autolock-toggle-label">Auto-Lock</span>
         </button>
+        <button class="dock-btn" id="btn-toggle-audio" onclick="toggleRemoteAudio()" title="Alternar Áudio Remoto">
+          <span id="audio-toggle-icon">🔊</span> <span class="dock-label" id="audio-toggle-label">Áudio</span>
+        </button>
         <button class="dock-btn" id="btn-block-input" onclick="toggleBlockInput()" title="Bloquear Mouse e Teclado Físico do Cliente Acessado">
           🚫 <span class="dock-label">Bloquear Entrada</span>
+        </button>
+
+        <div class="dock-divider"></div>
+
+        <!-- Quick Actions -->
+        <button class="dock-btn" onclick="sendSystemAction('cad')" title="Enviar Ctrl+Alt+Del">
+          ⌨️ <span class="dock-label">CAD</span>
+        </button>
+        <button class="dock-btn" onclick="sendSystemAction('taskmgr')" title="Abrir Gerenciador de Tarefas">
+          ⚡ <span class="dock-label">Tarefas</span>
         </button>
         <button class="dock-btn" onclick="openClipboardModal()" title="Colar Texto Remoto">
           📋 <span class="dock-label">Colar</span>

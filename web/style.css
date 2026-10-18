@@ -893,8 +893,15 @@ body {
   align-items: center;
   gap: 5px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7), 0 0 24px rgba(59, 130, 246, 0.18);
-  max-width: 96vw;
+  max-width: 98vw;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   white-space: nowrap;
+}
+
+.dock-content::-webkit-scrollbar {
+  display: none;
 }
 
 .dock-divider {
@@ -989,6 +996,66 @@ select option, .dock-select option {
   background: #dc2626;
   border-color: #dc2626;
   color: white;
+}
+
+.dock-btn.btn-control-highlight {
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+.dock-btn.btn-control-highlight.btn-observer-active {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
+.btn-control-toggle {
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  color: #93c5fd;
+  padding: 0.5rem 0.9rem;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  transition: all 0.2s ease;
+}
+
+.btn-control-toggle:hover {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: #60a5fa;
+  color: #fff;
+}
+
+.btn-control-toggle.paused {
+  background: rgba(234, 179, 8, 0.2);
+  border-color: rgba(234, 179, 8, 0.5);
+  color: #fde047;
+}
+
+.btn-control-toggle.paused:hover {
+  background: rgba(234, 179, 8, 0.3);
+  color: #fff;
+}
+
+@media (max-width: 1200px) {
+  #hud-status-badge,
+  #stat-bandwidth,
+  .dock-stats-group .hud-sep:nth-of-type(1),
+  .dock-stats-group .hud-sep:nth-of-type(3) {
+    display: none !important;
+  }
+  .dock-btn .dock-label {
+    display: none;
+  }
+  .dock-btn#btn-toggle-observer .dock-label,
+  .dock-btn.btn-disconnect .dock-label {
+    display: inline;
+  }
 }
 
 /* Canvas Wrapper */

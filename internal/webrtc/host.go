@@ -59,6 +59,7 @@ type HostSession struct {
 	lastReceivedClipText string
 	lastSentClipText     string
 	autoLockOnClose      bool
+	allowRemoteInput     int32 // 1 = allowed, 0 = paused by host
 	fpsUpdate    chan int
 	disconnectTimer *time.Timer
 	OnStatus     func(status string, msg string)
@@ -92,13 +93,38 @@ func NewHostSession(clientID string, clientAlias string, fps int, quality int, s
 		ctx:           ctx,
 		cancel:        cancel,
 		lastActivity:  time.Now().Unix(),
-		lastInputTime: time.Now().Unix(),
-		fpsUpdate:     make(chan int, 10),
-		activeFiles:   make(map[string]*os.File),
-		SendSignal:    sendSignal,
+		lastInputTime:    time.Now().Unix(),
+		fpsUpdate:        make(chan int, 10),
+		activeFiles:      make(map[string]*os.File),
+		SendSignal:       sendSignal,
+		allowRemoteInput: 1,
 	}
 
 	return sess, nil
+}
+
+// SetAllowRemoteInput toggles whether the host allows remote mouse and keyboard inputs
+func (h *HostSession) SetAllowRemoteInput(allow bool) {
+	if allow {
+		atomic.StoreInt32(&h.allowRemoteInput, 1)
+		h.SendControl(protocol.ControlMessage{
+			Type:   protocol.TypeChat,
+			Sender: "Sistema",
+			Text:   "✅ O cliente ativou o controle remoto de mouse e teclado.",
+		})
+	} else {
+		atomic.StoreInt32(&h.allowRemoteInput, 0)
+		h.SendControl(protocol.ControlMessage{
+			Type:   protocol.TypeChat,
+			Sender: "Sistema",
+			Text:   "⚠️ O cliente desativou o controle remoto (modo somente observação).",
+		})
+	}
+}
+
+// IsRemoteInputAllowed returns true if remote control inputs are currently accepted
+func (h *HostSession) IsRemoteInputAllowed() bool {
+	return atomic.LoadInt32(&h.allowRemoteInput) != 0
 }
 
 func (h *HostSession) IsActive() bool {
@@ -294,17 +320,29 @@ func (h *HostSession) HandleControlData(data []byte) {
 
 	switch ctrl.Type {
 	case protocol.TypeMouseMove:
-		_ = input.MoveMouseAbsolute(ctrl.X, ctrl.Y)
+		if h.IsRemoteInputAllowed() {
+			_ = input.MoveMouseAbsolute(ctrl.X, ctrl.Y)
+		}
 	case protocol.TypeMouseDown:
-		_ = input.MouseDown(ctrl.Button)
+		if h.IsRemoteInputAllowed() {
+			_ = input.MouseDown(ctrl.Button)
+		}
 	case protocol.TypeMouseUp:
-		_ = input.MouseUp(ctrl.Button)
+		if h.IsRemoteInputAllowed() {
+			_ = input.MouseUp(ctrl.Button)
+		}
 	case protocol.TypeWheel:
-		_ = input.MouseWheel(ctrl.DeltaY)
+		if h.IsRemoteInputAllowed() {
+			_ = input.MouseWheel(ctrl.DeltaY)
+		}
 	case protocol.TypeKeyDown:
-		_ = input.KeyDown(ctrl.Key, ctrl.Code, ctrl.KeyCode)
+		if h.IsRemoteInputAllowed() {
+			_ = input.KeyDown(ctrl.Key, ctrl.Code, ctrl.KeyCode)
+		}
 	case protocol.TypeKeyUp:
-		_ = input.KeyUp(ctrl.Key, ctrl.Code, ctrl.KeyCode)
+		if h.IsRemoteInputAllowed() {
+			_ = input.KeyUp(ctrl.Key, ctrl.Code, ctrl.KeyCode)
+		}
 	case protocol.TypeMonitorSwitch:
 		_ = h.capturer.SetDisplayIndex(ctrl.Monitor)
 		input.SetActiveMonitorBounds(h.capturer.GetBounds())

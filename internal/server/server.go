@@ -115,6 +115,7 @@ func (s *LocalServer) Start(port int) error {
 	mux.HandleFunc("/api/logs", s.handleLogs)
 	mux.HandleFunc("/api/set-log-file", s.handleSetLogFile)
 	mux.HandleFunc("/api/session-status", s.handleSessionStatus)
+	mux.HandleFunc("/api/host-toggle-control", s.handleHostToggleControl)
 	mux.HandleFunc("/api/kick-session", s.handleKickSession)
 	mux.HandleFunc("/api/chat-messages", s.handleGetChatMessages)
 	mux.HandleFunc("/api/send-chat", s.handleSendChatMessage)
@@ -224,16 +225,40 @@ func (s *LocalServer) handleSessionStatus(w http.ResponseWriter, r *http.Request
 	w.Header().Set("Content-Type", "application/json")
 	if sess != nil && sess.IsActive() {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"active":       true,
-			"client_id":    sess.ClientID,
-			"client_alias": sess.ClientAlias,
-			"duration":     int(time.Since(sess.ConnectedAt).Seconds()),
+			"active":                 true,
+			"client_id":              sess.ClientID,
+			"client_alias":           sess.ClientAlias,
+			"duration":               int(time.Since(sess.ConnectedAt).Seconds()),
+			"remote_control_enabled": sess.IsRemoteInputAllowed(),
 		})
 	} else {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"active": false,
 		})
 	}
+}
+
+func (s *LocalServer) handleHostToggleControl(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	sess := s.hostSession
+	s.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	if sess != nil && sess.IsActive() {
+		cur := sess.IsRemoteInputAllowed()
+		newVal := !cur
+		sess.SetAllowRemoteInput(newVal)
+		log.Printf("[Host] Controle remoto de mouse/teclado alterado pelo cliente local para: %v", newVal)
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":                 "ok",
+			"remote_control_enabled": newVal,
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "error",
+		"message": "Nenhuma sessão ativa no momento",
+	})
 }
 
 func (s *LocalServer) handleKickSession(w http.ResponseWriter, r *http.Request) {

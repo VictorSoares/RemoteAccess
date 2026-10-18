@@ -238,6 +238,35 @@ async function runVisualTests() {
     await pageClient.screenshot({ path: appInitialScreenshot });
     console.log('[Playwright] Screenshot do app desktop inicial salvo:', appInitialScreenshot);
 
+    // Validar botão de alternar controle remoto no Host Session Banner (#btn-host-control-toggle)
+    await pageClient.evaluate(() => {
+      const box = document.getElementById('active-session-box');
+      if (box) box.style.display = 'flex';
+      if (typeof updateHostControlUI === 'function') {
+        updateHostControlUI(true);
+      }
+    });
+    const hostControlBtn = await pageClient.$('#btn-host-control-toggle');
+    if (!hostControlBtn) {
+      throw new Error('Elemento #btn-host-control-toggle não encontrado no host banner!');
+    }
+    const hostInitialLabel = await pageClient.$eval('#host-control-label', el => el.innerText.trim());
+    console.log('[Playwright] Estado inicial no Host (Controle Ativo):', hostInitialLabel);
+    if (hostInitialLabel !== 'Desativar Controle') {
+      throw new Error(`Esperado "Desativar Controle", obtido "${hostInitialLabel}"`);
+    }
+
+    await pageClient.evaluate(() => {
+      if (typeof updateHostControlUI === 'function') {
+        updateHostControlUI(false);
+      }
+    });
+    const hostPausedLabel = await pageClient.$eval('#host-control-label', el => el.innerText.trim());
+    console.log('[Playwright] Estado após pausar no Host:', hostPausedLabel);
+    if (hostPausedLabel !== 'Ativar Controle') {
+      throw new Error(`Esperado "Ativar Controle", obtido "${hostPausedLabel}"`);
+    }
+
     // Simular abertura do viewer no app desktop
     await pageClient.evaluate(() => {
       const vContainer = document.getElementById('viewer-container');

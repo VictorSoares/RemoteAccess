@@ -287,12 +287,22 @@ function toggleObserverMode() {
   const icon = document.getElementById('observer-mode-icon');
   const label = document.getElementById('observer-mode-label');
   if (!isObserverMode) {
-    if (btn) btn.classList.remove('active');
+    if (btn) {
+      btn.classList.remove('btn-observer-active');
+      btn.style.background = 'rgba(34, 197, 94, 0.2)';
+      btn.style.color = '#4ade80';
+      btn.style.borderColor = 'rgba(34, 197, 94, 0.4)';
+    }
     if (icon) icon.innerText = '🖱️';
     if (label) label.innerText = 'Controlando';
     if (canvas) canvas.style.cursor = currentRemoteCursor || 'default';
   } else {
-    if (btn) btn.classList.add('active');
+    if (btn) {
+      btn.classList.add('btn-observer-active');
+      btn.style.background = 'rgba(239, 68, 68, 0.2)';
+      btn.style.color = '#f87171';
+      btn.style.borderColor = 'rgba(239, 68, 68, 0.4)';
+    }
     if (icon) icon.innerText = '👁️';
     if (label) label.innerText = 'Observador';
     if (canvas) canvas.style.cursor = 'default';
@@ -575,6 +585,7 @@ async function fetchSessionStatus() {
       const m = Math.floor(data.duration / 60).toString().padStart(2, '0');
       const s = (data.duration % 60).toString().padStart(2, '0');
       document.getElementById('host-session-duration').innerText = `${m}:${s}`;
+      updateHostControlUI(data.remote_control_enabled !== false);
       await refreshHostChat();
     } else {
       if (box) box.style.display = 'none';
@@ -600,6 +611,39 @@ async function fetchSessionStatus() {
       hideHostToast();
     }
   } catch (err) {}
+}
+
+async function toggleHostRemoteControl() {
+  try {
+    const res = await fetch('/api/host-toggle-control', { method: 'POST' });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      updateHostControlUI(data.remote_control_enabled);
+      if (typeof showToast === 'function') {
+        showToast(data.remote_control_enabled ? '🖱️ Controle remoto ativado.' : '👁️ Controle remoto desativado (modo observação).');
+      }
+    }
+  } catch (err) {
+    console.error('Erro ao alternar controle remoto no host:', err);
+  }
+}
+
+function updateHostControlUI(enabled) {
+  const btn = document.getElementById('btn-host-control-toggle');
+  const icon = document.getElementById('host-control-icon');
+  const label = document.getElementById('host-control-label');
+  if (!btn) return;
+  if (enabled) {
+    btn.classList.remove('paused');
+    if (icon) icon.innerText = '🖱️';
+    if (label) label.innerText = 'Desativar Controle';
+    btn.title = 'Clique para pausar o controle do operador (somente visualização)';
+  } else {
+    btn.classList.add('paused');
+    if (icon) icon.innerText = '👁️';
+    if (label) label.innerText = 'Ativar Controle';
+    btn.title = 'Clique para permitir que o operador controle mouse e teclado';
+  }
 }
 
 let appAudioCtx = null;
