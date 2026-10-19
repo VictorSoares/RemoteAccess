@@ -1594,6 +1594,7 @@
     function switchWebViewerMonitor(monIdx) {
       sendViewerCtrl({ t: 'mon_switch', mon: parseInt(monIdx) });
     }
+    window.switchRemoteMonitor = switchWebViewerMonitor;
 
     function setWebViewerQuality(mode) {
       if (mode === 'speed') {
@@ -2622,6 +2623,16 @@
       e.preventDefault();
       sendViewerCtrl({ t: 'w', dy: e.deltaY > 0 ? -120 : 120 });
     }, { passive: false });
+    // Emergency Escape Hotkey (Shift+Escape ou Ctrl+Shift+Q) para desconexão imediata e liberação do cursor local
+    window.addEventListener('keydown', (e) => {
+      if (viewerConnected && ((e.shiftKey && e.key === 'Escape') || (e.ctrlKey && e.shiftKey && (e.key === 'q' || e.key === 'Q' || e.code === 'KeyQ')))) {
+        e.preventDefault();
+        e.stopPropagation();
+        closeWebViewer();
+        return;
+      }
+    }, true);
+
     window.addEventListener('keydown', (e) => {
       if (!viewerConnected || !viewerControlEnabled || e.key === 'F12') return;
       if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'SELECT')) {

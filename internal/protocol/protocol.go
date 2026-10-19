@@ -28,6 +28,7 @@ type SignalingMessage struct {
 	Monitors  int             `json:"monitors,omitempty"`
 	MAC       string          `json:"mac,omitempty"`
 	TargetID  string          `json:"targetId,omitempty"`
+	HostID    string          `json:"host_id,omitempty"`
 	Password  string          `json:"password,omitempty"`
 	SDP       string          `json:"sdp,omitempty"`
 	Candidate json.RawMessage `json:"candidate,omitempty"`

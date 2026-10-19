@@ -555,10 +555,14 @@ function updateViewerMonitors(count, activeMon) {
   const currentVal = monSelect.value;
   monSelect.innerHTML = '';
   const total = Math.max(1, count || 1);
+  const monWrap = document.getElementById('viewer-mon-wrap');
+  if (monWrap) {
+    monWrap.style.display = total > 1 ? 'inline-flex' : 'none';
+  }
   for (let i = 0; i < total; i++) {
     const opt = document.createElement('option');
     opt.value = i;
-    opt.innerText = `🖥️ Monitor ${i + 1}`;
+    opt.innerText = `🖥️ Mon ${i + 1}`;
     monSelect.appendChild(opt);
   }
   if (activeMon !== undefined && parseInt(activeMon) >= 0 && parseInt(activeMon) < total) {
@@ -1274,6 +1278,17 @@ async function connectToRemote(e) {
     return;
   }
 
+  // Prevenção contra auto-conexão (loop infinito de cursor e vídeo)
+  const myIdClean = (myHostInfo.id || '').replace(/\D/g, '');
+  if (myIdClean && rawTargetId === myIdClean) {
+    await showModalAlert(
+      'Auto-Conexão Não Permitida',
+      'Você não pode iniciar uma sessão de controle remoto para o seu próprio computador. O acesso a si mesmo gera um loop infinito de cursor e vídeo entre as telas.',
+      '🚫'
+    );
+    return;
+  }
+
   currentTargetId = rawTargetId;
   const btn = document.getElementById('btn-connect');
   btn.disabled = true;
@@ -1913,6 +1928,16 @@ function setupCanvasEvents() {
 }
 
 function setupKeyboardEvents() {
+  // Emergency Escape Hotkey (Shift+Escape ou Ctrl+Shift+Q) para desconexão imediata e liberação do cursor local
+  window.addEventListener('keydown', (e) => {
+    if (isConnected && ((e.shiftKey && e.key === 'Escape') || (e.ctrlKey && e.shiftKey && (e.key === 'q' || e.key === 'Q' || e.code === 'KeyQ')))) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeViewer();
+      return;
+    }
+  }, true);
+
   window.addEventListener('keydown', (e) => {
     if (!isConnected || isObserverMode || e.key === 'F12') return;
     if (document.activeElement && document.activeElement.tagName === 'INPUT') return;

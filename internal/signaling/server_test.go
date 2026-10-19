@@ -7,7 +7,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/gorilla/websocket"
+	"remoteaccess/internal/protocol"
 )
 
 func TestCleanAndFormatID(t *testing.T) {
@@ -173,5 +177,47 @@ func TestServerGzipDashboardAndStats(t *testing.T) {
 	}
 	if _, ok := statsData["host_count"]; !ok {
 		t.Errorf("Expected host_count in decompressed stats")
+	}
+}
+
+func TestSelfConnectionRejected(t *testing.T) {
+	srv := NewServer()
+	ts := httptest.NewServer(http.HandlerFunc(srv.HandleWS))
+	defer ts.Close()
+
+	wsURL := "ws" + ts.URL[4:]
+	ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to dial test websocket: %v", err)
+	}
+	defer ws.Close()
+
+	// Read initial status message
+	var initMsg protocol.SignalingMessage
+	if err := ws.ReadJSON(&initMsg); err != nil {
+		t.Fatalf("Failed to read initial status: %v", err)
+	}
+
+	// Attempt self-connection with HostID matching TargetID
+	selfConnect := protocol.SignalingMessage{
+		Action:   protocol.ActionConnect,
+		ID:       initMsg.ID,
+		HostID:   "123456",
+		TargetID: "123456",
+	}
+	if err := ws.WriteJSON(selfConnect); err != nil {
+		t.Fatalf("Failed to send self-connect: %v", err)
+	}
+
+	// Expect ActionError rejecting self-connection
+	var respMsg protocol.SignalingMessage
+	if err := ws.ReadJSON(&respMsg); err != nil {
+		t.Fatalf("Failed to read response: %v", err)
+	}
+	if respMsg.Action != protocol.ActionError {
+		t.Errorf("Expected ActionError for self-connection, got %q", respMsg.Action)
+	}
+	if !strings.Contains(respMsg.Message, "Auto-conexão não permitida") {
+		t.Errorf("Expected auto-connection error message, got %q", respMsg.Message)
 	}
 }

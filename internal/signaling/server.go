@@ -326,6 +326,15 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 			return
 
 		case protocol.ActionConnect:
+			if (msg.TargetID != "" && msg.TargetID == peer.ID) || (msg.HostID != "" && msg.HostID == msg.TargetID) {
+				s.addLog("Conexão recusada: Tentativa de auto-conexão (HostID == TargetID: %s)", msg.TargetID)
+				_ = conn.WriteJSON(protocol.SignalingMessage{
+					Action:  protocol.ActionError,
+					Message: "Auto-conexão não permitida: Você não pode controlar seu próprio computador remotamente na mesma sessão.",
+				})
+				continue
+			}
+
 			s.mu.RLock()
 			targetPeer, exists := s.peers[msg.TargetID]
 			s.mu.RUnlock()
