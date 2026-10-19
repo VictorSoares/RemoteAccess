@@ -664,8 +664,13 @@ function getAppAudioContext() {
   return appAudioCtx;
 }
 
-window.addEventListener('pointerdown', () => { getAppAudioContext(); }, { once: true });
-window.addEventListener('keydown', () => { getAppAudioContext(); }, { once: true });
+function ensureAppAudioRunning() {
+  if (appAudioCtx && appAudioCtx.state === 'suspended') {
+    appAudioCtx.resume().catch(() => {});
+  }
+}
+window.addEventListener('pointerdown', ensureAppAudioRunning);
+window.addEventListener('keydown', ensureAppAudioRunning);
 
 function toggleRemoteAudio() {
   remoteAudioMuted = !remoteAudioMuted;
@@ -695,10 +700,15 @@ function toggleRemoteAudio() {
 function handleRemoteAudioData(buffer) {
   if (remoteAudioMuted) return;
   const ctx = getAppAudioContext();
-  if (!ctx || ctx.state !== 'running') return;
+  if (!ctx) return;
+
+  if (ctx.state === 'suspended') {
+    ctx.resume().catch(() => {});
+    return;
+  }
 
   const int16 = new Int16Array(buffer);
-  const numFrames = Math.floor(int16.length / 2); // 2 channels stereo
+  const numFrames = Math.floor(int16.length / 2); // 2 canais estéreo
   if (numFrames === 0) return;
 
   const audioBuffer = ctx.createBuffer(2, numFrames, 48000);
@@ -715,12 +725,16 @@ function handleRemoteAudioData(buffer) {
   source.connect(ctx.destination);
 
   const currentTime = ctx.currentTime;
-  if (nextRemoteAudioPlayTime < currentTime) {
-    nextRemoteAudioPlayTime = currentTime + 0.02; // 20ms lead
+  if (nextRemoteAudioPlayTime < currentTime || nextRemoteAudioPlayTime > currentTime + 0.25) {
+    nextRemoteAudioPlayTime = currentTime + 0.04; // 40ms lead para suavização de jitter
   }
 
-  source.start(nextRemoteAudioPlayTime);
-  nextRemoteAudioPlayTime += audioBuffer.duration;
+  try {
+    source.start(nextRemoteAudioPlayTime);
+    nextRemoteAudioPlayTime += audioBuffer.duration;
+  } catch (e) {
+    try { source.start(0); } catch (_) {}
+  }
 }
 
 function playChatChime() {
@@ -1224,19 +1238,6 @@ function connectSignaling() {
 
         case 'data':
           if (typeof msg.payload === 'string' && msg.payload.startsWith('{')) {
-function updateAppLatency(rtt) {
-  const latEl = document.getElementById('stat-latency');
-  if (!latEl) return;
-  latEl.innerText = `⚡ ${rtt} ms`;
-  if (rtt < 50) {
-    latEl.style.color = '#4ade80';
-  } else if (rtt <= 150) {
-    latEl.style.color = '#fbbf24';
-  } else {
-    latEl.style.color = '#f87171';
-  }
-}
-
             try {
               const ctrl = JSON.parse(msg.payload);
               if (ctrl.t === 'pong') {
@@ -1270,6 +1271,7 @@ function updateAppLatency(rtt) {
 // Client: Connect to Remote Host
 async function connectToRemote(e) {
   if (e) e.preventDefault();
+  getAppAudioContext();
   const rawTargetId = document.getElementById('target-id').value.replace(/\D/g, '');
   const targetPwd = document.getElementById('target-pwd').value;
 
@@ -1631,6 +1633,19 @@ function sendControl(ctrlObj) {
   }
 }
 
+function updateAppLatency(rtt) {
+  const latEl = document.getElementById('stat-latency');
+  if (!latEl) return;
+  latEl.innerText = `⚡ ${rtt} ms`;
+  if (rtt < 50) {
+    latEl.style.color = '#4ade80';
+  } else if (rtt <= 150) {
+    latEl.style.color = '#fbbf24';
+  } else {
+    latEl.style.color = '#f87171';
+  }
+}
+
 function startPingLoop() {
   if (pingIntervalTimer) clearInterval(pingIntervalTimer);
   pingIntervalTimer = setInterval(() => {
@@ -1686,6 +1701,7 @@ function startSessionStatsLoop() {
 
 function openViewer() {
   isConnected = true;
+  getAppAudioContext();
   sessionStartTime = Date.now();
   lastUserActivity = Date.now();
   viewerContainer.style.display = 'flex';
@@ -1708,6 +1724,7 @@ function openViewer() {
 function closeViewer() {
   if (!isConnected && viewerContainer.style.display === 'none') return;
   isConnected = false;
+  nextRemoteAudioPlayTime = 0;
   viewerContainer.style.display = 'none';
   if (pingIntervalTimer) {
     clearInterval(pingIntervalTimer);
@@ -1907,6 +1924,7 @@ function setupCanvasEvents() {
   });
 
   canvas.addEventListener('mousedown', (e) => {
+    getAppAudioContext();
     if (!isConnected || isObserverMode) return;
     isMouseDown = true;
     const coords = getCanvasCoords(e);
@@ -2275,4 +2293,26 @@ window.addEventListener('beforeunload', () => {
     navigator.sendBeacon('/api/app-close');
   } catch (e) {}
 });
+
+// Reativação imediata ao voltar para a aba/janela (evita desconexão espúria por throttling de timer)
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    ensureAppAudioRunning();
+    if (isConnected) {
+      sendControl({ t: 'ping', ts: performance.now() });
+    }
+  }
+});
+
+// Suporte a rolagem horizontal via mouse wheel na dock toolbar caso tela seja ultra compacta
+const dockContentEl = document.querySelector('.dock-content');
+if (dockContentEl) {
+  dockContentEl.addEventListener('wheel', (e) => {
+    if (dockContentEl.scrollWidth > dockContentEl.clientWidth) {
+      dockContentEl.scrollLeft += e.deltaY;
+      e.preventDefault();
+    }
+  }, { passive: false });
+}
+
 

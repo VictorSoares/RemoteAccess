@@ -145,12 +145,12 @@ func (h *HostSession) handleDisconnectGrace(source string) {
 	if h.disconnectTimer != nil {
 		return // Tolerância já em andamento
 	}
-	log.Printf("[Host] %s desconectado temporariamente. Tolerância de reconexão de 4s ativada...", source)
-	h.disconnectTimer = time.AfterFunc(4*time.Second, func() {
+	log.Printf("[Host] %s desconectado temporariamente. Tolerância de reconexão de 20s ativada...", source)
+	h.disconnectTimer = time.AfterFunc(20*time.Second, func() {
 		h.mu.Lock()
 		h.disconnectTimer = nil
 		h.mu.Unlock()
-		log.Printf("[Host] Tempo limite de reconexão esgotado (4s). Encerrando sessão.")
+		log.Printf("[Host] Tempo limite de reconexão esgotado (20s). Encerrando sessão.")
 		h.Close()
 	})
 }
@@ -252,8 +252,16 @@ func (h *HostSession) HandleRemoteOffer(targetID string, sdpStr string) error {
 			h.mu.Lock()
 			h.audioChannel = dc
 			h.mu.Unlock()
-			log.Println("[Host] Audio DataChannel conectado.")
+			dc.OnOpen(func() {
+				h.mu.Lock()
+				h.audioChannel = dc
+				h.mu.Unlock()
+				log.Println("[Host] Audio DataChannel aberto e pronto para streaming.")
+			})
 			dc.OnClose(func() {
+				h.mu.Lock()
+				h.audioChannel = nil
+				h.mu.Unlock()
 				log.Println("[Host] Audio DataChannel fechado.")
 			})
 		}
@@ -607,8 +615,8 @@ func (h *HostSession) StartStreaming() {
 			case <-watchdogTicker.C:
 				now := time.Now().Unix()
 				last := atomic.LoadInt64(&h.lastActivity)
-				if last > 0 && now-last > 5 {
-					log.Printf("[Host] Conexão de rede com cliente (%s) interrompida (>5s sem resposta). Encerrando sessão.", h.ClientID)
+				if last > 0 && now-last > 90 {
+					log.Printf("[Host] Conexão de rede com cliente (%s) interrompida (>90s sem resposta). Encerrando sessão.", h.ClientID)
 					go h.Close()
 					return
 				}

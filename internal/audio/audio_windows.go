@@ -135,9 +135,19 @@ func StartLoopbackCapture(ctx context.Context, onPCM func(data []byte)) error {
 		log.Printf("[Audio] WASAPI Loopback ativo: %d Hz, %d canais, %d bits", pwfx.nSamplesPerSec, pwfx.nChannels, pwfx.wBitsPerSample)
 
 		channels := int(pwfx.nChannels)
+		if channels < 1 {
+			channels = 2
+		}
 		isFloat := (pwfx.wBitsPerSample == 32)
+		srcRate := int(pwfx.nSamplesPerSec)
+		if srcRate <= 0 {
+			srcRate = 48000
+		}
 
-		pcmBuf := make([]byte, 4096)
+		pcmBuf := make([]byte, 8192)
+		tempLeft := make([]int16, 2048)
+		tempRight := make([]int16, 2048)
+
 		ticker := time.NewTicker(20 * time.Millisecond)
 		defer ticker.Stop()
 
@@ -156,32 +166,75 @@ func StartLoopbackCapture(ctx context.Context, onPCM func(data []byte)) error {
 					hr, _, _ := syscall.SyscallN(capVtbl[3], captureClient, uintptr(unsafe.Pointer(&pData)), uintptr(unsafe.Pointer(&numFramesRead)), uintptr(unsafe.Pointer(&flags)), 0, 0)
 
 					if hr == 0 && numFramesRead > 0 && pData != 0 {
-						// Check if silent packet
 						if (flags & AUDCLNT_BUFFERFLAGS_SILENT) == 0 {
-							// Convert float32 or int16 to 16-bit stereo PCM
-							totalSamples := int(numFramesRead) * channels
-							reqBytes := totalSamples * 2
-							if len(pcmBuf) < reqBytes {
-								pcmBuf = make([]byte, reqBytes)
+							nFrames := int(numFramesRead)
+							if len(tempLeft) < nFrames {
+								tempLeft = make([]int16, nFrames)
+								tempRight = make([]int16, nFrames)
 							}
 
+							totalSamples := nFrames * channels
 							if isFloat {
 								floatSlice := (*[1 << 26]float32)(unsafe.Pointer(pData))[:totalSamples:totalSamples]
-								for i := 0; i < totalSamples; i++ {
-									f := floatSlice[i]
-									if f > 1.0 {
-										f = 1.0
-									} else if f < -1.0 {
-										f = -1.0
+								for f := 0; f < nFrames; f++ {
+									lf := floatSlice[f*channels]
+									if lf > 1.0 {
+										lf = 1.0
+									} else if lf < -1.0 {
+										lf = -1.0
 									}
-									val := int16(f * 32767.0)
-									binary.LittleEndian.PutUint16(pcmBuf[i*2:i*2+2], uint16(val))
+									tempLeft[f] = int16(lf * 32767.0)
+
+									rf := lf
+									if channels > 1 {
+										rf = floatSlice[f*channels+1]
+										if rf > 1.0 {
+											rf = 1.0
+										} else if rf < -1.0 {
+											rf = -1.0
+										}
+									}
+									tempRight[f] = int16(rf * 32767.0)
 								}
-								onPCM(pcmBuf[:reqBytes])
 							} else if pwfx.wBitsPerSample == 16 {
-								srcSlice := (*[1 << 26]byte)(unsafe.Pointer(pData))[:reqBytes:reqBytes]
-								copy(pcmBuf, srcSlice)
-								onPCM(pcmBuf[:reqBytes])
+								int16Slice := (*[1 << 26]int16)(unsafe.Pointer(pData))[:totalSamples:totalSamples]
+								for f := 0; f < nFrames; f++ {
+									tempLeft[f] = int16Slice[f*channels]
+									if channels > 1 {
+										tempRight[f] = int16Slice[f*channels+1]
+									} else {
+										tempRight[f] = tempLeft[f]
+									}
+								}
+							}
+
+							if srcRate == 48000 {
+								outBytes := nFrames * 4
+								if len(pcmBuf) < outBytes {
+									pcmBuf = make([]byte, outBytes)
+								}
+								for f := 0; f < nFrames; f++ {
+									binary.LittleEndian.PutUint16(pcmBuf[f*4:f*4+2], uint16(tempLeft[f]))
+									binary.LittleEndian.PutUint16(pcmBuf[f*4+2:f*4+4], uint16(tempRight[f]))
+								}
+								onPCM(pcmBuf[:outBytes])
+							} else {
+								outFrames := (nFrames * 48000) / srcRate
+								if outFrames > 0 {
+									outBytes := outFrames * 4
+									if len(pcmBuf) < outBytes {
+										pcmBuf = make([]byte, outBytes)
+									}
+									for of := 0; of < outFrames; of++ {
+										sf := (of * srcRate) / 48000
+										if sf >= nFrames {
+											sf = nFrames - 1
+										}
+										binary.LittleEndian.PutUint16(pcmBuf[of*4:of*4+2], uint16(tempLeft[sf]))
+										binary.LittleEndian.PutUint16(pcmBuf[of*4+2:of*4+4], uint16(tempRight[sf]))
+									}
+									onPCM(pcmBuf[:outBytes])
+								}
 							}
 						}
 						syscall.SyscallN(capVtbl[4], captureClient, uintptr(numFramesRead))

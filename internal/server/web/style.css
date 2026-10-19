@@ -826,6 +826,8 @@ body {
   transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease;
   opacity: 0;
   pointer-events: none;
+  max-width: calc(100vw - 20px);
+  box-sizing: border-box;
 }
 
 .viewer-dock.dock-visible,
@@ -875,12 +877,13 @@ body {
 .dock-stats-group {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   font-family: var(--font-mono);
-  font-size: 0.74rem;
+  font-size: 0.73rem;
   color: #e2e8f0;
   padding: 0 4px;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .dock-content {
@@ -888,12 +891,13 @@ body {
   backdrop-filter: blur(24px);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 9999px;
-  padding: 4px 10px;
+  padding: 4px 8px;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 3px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7), 0 0 24px rgba(59, 130, 246, 0.18);
-  max-width: 98vw;
+  max-width: 100%;
+  box-sizing: border-box;
   overflow-x: auto;
   scrollbar-width: none;
   -ms-overflow-style: none;
@@ -959,18 +963,34 @@ select option, .dock-select option {
 
 .dock-btn {
   background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   color: #e2e8f0;
-  padding: 5px 10px;
+  padding: 4px 7px;
   border-radius: 6px;
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   font-weight: 600;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   transition: all 0.15s ease;
   white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.dock-btn .dock-label {
+  display: none;
+}
+
+.dock-btn#btn-toggle-observer .dock-label,
+.dock-btn.btn-disconnect .dock-label {
+  display: inline;
+}
+
+@media (min-width: 1750px) {
+  .dock-btn .dock-label {
+    display: inline;
+  }
 }
 
 .dock-btn:hover {
@@ -1042,19 +1062,12 @@ select option, .dock-select option {
   color: #fff;
 }
 
-@media (max-width: 1200px) {
+@media (max-width: 900px) {
   #hud-status-badge,
   #stat-bandwidth,
   .dock-stats-group .hud-sep:nth-of-type(1),
   .dock-stats-group .hud-sep:nth-of-type(3) {
     display: none !important;
-  }
-  .dock-btn .dock-label {
-    display: none;
-  }
-  .dock-btn#btn-toggle-observer .dock-label,
-  .dock-btn.btn-disconnect .dock-label {
-    display: inline;
   }
 }
 

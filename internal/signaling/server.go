@@ -229,14 +229,7 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 		if activeTarget != "" {
 			if targetPeer, ok := s.peers[activeTarget]; ok {
 				targetPeer.ActiveTargetID = ""
-				targetPeer.mu.Lock()
-				_ = targetPeer.Conn.WriteJSON(protocol.SignalingMessage{
-					Action:   protocol.ActionClose,
-					TargetID: targetPeer.ID,
-					ID:       peer.ID,
-					Message:  "A sessão foi encerrada pela outra ponta.",
-				})
-				targetPeer.mu.Unlock()
+				// Não envia ActionClose: conexões WebRTC P2P diretas continuam ativas mesmo se o WebSocket de sinalização oscilar
 			}
 		}
 		s.mu.Unlock()
