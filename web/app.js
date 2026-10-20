@@ -1724,6 +1724,7 @@ function openViewer() {
 function closeViewer() {
   if (!isConnected && viewerContainer.style.display === 'none') return;
   isConnected = false;
+  releaseAllViewerKeys();
   nextRemoteAudioPlayTime = 0;
   viewerContainer.style.display = 'none';
   if (pingIntervalTimer) {
@@ -1945,12 +1946,31 @@ function setupCanvasEvents() {
   }, { passive: false });
 }
 
+let pressedKeyCodes = new Set();
+function releaseAllViewerKeys() {
+  if (pressedKeyCodes.size > 0) {
+    for (const code of pressedKeyCodes) {
+      sendControl({ t: 'ku', k: code, c: code, kc: 0 });
+    }
+    pressedKeyCodes.clear();
+  }
+  sendControl({ t: 'sys_cmd', cmd: 'release_keys' });
+}
+
 function setupKeyboardEvents() {
+  // Liberação automática de teclas presas ao perder foco da janela
+  window.addEventListener('blur', () => {
+    if (isConnected) {
+      releaseAllViewerKeys();
+    }
+  });
+
   // Emergency Escape Hotkey (Shift+Escape ou Ctrl+Shift+Q) para desconexão imediata e liberação do cursor local
   window.addEventListener('keydown', (e) => {
     if (isConnected && ((e.shiftKey && e.key === 'Escape') || (e.ctrlKey && e.shiftKey && (e.key === 'q' || e.key === 'Q' || e.code === 'KeyQ')))) {
       e.preventDefault();
       e.stopPropagation();
+      releaseAllViewerKeys();
       closeViewer();
       return;
     }
@@ -1958,11 +1978,14 @@ function setupKeyboardEvents() {
 
   window.addEventListener('keydown', (e) => {
     if (!isConnected || isObserverMode || e.key === 'F12') return;
-    if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+    if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
+
+    pressedKeyCodes.add(e.code || e.key);
 
     // Intercept Alt+F4 to prevent closing operator's desktop window
     if (e.altKey && (e.key === 'F4' || e.keyCode === 115)) {
       e.preventDefault();
+      releaseAllViewerKeys();
       sendSystemAction('alt_f4');
       return;
     }
@@ -1970,6 +1993,7 @@ function setupKeyboardEvents() {
     // Intercept Alt+Tab if captured
     if (e.altKey && (e.key === 'Tab' || e.keyCode === 9)) {
       e.preventDefault();
+      releaseAllViewerKeys();
       sendSystemAction('alt_tab');
       return;
     }
@@ -1977,19 +2001,39 @@ function setupKeyboardEvents() {
     // Intercept Win+D / Meta+D
     if ((e.metaKey || e.key === 'Meta') && (e.key === 'd' || e.key === 'D' || e.keyCode === 68)) {
       e.preventDefault();
+      releaseAllViewerKeys();
       sendSystemAction('desktop');
       return;
     }
 
     e.preventDefault();
-    sendControl({ t: 'kd', k: e.key, c: e.code, kc: e.keyCode });
+    sendControl({
+      t: 'kd',
+      k: e.key,
+      c: e.code,
+      kc: e.keyCode,
+      alt: e.altKey,
+      ctrl: e.ctrlKey,
+      shift: e.shiftKey,
+      meta: e.metaKey
+    });
   });
 
   window.addEventListener('keyup', (e) => {
     if (!isConnected || isObserverMode || e.key === 'F12') return;
-    if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+    if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
+    pressedKeyCodes.delete(e.code || e.key);
     e.preventDefault();
-    sendControl({ t: 'ku', k: e.key, c: e.code, kc: e.keyCode });
+    sendControl({
+      t: 'ku',
+      k: e.key,
+      c: e.code,
+      kc: e.keyCode,
+      alt: e.altKey,
+      ctrl: e.ctrlKey,
+      shift: e.shiftKey,
+      meta: e.metaKey
+    });
   });
 }
 

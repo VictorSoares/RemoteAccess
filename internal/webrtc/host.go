@@ -100,6 +100,8 @@ func NewHostSession(clientID string, clientAlias string, fps int, quality int, s
 		allowRemoteInput: 1,
 	}
 
+	input.ReleaseAllModifierKeys()
+
 	return sess, nil
 }
 
@@ -345,7 +347,7 @@ func (h *HostSession) HandleControlData(data []byte) {
 		}
 	case protocol.TypeKeyDown:
 		if h.IsRemoteInputAllowed() {
-			_ = input.KeyDown(ctrl.Key, ctrl.Code, ctrl.KeyCode)
+			_ = input.KeyDownEx(ctrl.Key, ctrl.Code, ctrl.KeyCode, ctrl.Alt, ctrl.Ctrl, ctrl.Shift, ctrl.Meta)
 		}
 	case protocol.TypeKeyUp:
 		if h.IsRemoteInputAllowed() {
@@ -370,6 +372,8 @@ func (h *HostSession) HandleControlData(data []byte) {
 		case "close", "disconnect":
 			log.Printf("[Host] Comando de encerramento de sessão recebido do cliente (%s)", h.ClientID)
 			go h.Close()
+		case "release_keys":
+			input.ReleaseAllModifierKeys()
 		case "lock", "win_l":
 			input.LockWorkstation()
 		case "taskmgr":
@@ -686,6 +690,7 @@ func (h *HostSession) StopStreaming() {
 func (h *HostSession) Close() {
 	_ = input.BlockLocalInput(false)
 	_ = input.EnablePrivacyScreen(false) // Always restore physical display when session ends
+	input.ReleaseAllModifierKeys()        // Always clean up any held keys when session finishes
 	h.cancel()
 	h.mu.Lock()
 	shouldLock := h.autoLockOnClose

@@ -89,6 +89,10 @@ type ControlMessage struct {
 	FileSize int64   `json:"file_size,omitempty"`
 	Chunk    string  `json:"chunk,omitempty"`
 	Seq      int     `json:"seq,omitempty"`
+	Alt      bool    `json:"alt,omitempty"`
+	Ctrl     bool    `json:"ctrl,omitempty"`
+	Shift    bool    `json:"shift,omitempty"`
+	Meta     bool    `json:"meta,omitempty"`
 }
 
 // EncodeVideoChunk prepends an 8-byte header [uint32 frameID, uint16 chunkIndex, uint16 totalChunks] to the chunk payload

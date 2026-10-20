@@ -24,6 +24,7 @@ var (
 	procSetCursorPos             = user32.NewProc("SetCursorPos")
 	procMouseEvent               = user32.NewProc("mouse_event")
 	procKeybdEvent               = user32.NewProc("keybd_event")
+	procGetAsyncKeyState          = user32.NewProc("GetAsyncKeyState")
 	procGetSystemMetrics         = user32.NewProc("GetSystemMetrics")
 	procBlockInput               = user32.NewProc("BlockInput")
 	procLockWorkStation          = user32.NewProc("LockWorkStation")
@@ -531,8 +532,74 @@ func SendUnicodeChar(r rune) error {
 	return nil
 }
 
-// KeyDown simulates key press
-func KeyDown(key, code string, keyCode int) error {
+// IsKeyDownAsync checks whether a virtual key is currently held down in the OS
+func IsKeyDownAsync(vk uint16) bool {
+	if procGetAsyncKeyState.Find() != nil {
+		return false
+	}
+	ret, _, _ := procGetAsyncKeyState.Call(uintptr(vk))
+	return (ret & 0x8000) != 0
+}
+
+// ReleaseAllModifierKeys forcefully releases all modifier keys (Ctrl, Alt, Shift, Win)
+func ReleaseAllModifierKeys() {
+	modifiers := []struct {
+		vk       uint16
+		extended bool
+	}{
+		{0x10, false}, // VK_SHIFT
+		{0xA0, false}, // VK_LSHIFT
+		{0xA1, false}, // VK_RSHIFT
+		{0x11, false}, // VK_CONTROL
+		{0xA2, false}, // VK_LCONTROL
+		{0xA3, true},  // VK_RCONTROL
+		{0x12, false}, // VK_MENU (Alt)
+		{0xA4, false}, // VK_LMENU (Left Alt)
+		{0xA5, true},  // VK_RMENU (Right Alt / AltGr)
+		{0x5B, true},  // VK_LWIN
+		{0x5C, true},  // VK_RWIN
+	}
+
+	for _, m := range modifiers {
+		flags := uintptr(keyeventfKeyup)
+		if m.extended {
+			flags |= keyeventfExtendedkey
+		}
+		procKeybdEvent.Call(uintptr(m.vk), 0, flags, remoteAccessMagicExtraInfo)
+	}
+}
+
+// AutoUnstickModifiers ensures ghost modifier keys are released before typing
+func AutoUnstickModifiers(alt, ctrl, shift, meta bool) {
+	if !alt {
+		if IsKeyDownAsync(0x12) || IsKeyDownAsync(0xA4) || IsKeyDownAsync(0xA5) {
+			procKeybdEvent.Call(0x12, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+			procKeybdEvent.Call(0xA4, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+			procKeybdEvent.Call(0xA5, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+		}
+	}
+	if !meta {
+		if IsKeyDownAsync(0x5B) || IsKeyDownAsync(0x5C) {
+			procKeybdEvent.Call(0x5B, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+			procKeybdEvent.Call(0x5C, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+		}
+	}
+	if !ctrl {
+		if IsKeyDownAsync(0x11) || IsKeyDownAsync(0xA2) || IsKeyDownAsync(0xA3) {
+			procKeybdEvent.Call(0x11, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+			procKeybdEvent.Call(0xA2, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+			procKeybdEvent.Call(0xA3, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+		}
+	}
+}
+
+// KeyDownEx simulates key press with modifier unstick validation
+func KeyDownEx(key, code string, keyCode int, alt, ctrl, shift, meta bool) error {
+	if code != "AltLeft" && code != "AltRight" && code != "ControlLeft" && code != "ControlRight" &&
+		code != "MetaLeft" && code != "MetaRight" && code != "ShiftLeft" && code != "ShiftRight" {
+		AutoUnstickModifiers(alt, ctrl, shift, meta)
+	}
+
 	runes := []rune(key)
 	// Check if this is a printable non-ASCII Unicode character (e.g. ç, ã, é, ^, ~, etc.)
 	if len(runes) == 1 && runes[0] > 127 {
@@ -549,6 +616,11 @@ func KeyDown(key, code string, keyCode int) error {
 		return nil
 	}
 	return nil
+}
+
+// KeyDown simulates key press
+func KeyDown(key, code string, keyCode int) error {
+	return KeyDownEx(key, code, keyCode, false, false, false, false)
 }
 
 // KeyUp simulates key release
@@ -573,7 +645,7 @@ func KeyUp(key, code string, keyCode int) error {
 
 func isExtendedKey(vk uint16) bool {
 	switch vk {
-	case 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E, 0x5D:
+	case 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2D, 0x2E, 0x5B, 0x5C, 0x5D, 0xA3, 0xA5, 0x6F:
 		return true
 	default:
 		return false
@@ -586,14 +658,15 @@ var jsKeyToVK = map[string]uint16{
 	"Tab":          0x09,
 	"Enter":        0x0D,
 	"Shift":        0x10,
-	"ShiftLeft":    0x10,
-	"ShiftRight":   0x10,
+	"ShiftLeft":    0xA0,
+	"ShiftRight":   0xA1,
 	"Control":      0x11,
-	"ControlLeft":  0x11,
-	"ControlRight": 0x11,
+	"ControlLeft":  0xA2,
+	"ControlRight": 0xA3,
 	"Alt":          0x12,
-	"AltLeft":      0x12,
-	"AltRight":     0x12,
+	"AltLeft":      0xA4,
+	"AltRight":     0xA5,
+	"AltGraph":     0xA5,
 	"Pause":        0x13,
 	"CapsLock":     0x14,
 	"Escape":       0x1B,

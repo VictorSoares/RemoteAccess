@@ -2197,6 +2197,7 @@
 
     function closeWebViewer() {
       viewerConnected = false;
+      if (typeof releaseAllWebViewerKeys === 'function') releaseAllWebViewerKeys();
       nextAudioPlayTime = 0;
       if (vPingTimer) {
         clearInterval(vPingTimer);
@@ -2650,11 +2651,29 @@
       e.preventDefault();
       sendViewerCtrl({ t: 'w', dy: e.deltaY > 0 ? -120 : 120 });
     }, { passive: false });
+    let pressedWebKeyCodes = new Set();
+    function releaseAllWebViewerKeys() {
+      if (pressedWebKeyCodes.size > 0) {
+        for (const code of pressedWebKeyCodes) {
+          sendViewerCtrl({ t: 'ku', k: code, c: code, kc: 0 });
+        }
+        pressedWebKeyCodes.clear();
+      }
+      sendViewerCtrl({ t: 'sys_cmd', cmd: 'release_keys' });
+    }
+
+    window.addEventListener('blur', () => {
+      if (viewerConnected) {
+        releaseAllWebViewerKeys();
+      }
+    });
+
     // Emergency Escape Hotkey (Shift+Escape ou Ctrl+Shift+Q) para desconexão imediata e liberação do cursor local
     window.addEventListener('keydown', (e) => {
       if (viewerConnected && ((e.shiftKey && e.key === 'Escape') || (e.ctrlKey && e.shiftKey && (e.key === 'q' || e.key === 'Q' || e.code === 'KeyQ')))) {
         e.preventDefault();
         e.stopPropagation();
+        releaseAllWebViewerKeys();
         closeWebViewer();
         return;
       }
@@ -2666,9 +2685,12 @@
         return; // Allow typing in chat input and dialogs!
       }
 
+      pressedWebKeyCodes.add(e.code || e.key);
+
       // Intercept Alt+F4 to prevent closing operator's browser window
       if (e.altKey && (e.key === 'F4' || e.keyCode === 115)) {
         e.preventDefault();
+        releaseAllWebViewerKeys();
         sendViewerSys('alt_f4');
         return;
       }
@@ -2676,6 +2698,7 @@
       // Intercept Alt+Tab if captured by browser
       if (e.altKey && (e.key === 'Tab' || e.keyCode === 9)) {
         e.preventDefault();
+        releaseAllWebViewerKeys();
         sendViewerSys('alt_tab');
         return;
       }
@@ -2683,20 +2706,40 @@
       // Intercept Win+D / Meta+D if captured by browser
       if ((e.metaKey || e.key === 'Meta') && (e.key === 'd' || e.key === 'D' || e.keyCode === 68)) {
         e.preventDefault();
+        releaseAllWebViewerKeys();
         sendViewerSys('desktop');
         return;
       }
 
       e.preventDefault();
-      sendViewerCtrl({ t: 'kd', k: e.key, c: e.code, kc: e.keyCode });
+      sendViewerCtrl({
+        t: 'kd',
+        k: e.key,
+        c: e.code,
+        kc: e.keyCode,
+        alt: e.altKey,
+        ctrl: e.ctrlKey,
+        shift: e.shiftKey,
+        meta: e.metaKey
+      });
     });
     window.addEventListener('keyup', (e) => {
       if (!viewerConnected || !viewerControlEnabled || e.key === 'F12') return;
       if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'SELECT')) {
         return; // Allow typing in chat input and dialogs!
       }
+      pressedWebKeyCodes.delete(e.code || e.key);
       e.preventDefault();
-      sendViewerCtrl({ t: 'ku', k: e.key, c: e.code, kc: e.keyCode });
+      sendViewerCtrl({
+        t: 'ku',
+        k: e.key,
+        c: e.code,
+        kc: e.keyCode,
+        alt: e.altKey,
+        ctrl: e.ctrlKey,
+        shift: e.shiftKey,
+        meta: e.metaKey
+      });
     });
 
     // Reativação imediata ao focar na janela/aba (evita desconexão espúria por throttling de 60s do navegador)
