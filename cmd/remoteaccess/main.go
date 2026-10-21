@@ -371,9 +371,9 @@ func main() {
 		}
 	}
 
-	// 3. Varredura ativa de instâncias: no modo Admin ou execução explícita, força takeover de instâncias anteriores/zumbis
+	// 3. Varredura ativa de instâncias: SEMPRE força takeover para garantir instância única limpa
 	isElevated := config.IsAdmin()
-	sweepExistingInstances(os.Getpid(), isElevated || *elevateFlag)
+	sweepExistingInstances(os.Getpid(), true)
 
 	// Acquire single-instance lock with retry for smooth transitions during elevation
 	maxWait := 300 * time.Millisecond
