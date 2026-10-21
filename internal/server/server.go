@@ -442,6 +442,7 @@ func (s *LocalServer) handleSetAlias(w http.ResponseWriter, r *http.Request) {
 			Password: hostPwd,
 			Monitors: capture.GetNumDisplays(),
 			MAC:      wol.GetPrimaryMACAddress(),
+			IsAdmin:  config.IsAdmin(),
 		})
 	}
 
@@ -510,6 +511,7 @@ func (s *LocalServer) handleSetPassword(w http.ResponseWriter, r *http.Request) 
 			Password: req.Password,
 			Monitors: capture.GetNumDisplays(),
 			MAC:      wol.GetPrimaryMACAddress(),
+			IsAdmin:  config.IsAdmin(),
 		})
 	}
 
@@ -602,7 +604,8 @@ func (s *LocalServer) cloudSignalingLoop() {
 		primaryMAC := wol.GetPrimaryMACAddress()
 		s.mu.Unlock()
 
-		log.Printf("[Nuvem] Conectado com sucesso! Registrado Host ID: %s (Alias: %s, Monitores: %d, MAC: %s)", hostID, hostAlias, numDisplays, primaryMAC)
+		isAdmin := config.IsAdmin()
+		log.Printf("[Nuvem] Conectado com sucesso! Registrado Host ID: %s (Alias: %s, Monitores: %d, MAC: %s, Admin: %v)", hostID, hostAlias, numDisplays, primaryMAC, isAdmin)
 
 		err = s.writeCloudJSON(protocol.SignalingMessage{
 			Action:   protocol.ActionRegister,
@@ -611,6 +614,7 @@ func (s *LocalServer) cloudSignalingLoop() {
 			Password: hostPwd,
 			Monitors: numDisplays,
 			MAC:      primaryMAC,
+			IsAdmin:  isAdmin,
 		})
 		if err != nil {
 			conn.Close()

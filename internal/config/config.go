@@ -245,9 +245,15 @@ func ElevateSelf(args string) error {
 	if err != nil {
 		return err
 	}
+	trimmed := strings.TrimSpace(args)
+	if trimmed == "" {
+		trimmed = "-elevate"
+	} else if !strings.Contains(trimmed, "-elevate") && !strings.Contains(trimmed, "-install") && !strings.Contains(trimmed, "-uninstall") {
+		trimmed = "-elevate " + trimmed
+	}
 	verb, _ := syscall.UTF16PtrFromString("runas")
 	file, _ := syscall.UTF16PtrFromString(exePath)
-	params, _ := syscall.UTF16PtrFromString(args)
+	params, _ := syscall.UTF16PtrFromString(trimmed)
 
 	ret, _, _ := procShellExecuteW.Call(
 		0,

@@ -25,11 +25,113 @@ import (
 const version = "2.0.0"
 
 var (
-	kernel32        = syscall.NewLazyDLL("kernel32.dll")
-	procCreateMutex = kernel32.NewProc("CreateMutexW")
-	procCloseHandle = kernel32.NewProc("CloseHandle")
-	appMutex        uintptr
+	kernel32                     = syscall.NewLazyDLL("kernel32.dll")
+	procCreateMutex              = kernel32.NewProc("CreateMutexW")
+	procCloseHandle              = kernel32.NewProc("CloseHandle")
+	procCreateToolhelp32Snapshot = kernel32.NewProc("CreateToolhelp32Snapshot")
+	procProcess32FirstW          = kernel32.NewProc("Process32FirstW")
+	procProcess32NextW           = kernel32.NewProc("Process32NextW")
+	procOpenProcess              = kernel32.NewProc("OpenProcess")
+	procTerminateProcess         = kernel32.NewProc("TerminateProcess")
+	appMutex                     uintptr
 )
+
+type processEntry32W struct {
+	dwSize              uint32
+	cntUsage            uint32
+	th32ProcessID       uint32
+	th32DefaultHeapID   uintptr
+	th32ModuleID        uint32
+	cntThreads          uint32
+	th32ParentProcessID uint32
+	pcPriClassBase      int32
+	dwFlags             uint32
+	szExeFile           [260]uint16
+}
+
+func sweepExistingInstances(currentPID int, forceTakeover bool) {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	// TH32CS_SNAPPROCESS = 0x00000002
+	hSnap, _, _ := procCreateToolhelp32Snapshot.Call(2, 0)
+	if hSnap == 0 || hSnap == uintptr(syscall.InvalidHandle) {
+		return
+	}
+	defer procCloseHandle.Call(hSnap)
+
+	var entry processEntry32W
+	entry.dwSize = uint32(unsafe.Sizeof(entry))
+
+	ret, _, _ := procProcess32FirstW.Call(hSnap, uintptr(unsafe.Pointer(&entry)))
+	var targetPIDs []uint32
+
+	for ret != 0 {
+		pid := entry.th32ProcessID
+		if int(pid) != currentPID && pid > 4 {
+			exeName := syscall.UTF16ToString(entry.szExeFile[:])
+			if strings.EqualFold(exeName, "RemoteAccess.exe") {
+				targetPIDs = append(targetPIDs, pid)
+			}
+		}
+		ret, _, _ = procProcess32NextW.Call(hSnap, uintptr(unsafe.Pointer(&entry)))
+	}
+
+	if len(targetPIDs) == 0 {
+		return
+	}
+
+	log.Printf("[Instâncias] Detectadas %d instâncias anteriores de RemoteAccess.exe (PIDs: %v)", len(targetPIDs), targetPIDs)
+
+	if forceTakeover {
+		// 1. Tentar encerramento gracioso via HTTP se porta estiver aberta
+		client := &http.Client{Timeout: 300 * time.Millisecond}
+		for port := 8080; port < 8090; port++ {
+			resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/app-close", port))
+			if err == nil && resp != nil {
+				_ = resp.Body.Close()
+			}
+		}
+		time.Sleep(300 * time.Millisecond)
+
+		// 2. Encerrar qualquer processo restante (PROCESS_TERMINATE = 0x0001)
+		for _, pid := range targetPIDs {
+			hProc, _, _ := procOpenProcess.Call(0x0001, 0, uintptr(pid))
+			if hProc != 0 {
+				procTerminateProcess.Call(hProc, 0)
+				procCloseHandle.Call(hProc)
+				log.Printf("[Instâncias] Processo anterior PID %d finalizado para takeover.", pid)
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+func syncProgramFilesExe() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	progFiles := os.Getenv("ProgramFiles")
+	if progFiles == "" {
+		progFiles = `C:\Program Files`
+	}
+	targetDir := filepath.Join(progFiles, "RemoteAccess")
+	targetExe := filepath.Join(targetDir, "RemoteAccess.exe")
+	currentExe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	if strings.EqualFold(filepath.Clean(currentExe), filepath.Clean(targetExe)) {
+		return
+	}
+	if _, err := os.Stat(targetDir); err == nil {
+		data, err := os.ReadFile(currentExe)
+		if err == nil && len(data) > 0 {
+			_ = os.WriteFile(targetExe, data, 0755)
+			log.Printf("[Instalação] Executável em %s sincronizado automaticamente.", targetExe)
+		}
+	}
+}
 
 func acquireSingleInstanceLock(maxWait time.Duration) bool {
 	if runtime.GOOS != "windows" {
@@ -39,14 +141,14 @@ func acquireSingleInstanceLock(maxWait time.Duration) bool {
 	deadline := time.Now().Add(maxWait)
 	for {
 		hMutex, _, _ := procCreateMutex.Call(0, 1, uintptr(unsafe.Pointer(name)))
-		if hMutex != 0 && syscall.GetLastError() != syscall.ERROR_ALREADY_EXISTS {
-			appMutex = hMutex
-			return true
+		if hMutex != 0 {
+			if syscall.GetLastError() != syscall.ERROR_ALREADY_EXISTS {
+				appMutex = hMutex
+				return true
+			}
+			procCloseHandle.Call(hMutex)
 		}
 		if time.Now().After(deadline) {
-			if hMutex != 0 {
-				procCloseHandle.Call(hMutex)
-			}
 			return false
 		}
 		time.Sleep(150 * time.Millisecond)
@@ -269,19 +371,33 @@ func main() {
 		}
 	}
 
-	// 3. Acquire single-instance lock with retry for smooth transitions during elevation
+	// 3. Varredura ativa de instâncias: no modo Admin ou execução explícita, força takeover de instâncias anteriores/zumbis
+	isElevated := config.IsAdmin()
+	sweepExistingInstances(os.Getpid(), isElevated || *elevateFlag)
+
+	// Acquire single-instance lock with retry for smooth transitions during elevation
 	maxWait := 300 * time.Millisecond
-	if *elevateFlag || config.IsAdmin() {
+	if *elevateFlag || isElevated {
 		maxWait = 3 * time.Second
 	}
 
 	if !acquireSingleInstanceLock(maxWait) {
+		// Se ainda não conseguiu, tenta uma última varredura forçada antes de desistir
+		sweepExistingInstances(os.Getpid(), true)
+		if acquireSingleInstanceLock(1 * time.Second) {
+			goto instanceAcquired
+		}
 		log.Println("[Aviso] Outra instância do RemoteAccess já está em execução.")
 		if !*noBrowser {
 			runningPort := findRunningLocalPort()
 			runNativeAppWindow(fmt.Sprintf("http://127.0.0.1:%d", runningPort))
 		}
 		os.Exit(0)
+	}
+
+instanceAcquired:
+	if isElevated {
+		syncProgramFilesExe()
 	}
 
 	cfg := config.LoadConfig()
