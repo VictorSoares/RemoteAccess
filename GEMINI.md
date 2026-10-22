@@ -40,3 +40,7 @@ Este arquivo define regras de arquitetura e integridade que **NUNCA DEVEM SER MO
 
 ## 6. Documentação no Obsidian
 - Toda e qualquer alteração de arquitetura ou comportamento deve ser registrada e mantida em sincronia no vault em D:\Obsidian\Victor-Vault\01-Projetos\RemoteAccess.md.
+
+## Regra de ouro — arquivos e Git compartilhados (2026-10-21)
+
+Antes de editar/gerar/substituir arquivos ou executar publicação autorizada, ler e aplicar a regra compartilhada em `C:/Users/Victor/.codex/skills/victor-shared-git-safety/SKILL.md`. Vale para Codex, Claude, Gemini e Paperclip. Conferir conteúdo existente, baseline local, branches/upstream e estado atual no servidor; preservar trabalho de Leandro/Victor/outros agentes, detectar mudanças entre leitura e escrita e repetir a conferência antes de publicar. Nunca sobrescrever trabalho concorrente, publicar snapshot antigo ou assumir que main/dev existem/estão sincronizadas. Sem autorização implícita de commit/push/merge/deploy ou criação remota de branch. Se a regra não puder ser lida, interromper a escrita e registrar a limitação; investigação somente leitura pode continuar.

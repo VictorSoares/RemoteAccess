@@ -915,9 +915,15 @@
     <div class="web-viewer-dock" id="web-viewer-toolbar">
       <!-- Integrated Stats Group -->
       <div style="display: flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 0.73rem; padding: 0 4px; flex-shrink: 0;">
+        <span id="web-stat-target" style="color: #60a5fa; font-weight: 700;">Host: ---</span>
+        <span style="opacity: 0.3;">|</span>
         <span id="web-stat-mode" style="color: #4ade80; font-weight: 700;">● P2P</span>
         <span style="opacity: 0.3;">|</span>
         <span id="web-stat-lat" style="color: #38bdf8; font-weight: 700;">⚡ 0 ms</span>
+        <span style="opacity: 0.3;">|</span>
+        <span id="web-stat-fps" style="color: #a78bfa; font-weight: 700;">0 FPS</span>
+        <span style="opacity: 0.3;">|</span>
+        <span id="web-stat-bandwidth" style="color: #38bdf8; font-weight: 700;">0 KB/s</span>
         <span style="opacity: 0.3;">|</span>
         <span id="web-stat-timer" style="color: #fbbf24; font-weight: 700;">⏱️ 00:00</span>
       </div>
@@ -1109,7 +1115,7 @@
     function toggleViewerBlockInput() {
       if (!viewerConnected) return;
       viewerInputBlocked = !viewerInputBlocked;
-      sendViewerSysCmd('block_input', { block: viewerInputBlocked });
+      sendViewerCtrl({ t: 'sys_cmd', cmd: 'block_input', block: viewerInputBlocked });
       const btn = document.getElementById('btn-viewer-block-input');
       if (btn) {
         if (viewerInputBlocked) {
@@ -1430,12 +1436,17 @@
         }
         const data = await res.json();
 
-        document.getElementById('stat-hosts').innerText = data.host_count || 0;
-        document.getElementById('stat-sessions').innerText = data.active_sessions || 0;
-        document.getElementById('stat-uptime').innerText = formatDuration(data.uptime_sec || 0);
-        document.getElementById('stat-packets').innerText = (data.total_packets || 0).toLocaleString();
+        const elHosts = document.getElementById('stat-hosts');
+        const elSessions = document.getElementById('stat-sessions');
+        const elUptime = document.getElementById('stat-uptime');
+        const elPackets = document.getElementById('stat-packets');
+        if (elHosts) elHosts.innerText = data.host_count || 0;
+        if (elSessions) elSessions.innerText = data.active_sessions || 0;
+        if (elUptime) elUptime.innerText = formatDuration(data.uptime_sec || 0);
+        if (elPackets) elPackets.innerText = (data.total_packets || 0).toLocaleString();
 
         const tbody = document.getElementById('peers-table-body');
+        if (!tbody) return;
         if (!data.peers || data.peers.length === 0) {
           tbody.innerHTML = '<tr><td colspan="8" class="empty-row">Nenhum computador registrado online no momento.</td></tr>';
         } else {
@@ -1511,7 +1522,7 @@
         if (resLogs.status === 200) {
           const logsData = await resLogs.json();
           const term = document.getElementById('logs-terminal');
-          if (logsData.logs && logsData.logs.length > 0) {
+          if (term && logsData.logs && logsData.logs.length > 0) {
             term.innerText = logsData.logs.join('\n');
             term.scrollTop = term.scrollHeight;
           }
@@ -1806,10 +1817,12 @@
       getViewerAudioContext();
       currentSessionTarget = targetId;
       saveDashboardRecentHost(targetId, targetPwd);
-      document.getElementById('web-stat-target').innerText = 'Host: ' + formatID(targetId);
+      const targetStatEl = document.getElementById('web-stat-target');
+      if (targetStatEl) targetStatEl.innerText = 'Host: ' + formatID(targetId);
       const modeEl = document.getElementById('web-stat-mode');
       if (modeEl) modeEl.innerText = '● Conectando P2P...';
-      document.getElementById('web-viewer-container').style.display = 'flex';
+      const viewerContainer = document.getElementById('web-viewer-container');
+      if (viewerContainer) viewerContainer.style.display = 'flex';
       viewerConnected = true;
       updateWebViewerMonitors(monitorsCount || 1);
       startViewerSessionTimers();
@@ -2214,7 +2227,8 @@
       const banner = document.getElementById('web-inactivity-banner');
       if (banner) banner.style.display = 'none';
 
-      document.getElementById('web-viewer-container').style.display = 'none';
+      const viewerCont = document.getElementById('web-viewer-container');
+      if (viewerCont) viewerCont.style.display = 'none';
 
       if (vInputChannel) {
         try { vInputChannel.close(); } catch(e) {}
@@ -2247,8 +2261,7 @@
       if (document.fullscreenElement) {
         document.exitFullscreen().catch(() => {});
       }
-      // Clear canvas
-      vCtx.clearRect(0, 0, vCanvas.width, vCanvas.height);
+      if (vCtx && vCanvas) vCtx.clearRect(0, 0, vCanvas.width, vCanvas.height);
       vFrameAssembly = null;
       vPendingBlob = null;
       vIsRenderingFrame = false;
@@ -2302,6 +2315,7 @@
 
     async function toggleViewerFullscreen() {
       const container = document.getElementById('web-viewer-container');
+      if (!container) return;
       if (!document.fullscreenElement) {
         try {
           await container.requestFullscreen();

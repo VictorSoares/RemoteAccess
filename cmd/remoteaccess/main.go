@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -140,13 +141,14 @@ func acquireSingleInstanceLock(maxWait time.Duration) bool {
 	name, _ := syscall.UTF16PtrFromString("Local\\RemoteAccess_SingleInstance_Mutex")
 	deadline := time.Now().Add(maxWait)
 	for {
-		hMutex, _, _ := procCreateMutex.Call(0, 1, uintptr(unsafe.Pointer(name)))
+		hMutex, _, err := procCreateMutex.Call(0, 1, uintptr(unsafe.Pointer(name)))
 		if hMutex != 0 {
-			if syscall.GetLastError() != syscall.ERROR_ALREADY_EXISTS {
+			if err == syscall.ERROR_ALREADY_EXISTS {
+				procCloseHandle.Call(hMutex)
+			} else {
 				appMutex = hMutex
 				return true
 			}
-			procCloseHandle.Call(hMutex)
 		}
 		if time.Now().After(deadline) {
 			return false
@@ -166,95 +168,178 @@ func findRunningLocalPort() int {
 	return 8080
 }
 
+var windowSizeGuardOnce sync.Once
+
+// bringWindowToFront searches for an existing RemoteAccess window and restores/focuses it.
+func bringWindowToFront() bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	user32 := syscall.NewLazyDLL("user32.dll")
+	procEnumWindows := user32.NewProc("EnumWindows")
+	procGetWindowTextW := user32.NewProc("GetWindowTextW")
+	procGetClassNameW := user32.NewProc("GetClassNameW")
+	procShowWindow := user32.NewProc("ShowWindow")
+	procSetForegroundWindow := user32.NewProc("SetForegroundWindow")
+	procIsWindow := user32.NewProc("IsWindow")
+
+	var targetHWND uintptr
+	cb := syscall.NewCallback(func(hwnd uintptr, lParam uintptr) uintptr {
+		r, _, _ := procIsWindow.Call(hwnd)
+		if r == 0 {
+			return 1
+		}
+		var clsBuf [256]uint16
+		procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&clsBuf[0])), 256)
+		cls := syscall.UTF16ToString(clsBuf[:])
+		if cls != "Chrome_WidgetWin_1" {
+			return 1
+		}
+		var buf [256]uint16
+		procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), 256)
+		title := syscall.UTF16ToString(buf[:])
+		if strings.Contains(title, "Bate-Papo") || strings.Contains(title, "Chat") {
+			return 1
+		}
+		if strings.Contains(title, "RemoteAccess") || strings.Contains(title, "127.0.0.1") {
+			targetHWND = hwnd
+			return 0 // found target window
+		}
+		return 1
+	})
+	procEnumWindows.Call(cb, 0)
+
+	if targetHWND != 0 {
+		// SW_RESTORE = 9: activates and restores window if minimized
+		procShowWindow.Call(targetHWND, 9)
+		procSetForegroundWindow.Call(targetHWND)
+		log.Println("[Janela] Janela ativa encontrada e restaurada para primeiro plano.")
+		return true
+	}
+	return false
+}
+
+// cleanupStaleEdgeProfile ensures no stale lock files or lingering headless Edge processes
+// prevent Edge from launching cleanly.
+func cleanupStaleEdgeProfile(profileDir string) {
+	lockFiles := []string{
+		filepath.Join(profileDir, "SingletonLock"),
+		filepath.Join(profileDir, "SingletonCookie"),
+		filepath.Join(profileDir, "SingletonSocket"),
+		filepath.Join(profileDir, "lockfile"),
+	}
+	allClean := true
+	for _, f := range lockFiles {
+		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
+			allClean = false
+		}
+	}
+	if !allClean {
+		// Stale Edge processes may be holding lock files. Terminate only Edge processes tied to RemoteAccess_WebProfile.
+		_ = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
+			`Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'msedge.exe' -and $_.CommandLine -like '*RemoteAccess_WebProfile*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
+		).Run()
+		for _, f := range lockFiles {
+			_ = os.Remove(f)
+		}
+	}
+}
+
 // startWindowSizeGuard enforces a rigid native minimum window size (540x580)
 // on the application window so the user physically cannot shrink it below the threshold.
 func startWindowSizeGuard() {
 	if runtime.GOOS != "windows" {
 		return
 	}
-	user32 := syscall.NewLazyDLL("user32.dll")
-	procGetWindowRect := user32.NewProc("GetWindowRect")
-	procSetWindowPos := user32.NewProc("SetWindowPos")
-	procGetWindowTextW := user32.NewProc("GetWindowTextW")
-	procGetClassNameW := user32.NewProc("GetClassNameW")
-	procEnumWindows := user32.NewProc("EnumWindows")
-	procIsWindowVisible := user32.NewProc("IsWindowVisible")
-	procIsZoomed := user32.NewProc("IsZoomed")
-	procIsIconic := user32.NewProc("IsIconic")
+	windowSizeGuardOnce.Do(func() {
+		user32 := syscall.NewLazyDLL("user32.dll")
+		procGetWindowRect := user32.NewProc("GetWindowRect")
+		procSetWindowPos := user32.NewProc("SetWindowPos")
+		procGetWindowTextW := user32.NewProc("GetWindowTextW")
+		procGetClassNameW := user32.NewProc("GetClassNameW")
+		procEnumWindows := user32.NewProc("EnumWindows")
+		procIsWindowVisible := user32.NewProc("IsWindowVisible")
+		procIsZoomed := user32.NewProc("IsZoomed")
+		procIsIconic := user32.NewProc("IsIconic")
 
-	type rect struct {
-		left, top, right, bottom int32
-	}
-
-	go func() {
-		ticker := time.NewTicker(40 * time.Millisecond) // 25Hz physical clamp
-		defer ticker.Stop()
-
-		isVis := func(h uintptr) bool {
-			r, _, _ := procIsWindowVisible.Call(h)
-			return r != 0
+		type rect struct {
+			left, top, right, bottom int32
 		}
 
-		var targetHWND uintptr
-		// Allocate callback ONCE outside the loop to avoid exhausting Go runtime callback table
-		findCb := syscall.NewCallback(func(hwnd uintptr, lParam uintptr) uintptr {
-			if !isVis(hwnd) {
-				return 1
-			}
-			var clsBuf [256]uint16
-			procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&clsBuf[0])), 256)
-			cls := syscall.UTF16ToString(clsBuf[:])
-			if cls != "Chrome_WidgetWin_1" {
-				return 1
-			}
-			var buf [256]uint16
-			procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), 256)
-			title := syscall.UTF16ToString(buf[:])
-			if strings.Contains(title, "Bate-Papo") || strings.Contains(title, "Chat") {
-				return 1
-			}
-			if strings.Contains(title, "RemoteAccess") || strings.Contains(title, "127.0.0.1") {
-				targetHWND = hwnd
-				return 0 // found, stop enumerating
-			}
-			return 1
-		})
+		go func() {
+			ticker := time.NewTicker(40 * time.Millisecond) // 25Hz physical clamp
+			defer ticker.Stop()
 
-		for range ticker.C {
-			if targetHWND == 0 || !isVis(targetHWND) {
-				targetHWND = 0
-				procEnumWindows.Call(findCb, 0)
+			isVis := func(h uintptr) bool {
+				r, _, _ := procIsWindowVisible.Call(h)
+				return r != 0
 			}
 
-			if targetHWND != 0 {
-				isMin, _, _ := procIsIconic.Call(targetHWND)
-				if isMin != 0 {
-					continue
+			var targetHWND uintptr
+			// Allocate callback ONCE outside the loop to avoid exhausting Go runtime callback table
+			findCb := syscall.NewCallback(func(hwnd uintptr, lParam uintptr) uintptr {
+				if !isVis(hwnd) {
+					return 1
 				}
-				isMax, _, _ := procIsZoomed.Call(targetHWND)
-				if isMax != 0 {
-					continue
+				var clsBuf [256]uint16
+				procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&clsBuf[0])), 256)
+				cls := syscall.UTF16ToString(clsBuf[:])
+				if cls != "Chrome_WidgetWin_1" {
+					return 1
+				}
+				var buf [256]uint16
+				procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), 256)
+				title := syscall.UTF16ToString(buf[:])
+				if strings.Contains(title, "Bate-Papo") || strings.Contains(title, "Chat") {
+					return 1
+				}
+				if strings.Contains(title, "RemoteAccess") || strings.Contains(title, "127.0.0.1") {
+					targetHWND = hwnd
+					return 0 // found, stop enumerating
+				}
+				return 1
+			})
+
+			for range ticker.C {
+				if targetHWND == 0 || !isVis(targetHWND) {
+					targetHWND = 0
+					procEnumWindows.Call(findCb, 0)
 				}
 
-				var r rect
-				ret, _, _ := procGetWindowRect.Call(targetHWND, uintptr(unsafe.Pointer(&r)))
-				if ret != 0 {
-					w := r.right - r.left
-					h := r.bottom - r.top
-					// Lock to crisp fixed resolution (960x720) when not maximized
-					if w != 960 || h != 720 {
-						// SWP_NOMOVE (0x0002) | SWP_NOZORDER (0x0004) | SWP_NOACTIVATE (0x0010)
-						procSetWindowPos.Call(targetHWND, 0, 0, 0, 960, 720, 0x0002|0x0004|0x0010)
+				if targetHWND != 0 {
+					isMin, _, _ := procIsIconic.Call(targetHWND)
+					if isMin != 0 {
+						continue
+					}
+					isMax, _, _ := procIsZoomed.Call(targetHWND)
+					if isMax != 0 {
+						continue
+					}
+
+					var r rect
+					ret, _, _ := procGetWindowRect.Call(targetHWND, uintptr(unsafe.Pointer(&r)))
+					if ret != 0 {
+						w := r.right - r.left
+						h := r.bottom - r.top
+						// Lock to crisp fixed resolution (960x720) when not maximized
+						if w != 960 || h != 720 {
+							// SWP_NOMOVE (0x0002) | SWP_NOZORDER (0x0004) | SWP_NOACTIVATE (0x0010)
+							procSetWindowPos.Call(targetHWND, 0, 0, 0, 960, 720, 0x0002|0x0004|0x0010)
+						}
 					}
 				}
 			}
-		}
-	}()
+		}()
+	})
 }
 
 // runNativeAppWindow opens the standalone desktop app window (Edge App mode or browser fallback)
 func runNativeAppWindow(url string) {
 	if runtime.GOOS == "windows" {
+		if bringWindowToFront() {
+			return
+		}
+
 		edgePaths := []string{
 			os.Getenv("ProgramFiles(x86)") + `\Microsoft\Edge\Application\msedge.exe`,
 			os.Getenv("ProgramFiles") + `\Microsoft\Edge\Application\msedge.exe`,
@@ -265,6 +350,7 @@ func runNativeAppWindow(url string) {
 
 		profileDir := filepath.Join(os.TempDir(), "RemoteAccess_WebProfile")
 		_ = os.MkdirAll(profileDir, 0755)
+		cleanupStaleEdgeProfile(profileDir)
 
 		for _, edgePath := range edgePaths {
 			if _, err := os.Stat(edgePath); err == nil {
@@ -275,6 +361,10 @@ func runNativeAppWindow(url string) {
 					"--app-id=RemoteAccessPortable",
 					"--no-first-run",
 					"--no-default-browser-check",
+					"--disable-background-mode",
+					"--disable-background-networking",
+					"--disable-component-update",
+					"--disable-sync",
 				)
 				if err := cmd.Start(); err == nil {
 					log.Printf("[Janela] Janela desktop nativa iniciada via Edge (%s)", edgePath)
@@ -371,9 +461,11 @@ func main() {
 		}
 	}
 
-	// 3. Varredura ativa de instâncias: SEMPRE força takeover para garantir instância única limpa
+	// 3. Varredura ativa de instâncias: apenas se for elevação explícita
 	isElevated := config.IsAdmin()
-	sweepExistingInstances(os.Getpid(), true)
+	if *elevateFlag {
+		sweepExistingInstances(os.Getpid(), true)
+	}
 
 	// Acquire single-instance lock with retry for smooth transitions during elevation
 	maxWait := 300 * time.Millisecond
@@ -382,10 +474,12 @@ func main() {
 	}
 
 	if !acquireSingleInstanceLock(maxWait) {
-		// Se ainda não conseguiu, tenta uma última varredura forçada antes de desistir
-		sweepExistingInstances(os.Getpid(), true)
-		if acquireSingleInstanceLock(1 * time.Second) {
-			goto instanceAcquired
+		if *elevateFlag {
+			// Se está elevando e ainda não liberou o lock, tenta uma última varredura forçada
+			sweepExistingInstances(os.Getpid(), true)
+			if acquireSingleInstanceLock(1 * time.Second) {
+				goto instanceAcquired
+			}
 		}
 		log.Println("[Aviso] Outra instância do RemoteAccess já está em execução.")
 		if !*noBrowser {

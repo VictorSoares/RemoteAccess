@@ -41,6 +41,7 @@ if ($LASTEXITCODE -eq 0) {
     Write-Host "=============================================" -ForegroundColor Green
 
     if ($Sign) {
+        Start-Sleep -Milliseconds 800
         if (Test-Path "scripts/sign.ps1") {
             if ($InstallRoot) {
                 & ./scripts/sign.ps1 -FilePath "RemoteAccess.exe" -InstallRoot

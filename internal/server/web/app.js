@@ -2334,7 +2334,6 @@ window.addEventListener('beforeunload', () => {
         }));
       }
     }
-    navigator.sendBeacon('/api/app-close');
   } catch (e) {}
 });
 
