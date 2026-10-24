@@ -236,9 +236,14 @@ func cleanupStaleEdgeProfile(profileDir string) {
 	}
 	if !allClean {
 		// Stale Edge processes may be holding lock files. Terminate only Edge processes tied to RemoteAccess_WebProfile.
-		_ = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
+		psCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
 			`Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'msedge.exe' -and $_.CommandLine -like '*RemoteAccess_WebProfile*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
-		).Run()
+		)
+		psCmd.SysProcAttr = &syscall.SysProcAttr{
+			HideWindow:    true,
+			CreationFlags: 0x08000000, // CREATE_NO_WINDOW
+		}
+		_ = psCmd.Run()
 		for _, f := range lockFiles {
 			_ = os.Remove(f)
 		}
@@ -376,7 +381,11 @@ func runNativeAppWindow(url string) {
 
 		// Fallback: standard browser
 		log.Println("[Janela] Edge não encontrado diretamente, abrindo navegador padrão...")
-		_ = exec.Command("cmd", "/c", "start", url).Start()
+		shell32 := syscall.NewLazyDLL("shell32.dll")
+		procShellExecute := shell32.NewProc("ShellExecuteW")
+		verb, _ := syscall.UTF16PtrFromString("open")
+		targetURL, _ := syscall.UTF16PtrFromString(url)
+		procShellExecute.Call(0, uintptr(unsafe.Pointer(verb)), uintptr(unsafe.Pointer(targetURL)), 0, 0, 1) // 1 = SW_SHOWNORMAL
 		startWindowSizeGuard()
 		return
 	}

@@ -351,7 +351,7 @@ func (h *HostSession) HandleControlData(data []byte) {
 		}
 	case protocol.TypeKeyUp:
 		if h.IsRemoteInputAllowed() {
-			_ = input.KeyUp(ctrl.Key, ctrl.Code, ctrl.KeyCode)
+			_ = input.KeyUpEx(ctrl.Key, ctrl.Code, ctrl.KeyCode, ctrl.Alt, ctrl.Ctrl, ctrl.Shift, ctrl.Meta)
 		}
 	case protocol.TypeMonitorSwitch:
 		_ = h.capturer.SetDisplayIndex(ctrl.Monitor)
@@ -380,18 +380,26 @@ func (h *HostSession) HandleControlData(data []byte) {
 			input.OpenTaskManager()
 		case "desktop", "win_d":
 			input.ShowDesktop()
+		case "explorer", "win_e":
+			input.OpenFileExplorer()
+		case "run", "win_r":
+			input.OpenRunDialog()
+		case "win", "start_menu":
+			input.OpenStartMenu()
 		case "alt_f4":
 			input.CloseActiveWindow()
 		case "alt_tab":
 			input.SwitchWindowAltTab()
 		case "cad", "ctrl_alt_del":
 			input.SendCtrlAltDel()
-		case "run", "win_r":
-			_ = input.KeyDown("Meta", "MetaLeft", 91)
-			_ = input.KeyDown("r", "KeyR", 82)
-			time.Sleep(50 * time.Millisecond)
-			_ = input.KeyUp("r", "KeyR", 82)
-			_ = input.KeyUp("Meta", "MetaLeft", 91)
+		case "ctrl_a", "select_all":
+			input.SendCtrlShortcut(0x41) // 'A'
+		case "ctrl_c", "copy":
+			input.SendCtrlShortcut(0x43) // 'C'
+		case "ctrl_v", "paste":
+			input.SendCtrlShortcut(0x56) // 'V'
+		case "ctrl_z", "undo":
+			input.SendCtrlShortcut(0x5A) // 'Z'
 		case "block_input":
 			_ = input.BlockLocalInput(ctrl.Block)
 		case "autolock_on":

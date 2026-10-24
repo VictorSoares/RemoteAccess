@@ -21,14 +21,14 @@ if (Test-Path "$env:USERPROFILE\go\bin\go-winres.exe") {
 }
 
 if ($Mode -eq "release") {
-    # -H=windowsgui removes CMD console window
+    # -H=windowsgui removes CMD console window (PE Subsystem 2 GUI)
     # -s -w removes debug info and symbol table for smaller binary
     # -trimpath strips absolute build paths to avoid heuristics detection
     Write-Host "Gerando executavel de producao otimizado (sem janela CMD, -trimpath)..." -ForegroundColor Yellow
     go build -trimpath -ldflags="-H=windowsgui -s -w" -o "RemoteAccess.exe" ./cmd/remoteaccess
 } else {
-    Write-Host "Gerando executavel de desenvolvimento..." -ForegroundColor Yellow
-    go build -trimpath -o "RemoteAccess.exe" ./cmd/remoteaccess
+    Write-Host "Gerando executavel de desenvolvimento (sem janela CMD, -H=windowsgui)..." -ForegroundColor Yellow
+    go build -trimpath -ldflags="-H=windowsgui" -o "RemoteAccess.exe" ./cmd/remoteaccess
 }
 
 if ($LASTEXITCODE -eq 0) {

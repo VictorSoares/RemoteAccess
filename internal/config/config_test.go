@@ -26,8 +26,8 @@ func TestRandomIDGeneration(t *testing.T) {
 func TestRandomPasswordGeneration(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		pwd := generateRandomPassword()
-		if len(pwd) != 6 {
-			t.Errorf("Expected 6-character password, got %s (length %d)", pwd, len(pwd))
+		if len(pwd) != 8 {
+			t.Errorf("Expected 8-character password, got %s (length %d)", pwd, len(pwd))
 		}
 	}
 }

@@ -89,7 +89,7 @@ func generateRandomID() string {
 
 func generateRandomPassword() string {
 	const charset = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-	b := make([]byte, 6)
+	b := make([]byte, 8)
 	for i := range b {
 		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(charset))))
 		b[i] = charset[n.Int64()]
@@ -141,6 +141,14 @@ func LoadConfig() *ConfigManager {
 	return cm
 }
 
+// NewTestConfigManager creates an in-memory or custom path ConfigManager for testing
+func NewTestConfigManager(filePath string, data AppConfig) *ConfigManager {
+	return &ConfigManager{
+		filePath: filePath,
+		Data:     data,
+	}
+}
+
 func (cm *ConfigManager) Save() error {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
@@ -153,6 +161,10 @@ func (cm *ConfigManager) Save() error {
 }
 
 func (cm *ConfigManager) SetPassword(newPwd string) error {
+	newPwd = strings.TrimSpace(newPwd)
+	if len(newPwd) < 6 {
+		return fmt.Errorf("senha muito curta: mínimo de 6 caracteres")
+	}
 	cm.mu.Lock()
 	cm.Data.Password = newPwd
 	cm.mu.Unlock()
@@ -298,7 +310,12 @@ func (cm *ConfigManager) InstallAsAdmin() error {
 		// Safely terminate any older instance running in target directory (excluding current installer process)
 		myPID := os.Getpid()
 		killCmd := fmt.Sprintf("Get-Process -Name 'RemoteAccess' -ErrorAction SilentlyContinue | Where-Object { $_.Id -ne %d } | Stop-Process -Force", myPID)
-		_ = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", killCmd).Run()
+		psCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", killCmd)
+		psCmd.SysProcAttr = &syscall.SysProcAttr{
+			HideWindow:    true,
+			CreationFlags: 0x08000000,
+		}
+		_ = psCmd.Run()
 		time.Sleep(250 * time.Millisecond)
 
 		if err := os.WriteFile(targetExe, inputData, 0755); err != nil {

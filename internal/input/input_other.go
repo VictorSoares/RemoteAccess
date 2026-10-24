@@ -13,7 +13,16 @@ func MouseDown(button int) error               { return nil }
 func MouseUp(button int) error                 { return nil }
 func MouseWheel(deltaY int) error              { return nil }
 func KeyDown(key, code string, keyCode int) error { return nil }
+func KeyDownEx(key, code string, keyCode int, alt, ctrl, shift, meta bool) error { return nil }
 func KeyUp(key, code string, keyCode int) error   { return nil }
+func KeyUpEx(key, code string, keyCode int, alt, ctrl, shift, meta bool) error { return nil }
+func SyncModifiers(alt, ctrl, shift, meta bool)   {}
+func AutoUnstickModifiers(alt, ctrl, shift, meta bool) {}
+func SendCtrlShortcut(vk uint16)                  {}
+func OpenStartMenu()                              {}
+func OpenFileExplorer()                           {}
+func OpenRunDialog()                              {}
+func SendCtrlAltDel()                             {}
 func SendUnicodeChar(r rune) error             { return nil }
 func SetClipboardText(text string) error       { return nil }
 func GetClipboardText() (string, error)        { return "", nil }

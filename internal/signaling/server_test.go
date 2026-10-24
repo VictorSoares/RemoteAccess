@@ -59,8 +59,9 @@ func TestServerAuthAndStatsAPI(t *testing.T) {
 		t.Errorf("Expected 200 OK for valid key, got %d", w.Code)
 	}
 
-	// 3. Test Stats API with valid key in query
-	req = httptest.NewRequest("GET", "/api/stats?key="+srv.adminKey, nil)
+	// 3. Test Stats API with valid key in header
+	req = httptest.NewRequest("GET", "/api/stats", nil)
+	req.Header.Set("X-Admin-Key", srv.adminKey)
 	w = httptest.NewRecorder()
 	srv.HandleStats(w, req)
 	if w.Code != http.StatusOK {
@@ -88,7 +89,8 @@ func TestServerHistory(t *testing.T) {
 	}
 	srv.addHistory(rec)
 
-	req := httptest.NewRequest("GET", "/api/history?key="+srv.adminKey, nil)
+	req := httptest.NewRequest("GET", "/api/history", nil)
+	req.Header.Set("X-Admin-Key", srv.adminKey)
 	w := httptest.NewRecorder()
 	srv.HandleHistory(w, req)
 	if w.Code != http.StatusOK {
@@ -154,7 +156,8 @@ func TestServerGzipDashboardAndStats(t *testing.T) {
 	}
 
 	// 3. API Stats with Accept-Encoding: gzip
-	reqStatsGz := httptest.NewRequest("GET", "/api/stats?key="+srv.adminKey, nil)
+	reqStatsGz := httptest.NewRequest("GET", "/api/stats", nil)
+	reqStatsGz.Header.Set("X-Admin-Key", srv.adminKey)
 	reqStatsGz.Header.Set("Accept-Encoding", "gzip")
 	wStatsGz := httptest.NewRecorder()
 	srv.HandleStats(wStatsGz, reqStatsGz)

@@ -420,19 +420,19 @@
       opacity: 0;
       pointer-events: none;
       z-index: 100000;
-      background: rgba(15, 23, 42, 0.95);
-      backdrop-filter: blur(18px);
-      border: 1px solid rgba(255, 255, 255, 0.16);
-      border-radius: 9999px;
-      padding: 4px 8px;
-      display: inline-flex;
+      background: rgba(15, 23, 42, 0.96);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 12px;
+      padding: 5px 10px;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
       align-items: center;
       gap: 3px;
-      max-width: calc(100vw - 20px);
+      row-gap: 5px;
+      max-width: min(96vw, 1320px);
       box-sizing: border-box;
-      overflow-x: auto;
-      scrollbar-width: none;
-      -ms-overflow-style: none;
       box-shadow: 0 12px 36px rgba(0, 0, 0, 0.8), 0 0 16px rgba(56, 189, 248, 0.25);
       transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s;
     }
@@ -450,7 +450,7 @@
       background: rgba(255, 255, 255, 0.08);
       color: #f1f5f9;
       border: 1px solid rgba(255, 255, 255, 0.12);
-      padding: 0.28rem 0.48rem;
+      padding: 0.28rem 0.46rem;
       border-radius: 6px;
       font-size: 0.74rem;
       font-weight: 600;
@@ -472,6 +472,28 @@
     @media (min-width: 1750px) {
       .web-viewer-dock .btn-action .dock-label {
         display: inline;
+      }
+    }
+    @media (max-width: 1280px) {
+      #web-stat-bandwidth, #web-stat-bandwidth + span {
+        display: none !important;
+      }
+    }
+    @media (max-width: 1024px) {
+      #web-stat-timer, #web-stat-timer + span {
+        display: none !important;
+      }
+      .web-viewer-dock {
+        padding: 4px 6px;
+        border-radius: 10px;
+      }
+      .web-viewer-dock .btn-action {
+        padding: 0.22rem 0.36rem;
+        font-size: 0.71rem;
+      }
+      .web-viewer-dock .dock-select {
+        padding: 3px 18px 3px 5px;
+        font-size: 0.71rem;
       }
     }
     .web-viewer-dock .btn-action:hover {
@@ -830,6 +852,40 @@
       </div>
     </div>
 
+    <!-- Quick Connect by ID Bar -->
+    <div class="panel" style="background: linear-gradient(135deg, rgba(30, 41, 59, 0.75) 0%, rgba(15, 23, 42, 0.85) 100%); border: 1px solid rgba(59, 130, 246, 0.35); box-shadow: 0 8px 24px rgba(0,0,0,0.3); margin-bottom: 1.5rem;">
+      <div class="panel-header" style="margin-bottom: 0.85rem;">
+        <div>
+          <h2 class="panel-title" style="color: #60a5fa; display: flex; align-items: center; gap: 8px;">
+            <span>🚀 Conexão Rápida / Acesso Direto</span>
+            <span style="font-size: 0.72rem; padding: 2px 8px; border-radius: 9999px; background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-weight: 600;">Navegador Web</span>
+          </h2>
+          <span style="font-size: 0.82rem; color: var(--text-muted);">Digite o ID permanente de 6 dígitos e a senha da máquina remota para assumir o controle imediatamente.</span>
+        </div>
+      </div>
+      <form id="quick-connect-form" onsubmit="handleQuickConnect(event)" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end;">
+        <div style="flex: 1; min-width: 180px;">
+          <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #cbd5e1; margin-bottom: 4px;">ID DO COMPUTADOR REMOTO</label>
+          <input type="text" id="qc-target-id" placeholder="Ex: 612 287" maxlength="10" required autocomplete="off"
+            style="width: 100%; padding: 0.65rem 0.9rem; font-size: 1.1rem; font-weight: 800; font-family: var(--font-mono); background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 8px; color: #38bdf8; letter-spacing: 0.05em; outline: none;"
+            oninput="formatQuickConnectID(this)">
+        </div>
+        <div style="flex: 1; min-width: 180px;">
+          <label style="display: block; font-size: 0.78rem; font-weight: 700; color: #cbd5e1; margin-bottom: 4px;">SENHA DE ACESSO</label>
+          <div style="position: relative;">
+            <input type="password" id="qc-target-pwd" placeholder="Senha da máquina" autocomplete="current-password"
+              style="width: 100%; padding: 0.65rem 2.4rem 0.65rem 0.9rem; font-size: 1rem; font-weight: 700; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 8px; color: #fff; outline: none;">
+            <button type="button" onclick="toggleQcPwdVisibility()" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: transparent; border: none; cursor: pointer; color: #94a3b8; font-size: 1rem;" title="Mostrar/Ocultar Senha">👁️</button>
+          </div>
+        </div>
+        <div>
+          <button type="submit" class="btn-action btn-connect-direct" style="padding: 0.65rem 1.6rem; font-size: 0.95rem; font-weight: 700; height: 42px;">
+            🚀 Conectar
+          </button>
+        </div>
+      </form>
+    </div>
+
     <!-- Active Nodes Table -->
     <div class="panel">
       <div class="panel-header">
@@ -946,6 +1002,25 @@
         </select>
       </div>
 
+      <!-- Unified Shortcuts Dropdown -->
+      <div class="dock-select-wrap" title="Atalhos do Sistema Remoto">
+        <select id="web-viewer-shortcuts-select" class="dock-select" onchange="handleWebViewerShortcutDropdown(this.value)">
+          <option value="" disabled selected>⌨️ Atalhos</option>
+          <option value="cad">⚡ Ctrl+Alt+Del (CAD)</option>
+          <option value="taskmgr">📊 Gerenciador de Tarefas</option>
+          <option value="win">🪟 Menu Iniciar (Win)</option>
+          <option value="desktop">🖥️ Mostrar Área de Trabalho (Win+D)</option>
+          <option value="explorer">📂 Explorador de Arquivos (Win+E)</option>
+          <option value="run">🚀 Executar (Win+R)</option>
+          <option value="alt_tab">🔀 Alternar Janelas (Alt+Tab)</option>
+          <option value="alt_f4">✕ Fechar Janela Ativa (Alt+F4)</option>
+          <option value="ctrl_a">📄 Selecionar Tudo (Ctrl+A)</option>
+          <option value="ctrl_c">📑 Copiar (Ctrl+C)</option>
+          <option value="ctrl_v">📋 Colar (Ctrl+V)</option>
+          <option value="ctrl_z">↩️ Desfazer (Ctrl+Z)</option>
+        </select>
+      </div>
+
       <!-- Unified Power & Security Actions Dropdown -->
       <div class="dock-select-wrap" title="Ações de Energia e Sistema">
         <select id="web-viewer-power-select" class="dock-select" onchange="handleWebViewerPowerDropdown(this.value)">
@@ -966,8 +1041,6 @@
       <!-- Quick Actions -->
       <button id="btn-viewer-audio-toggle" class="btn-action" onclick="toggleViewerAudio()" title="Alternar Áudio Remoto" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4);"><span id="viewer-audio-icon">🔊</span> <span id="viewer-audio-label" class="dock-label">Áudio</span></button>
       <button id="btn-viewer-block-input" class="btn-action" onclick="toggleViewerBlockInput()" title="Bloquear Mouse e Teclado Físico do Cliente Acessado"><span>🚫</span> <span class="dock-label">Bloquear</span></button>
-      <button class="btn-action" onclick="sendViewerSys('cad')" title="Enviar Ctrl+Alt+Del"><span>⌨️</span> <span class="dock-label">CAD</span></button>
-      <button class="btn-action" onclick="sendViewerSys('taskmgr')" title="Abrir Gerenciador de Tarefas"><span>⚡</span> <span class="dock-label">Tarefas</span></button>
       <button class="btn-action" onclick="openWebClipboardModal()" title="Colar Texto Remoto"><span>📋</span> <span class="dock-label">Colar</span></button>
       <button class="btn-action" onclick="triggerWebFileUpload()" title="Enviar/Colar Arquivo"><span>📁</span> <span class="dock-label">Arquivo</span></button>
       <input type="file" id="web-viewer-file-input" style="display: none;" multiple onchange="handleWebFileSelect(this.files)">
@@ -1351,16 +1424,64 @@
 
     function formatID(id) {
       if (!id) return '---';
-      const clean = id.replace(/\D/g, '');
+      const str = (typeof id === 'string' ? id : String(id)).trim();
+      const clean = str.replace(/\D/g, '');
       if (clean.length > 3) {
         return clean.slice(0, 3) + ' ' + clean.slice(3);
       }
-      return id;
+      return clean || str || '---';
     }
 
-    function checkAuth() {
+    function formatQuickConnectID(input) {
+      if (!input) return;
+      let val = input.value.replace(/\D/g, '');
+      if (val.length > 3) {
+        val = val.slice(0, 3) + ' ' + val.slice(3, 6);
+      }
+      input.value = val;
+    }
+
+    function toggleQcPwdVisibility() {
+      const el = document.getElementById('qc-target-pwd');
+      if (el) {
+        el.type = el.type === 'password' ? 'text' : 'password';
+      }
+    }
+
+    async function handleQuickConnect(e) {
+      if (e) e.preventDefault();
+      const idInput = document.getElementById('qc-target-id');
+      const pwdInput = document.getElementById('qc-target-pwd');
+      const cleanId = idInput ? idInput.value.replace(/\D/g, '') : '';
+      if (!cleanId) {
+        await showModalAlert('ID Obrigatório', 'Por favor informe o ID permanente do computador remoto.', '⚠️');
+        return;
+      }
+      const pwd = pwdInput ? pwdInput.value.trim() : '';
+      connectDirect(cleanId, pwd, 1);
+    }
+
+    async function accessHost(targetId, hasPassword, monitorsCount) {
+      let pwd = '';
+      if (hasPassword) {
+        pwd = await showModalPrompt('Senha de Acesso', 'Informe a senha de acesso para o host ' + formatID(targetId) + ':', '', '🔑');
+        if (pwd === null) return;
+      }
+      connectDirect(targetId, pwd, monitorsCount);
+    }
+
+    function openAuthModal() {
+      const overlay = document.getElementById('auth-overlay');
+      if (overlay) overlay.style.display = 'flex';
+      const input = document.getElementById('auth-key-input');
+      if (input) input.focus();
+    }
+
+    function checkAuth(silent = false) {
       if (!adminKey) {
-        document.getElementById('auth-overlay').style.display = 'flex';
+        if (!silent) {
+          openAuthModal();
+        }
         return false;
       }
       return true;
@@ -1422,14 +1543,25 @@
     function logoutAdmin() {
       adminKey = '';
       localStorage.removeItem('ra_admin_key');
-      document.getElementById('auth-overlay').style.display = 'flex';
+      refreshData();
+      openAuthModal();
     }
 
     async function refreshData() {
-      if (!checkAuth() || viewerConnected) return;
+      if (viewerConnected) return;
+
+      const tbody = document.getElementById('peers-table-body');
+      if (!checkAuth(true)) {
+        if (tbody) {
+          tbody.innerHTML = '<tr><td colspan="8" class="empty-row" style="padding: 1.5rem; text-align: center;">🔒 Painel administrativo protegido. Utilize a <strong>Conexão Rápida</strong> acima ou <a href="javascript:void(0)" onclick="openAuthModal()" style="color: #60a5fa; font-weight: 700; text-decoration: underline;">clique aqui para autenticar</a> com a chave mestra.</td></tr>';
+        }
+        return;
+      }
 
       try {
-        const res = await fetch('/api/stats?key=' + encodeURIComponent(adminKey));
+        const res = await fetch('/api/stats', {
+          headers: { 'X-Admin-Key': adminKey }
+        });
         if (res.status === 401) {
           logoutAdmin();
           return;
@@ -1445,7 +1577,6 @@
         if (elUptime) elUptime.innerText = formatDuration(data.uptime_sec || 0);
         if (elPackets) elPackets.innerText = (data.total_packets || 0).toLocaleString();
 
-        const tbody = document.getElementById('peers-table-body');
         if (!tbody) return;
         if (!data.peers || data.peers.length === 0) {
           tbody.innerHTML = '<tr><td colspan="8" class="empty-row">Nenhum computador registrado online no momento.</td></tr>';
@@ -1470,25 +1601,16 @@
               statusHtml = '<span style="color: #f87171; font-weight: 700;">🔴 Em Sessão com ' + p.active_target_id + '</span>';
             }
 
-            let pwdDisplay = '<span style="color: var(--text-muted);">---</span>';
-            if (p.password) {
-              const isRevealed = !!revealedPwdMap[p.id];
-              const displayVal = isRevealed ? p.password : '••••••••';
-              const icon = isRevealed ? '🙈' : '👁️';
-              const spacing = isRevealed ? 'normal' : '0.12em';
-              const escapedPwd = p.password.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
-              pwdDisplay = '<div class="pwd-wrapper">' +
-                '<span class="pwd-tag" id="pwd-txt-' + p.id + '" style="letter-spacing: ' + spacing + ';">' + displayVal + '</span>' +
-                '<button class="btn-pwd-icon" id="pwd-btn-' + p.id + '" title="Exibir/Ocultar Senha" onclick="togglePwd(\'' + p.id + '\', \'' + escapedPwd + '\')">' + icon + '</button>' +
-                '<button class="btn-pwd-icon" title="Copiar Senha" onclick="copyPwd(\'' + escapedPwd + '\')">📋</button>' +
-              '</div>';
+            let pwdDisplay = '<span style="color: var(--text-muted);">Livre</span>';
+            if (p.has_password) {
+              pwdDisplay = '<span class="pwd-tag" style="letter-spacing: 0.12em; color: #94a3b8;" title="Protegido por senha fixa">••••••••</span>';
             }
 
             const aliasDisplay = p.alias ? '<strong style="color: #60a5fa;">' + p.alias + '</strong>' : '<span style="color: var(--text-muted); font-style: italic;">Não definido</span>';
 
             let actionsHtml = '';
             if (p.is_host) {
-              actionsHtml += '<button class="btn-action btn-connect-direct" onclick="connectDirect(\'' + p.id + '\', \'' + (p.password || '') + '\', ' + monCount + ')">🚀 Acessar</button>';
+              actionsHtml += '<button class="btn-action btn-connect-direct" onclick="accessHost(\'' + p.id + '\', ' + (!!p.has_password) + ', ' + monCount + ')">🚀 Acessar</button>';
               if (p.mac) {
                 actionsHtml += '<button class="btn-action" style="background: rgba(245,158,11,0.2); color: #fcd34d; border: 1px solid rgba(245,158,11,0.4);" onclick="triggerServerWoL(\'' + p.mac + '\', \'' + (p.alias || p.id) + '\')" title="Disparar pacote Magic Packet Wake-on-LAN">⚡ WoL</button>';
               }
@@ -1513,12 +1635,18 @@
             tbody.appendChild(tr);
           });
         }
-      } catch (err) {}
+      } catch (err) {
+        if (tbody) {
+          tbody.innerHTML = '<tr><td colspan="8" class="empty-row" style="color: #fcd34d;">⏳ Conectando ao servidor na nuvem... Aguarde alguns instantes (o serviço pode estar acordando).</td></tr>';
+        }
+      }
 
       await refreshHistory();
 
       try {
-        const resLogs = await fetch('/api/logs?key=' + encodeURIComponent(adminKey));
+        const resLogs = await fetch('/api/logs', {
+          headers: { 'X-Admin-Key': adminKey }
+        });
         if (resLogs.status === 200) {
           const logsData = await resLogs.json();
           const term = document.getElementById('logs-terminal');
@@ -1532,7 +1660,9 @@
 
     async function refreshHistory() {
       try {
-        const resHist = await fetch('/api/history?key=' + encodeURIComponent(adminKey));
+        const resHist = await fetch('/api/history', {
+          headers: { 'X-Admin-Key': adminKey }
+        });
         if (resHist.status === 200) {
           const histData = await resHist.json();
           const hBody = document.getElementById('history-table-body');
@@ -1565,9 +1695,12 @@
 
     async function toggleBlockPeer(id, shouldBlock) {
       try {
-        await fetch('/api/block?key=' + encodeURIComponent(adminKey), {
+        await fetch('/api/block', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'X-Admin-Key': adminKey
+          },
           body: JSON.stringify({ id: id, block: shouldBlock })
         });
         refreshData();
@@ -1580,9 +1713,12 @@
       const ok = await showModalConfirm('Desconectar Dispositivo', 'Deseja realmente forçar a desconexão do dispositivo ' + id + '?', '🛑', 'Desconectar', 'Cancelar');
       if (!ok) return;
       try {
-        await fetch('/api/kick?key=' + encodeURIComponent(adminKey), {
+        await fetch('/api/kick', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'X-Admin-Key': adminKey
+          },
           body: JSON.stringify({ id: id })
         });
         refreshData();
@@ -2453,6 +2589,13 @@
       setTimeout(() => {
         if (hud) hud.style.display = 'none';
       }, 3000);
+    }
+
+    function handleWebViewerShortcutDropdown(cmd) {
+      const select = document.getElementById('web-viewer-shortcuts-select');
+      if (select) select.value = '';
+      if (!cmd) return;
+      sendViewerSys(cmd);
     }
 
     function handleWebViewerPowerDropdown(action) {

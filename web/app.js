@@ -1,5 +1,32 @@
 // RemoteAccess AnyDesk Portable Edition - Client & Host Engine
 
+function getLocalCookie(name) {
+  const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+  return match ? decodeURIComponent(match[2]) : '';
+}
+
+// Automatic CSRF / Local Token injector for all internal API requests
+(function() {
+  const origFetch = window.fetch;
+  window.fetch = function(url, options = {}) {
+    options = options || {};
+    options.headers = options.headers || {};
+    const token = getLocalCookie('ra_local_token');
+    if (token) {
+      if (options.headers instanceof Headers) {
+        if (!options.headers.has('X-Local-Token')) {
+          options.headers.set('X-Local-Token', token);
+        }
+      } else if (Array.isArray(options.headers)) {
+        options.headers.push(['X-Local-Token', token]);
+      } else {
+        options.headers['X-Local-Token'] = token;
+      }
+    }
+    return origFetch.call(this, url, options);
+  };
+})();
+
 let myHostInfo = {
   id: '',
   alias: '',
@@ -466,23 +493,8 @@ async function toggleSaveLogFile(e) {
 }
 
 function sendSystemAction(action) {
-  if (!isConnected) return;
-  if (action === 'cad') {
-    sendControl({ t: 'kd', k: 'Control', c: 'ControlLeft', kc: 17 });
-    sendControl({ t: 'kd', k: 'Alt', c: 'AltLeft', kc: 18 });
-    sendControl({ t: 'kd', k: 'Delete', c: 'Delete', kc: 46 });
-    setTimeout(() => {
-      sendControl({ t: 'ku', k: 'Delete', c: 'Delete', kc: 46 });
-      sendControl({ t: 'ku', k: 'Alt', c: 'AltLeft', kc: 18 });
-      sendControl({ t: 'ku', k: 'Control', c: 'ControlLeft', kc: 17 });
-    }, 120);
-  } else if (action === 'win_r') {
-    sendControl({ t: 'sys_cmd', cmd: 'win_r' });
-  } else if (action === 'alt_tab') {
-    sendControl({ t: 'sys_cmd', cmd: 'alt_tab' });
-  } else {
-    sendControl({ t: 'sys_cmd', cmd: action });
-  }
+  if (!isConnected || !action) return;
+  sendControl({ t: 'sys_cmd', cmd: action });
 }
 
 function toggleBlockInput() {
@@ -975,6 +987,13 @@ async function kickActiveSession() {
   } catch (err) {
     await showModalAlert('Erro', 'Falha ao encerrar a sessão remota.', '❌');
   }
+}
+
+function handleShortcutDropdown(cmd) {
+  const select = document.getElementById('viewer-shortcuts-select');
+  if (select) select.value = '';
+  if (!cmd) return;
+  sendSystemAction(cmd);
 }
 
 function handlePowerDropdown(action) {

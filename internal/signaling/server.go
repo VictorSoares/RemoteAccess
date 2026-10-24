@@ -5,11 +5,14 @@ import (
 	"bytes"
 	"compress/gzip"
 	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math/big"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -59,7 +62,19 @@ func writeJSON(w http.ResponseWriter, r *http.Request, statusCode int, data inte
 
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
-		return true
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true // native desktop client
+		}
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		h := strings.ToLower(u.Hostname())
+		return h == "remoteaccess-ltwx.onrender.com" ||
+			h == "localhost" ||
+			h == "127.0.0.1" ||
+			strings.HasSuffix(h, ".onrender.com")
 	},
 }
 
@@ -90,6 +105,12 @@ type SessionRecord struct {
 	Status      string    `json:"status"` // "completed", "active", "rejected"
 }
 
+type loginAttempt struct {
+	count     int
+	lastFail  time.Time
+	lockUntil time.Time
+}
+
 type Server struct {
 	mu           sync.RWMutex
 	peers        map[string]*Peer
@@ -100,20 +121,69 @@ type Server struct {
 	historyMu    sync.RWMutex
 	history      []SessionRecord
 	adminKey     string
+	rateMu       sync.Mutex
+	failedLogins map[string]*loginAttempt
+}
+
+func (s *Server) isRateLimited(clientIP, targetID string) bool {
+	key := fmt.Sprintf("%s:%s", clientIP, cleanID(targetID))
+	s.rateMu.Lock()
+	defer s.rateMu.Unlock()
+
+	attempt, exists := s.failedLogins[key]
+	if !exists {
+		return false
+	}
+	return time.Now().Before(attempt.lockUntil)
+}
+
+func (s *Server) recordFailedAttempt(clientIP, targetID string) {
+	key := fmt.Sprintf("%s:%s", clientIP, cleanID(targetID))
+	s.rateMu.Lock()
+	defer s.rateMu.Unlock()
+
+	attempt, exists := s.failedLogins[key]
+	if !exists || time.Since(attempt.lastFail) > 2*time.Minute {
+		s.failedLogins[key] = &loginAttempt{
+			count:    1,
+			lastFail: time.Now(),
+		}
+		return
+	}
+
+	attempt.count++
+	attempt.lastFail = time.Now()
+	if attempt.count >= 5 {
+		attempt.lockUntil = time.Now().Add(60 * time.Second)
+	}
+}
+
+func (s *Server) resetFailedAttempts(clientIP, targetID string) {
+	key := fmt.Sprintf("%s:%s", clientIP, cleanID(targetID))
+	s.rateMu.Lock()
+	defer s.rateMu.Unlock()
+	delete(s.failedLogins, key)
 }
 
 func NewServer() *Server {
-	secret := os.Getenv("ADMIN_SECRET")
-	if strings.TrimSpace(secret) == "" {
-		secret = "remote2026"
+	secret := strings.TrimSpace(os.Getenv("ADMIN_SECRET"))
+	if secret == "" {
+		b := make([]byte, 16)
+		if _, err := rand.Read(b); err == nil {
+			secret = hex.EncodeToString(b)
+		} else {
+			secret = "remote2026"
+		}
+		log.Printf("[Signaling] ADMIN_SECRET não configurado. Chave gerada para esta sessão: %s", secret)
 	}
 
 	s := &Server{
-		peers:     make(map[string]*Peer),
-		startTime: time.Now(),
-		logs:      make([]string, 0, 200),
-		history:   make([]SessionRecord, 0, 500),
-		adminKey:  strings.TrimSpace(secret),
+		peers:        make(map[string]*Peer),
+		startTime:    time.Now(),
+		logs:         make([]string, 0, 200),
+		history:      make([]SessionRecord, 0, 500),
+		adminKey:     secret,
+		failedLogins: make(map[string]*loginAttempt),
 	}
 	s.addLog("Servidor Cloud Relay inicializado com sucesso. Chave Admin configurada.")
 	return s
@@ -148,25 +218,21 @@ func (s *Server) endHistorySession(hostID, clientID string) {
 }
 
 func (s *Server) checkAdminAuth(r *http.Request) bool {
-	// 1. Check Header
-	if key := r.Header.Get("X-Admin-Key"); key == s.adminKey {
-		return true
+	var key string
+	// 1. Check Header X-Admin-Key
+	if h := r.Header.Get("X-Admin-Key"); h != "" {
+		key = h
+	} else if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
+		key = strings.TrimPrefix(auth, "Bearer ")
+	} else if cookie, err := r.Cookie("admin_key"); err == nil && cookie.Value != "" {
+		key = cookie.Value
+	} else if cookie, err := r.Cookie("ra_admin_key"); err == nil && cookie.Value != "" {
+		key = cookie.Value
 	}
-	// 2. Check Query Param
-	if key := r.URL.Query().Get("key"); key == s.adminKey {
-		return true
+	if key == "" || s.adminKey == "" {
+		return false
 	}
-	// 3. Check Cookie
-	if cookie, err := r.Cookie("admin_key"); err == nil && cookie.Value == s.adminKey {
-		return true
-	}
-	// 4. Check Bearer Authorization
-	if auth := r.Header.Get("Authorization"); strings.HasPrefix(auth, "Bearer ") {
-		if strings.TrimPrefix(auth, "Bearer ") == s.adminKey {
-			return true
-		}
-	}
-	return false
+	return subtle.ConstantTimeCompare([]byte(key), []byte(s.adminKey)) == 1
 }
 
 func (s *Server) addLog(format string, a ...interface{}) {
@@ -350,14 +416,28 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			if targetPeer.Password != "" && targetPeer.Password != msg.Password {
-				s.addLog("Autenticação rejeitada para ID %s (senha incorreta)", msg.TargetID)
+			clientIP := strings.Split(conn.RemoteAddr().String(), ":")[0]
+			if s.isRateLimited(clientIP, msg.TargetID) {
+				s.addLog("Conexão recusada: Rate-limit de tentativas excedido para ID %s (IP %s)", msg.TargetID, clientIP)
 				_ = conn.WriteJSON(protocol.SignalingMessage{
 					Action:  protocol.ActionError,
-					Message: "Senha incorreta.",
+					Message: "Muitas tentativas com senha incorreta. Aguarde 60 segundos.",
 				})
 				continue
 			}
+
+			if targetPeer.Password != "" {
+				if subtle.ConstantTimeCompare([]byte(targetPeer.Password), []byte(msg.Password)) != 1 {
+					s.recordFailedAttempt(clientIP, msg.TargetID)
+					s.addLog("Autenticação rejeitada para ID %s (senha incorreta, IP %s)", msg.TargetID, clientIP)
+					_ = conn.WriteJSON(protocol.SignalingMessage{
+						Action:  protocol.ActionError,
+						Message: "Senha incorreta.",
+					})
+					continue
+				}
+			}
+			s.resetFailedAttempts(clientIP, msg.TargetID)
 
 			if msg.ID == "" {
 				msg.ID = peer.ID
@@ -498,7 +578,7 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 		Monitors       int    `json:"monitors"`
 		MAC            string `json:"mac,omitempty"`
 		IsHost         bool   `json:"is_host"`
-		Password       string `json:"password,omitempty"`
+		HasPassword    bool   `json:"has_password"`
 		DurationSec    int    `json:"duration_sec"`
 		RemoteAddr     string `json:"remote_addr"`
 		ActiveTargetID string `json:"active_target_id"`
@@ -592,7 +672,7 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 			Monitors:       mons,
 			MAC:            p.MAC,
 			IsHost:         p.IsHost,
-			Password:       p.Password,
+			HasPassword:    p.Password != "",
 			DurationSec:    int(time.Since(p.ConnectedAt).Seconds()),
 			RemoteAddr:     p.RemoteAddr,
 			ActiveTargetID: p.ActiveTargetID,

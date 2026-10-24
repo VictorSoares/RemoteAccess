@@ -114,6 +114,10 @@ func CreateStartMenuShortcut(targetExe, targetDir string) error {
 		lnkPath, targetExe, targetDir, targetExe)
 
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", psCmd)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: 0x08000000,
+	}
 	return cmd.Run()
 }
 
@@ -215,7 +219,12 @@ func UninstallStage2(silent bool) error {
 	time.Sleep(800 * time.Millisecond)
 
 	// Kill other running RemoteAccess instances (our process is RemoteAccess_Uninstall.exe)
-	_ = exec.Command("taskkill", "/F", "/IM", "RemoteAccess.exe").Run()
+	killCmd := exec.Command("taskkill", "/F", "/IM", "RemoteAccess.exe")
+	killCmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: 0x08000000,
+	}
+	_ = killCmd.Run()
 	time.Sleep(300 * time.Millisecond)
 
 	// 1. Remove registry auto-start
@@ -239,7 +248,12 @@ func UninstallStage2(silent bool) error {
 	currentExe, _ := os.Executable()
 	if strings.Contains(strings.ToLower(currentExe), strings.ToLower(os.TempDir())) {
 		cmdStr := fmt.Sprintf("cmd.exe /c timeout /t 2 /nobreak >nul & del /f /q \"%s\"", currentExe)
-		_ = exec.Command("cmd.exe", "/c", cmdStr).Start()
+		delCmd := exec.Command("cmd.exe", "/c", cmdStr)
+		delCmd.SysProcAttr = &syscall.SysProcAttr{
+			HideWindow:    true,
+			CreationFlags: 0x08000000,
+		}
+		_ = delCmd.Start()
 	}
 
 	// 6. User feedback

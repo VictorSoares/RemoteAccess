@@ -1,12 +1,16 @@
 package server
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"runtime"
 	"strings"
@@ -35,17 +39,18 @@ type ChatMessage struct {
 }
 
 type LocalServer struct {
-	mu          sync.RWMutex
-	Config      *config.ConfigManager
-	Signaling   *signaling.Server
-	hostSession *webrtcmod.HostSession
-	upgrader    websocket.Upgrader
-	cloudWS     *websocket.Conn
-	cloudWsMu   sync.Mutex
-	cloudStatus string
-	stopCloud   chan struct{}
-	chatMsgs    []ChatMessage
-	chatMu      sync.Mutex
+	mu           sync.RWMutex
+	Config       *config.ConfigManager
+	Signaling    *signaling.Server
+	hostSession  *webrtcmod.HostSession
+	upgrader     websocket.Upgrader
+	cloudWS      *websocket.Conn
+	cloudWsMu    sync.Mutex
+	cloudStatus  string
+	stopCloud    chan struct{}
+	chatMsgs     []ChatMessage
+	chatMu       sync.Mutex
+	sessionToken string
 }
 
 func (s *LocalServer) writeCloudJSON(msg protocol.SignalingMessage) error {
@@ -77,15 +82,67 @@ func normalizeWSURL(rawURL string) string {
 	return rawURL
 }
 
+func (s *LocalServer) validateLocalRequest(r *http.Request) bool {
+	// 1. Validate Origin / Referer if present
+	if origin := r.Header.Get("Origin"); origin != "" {
+		if u, err := url.Parse(origin); err == nil {
+			h := u.Hostname()
+			if h != "127.0.0.1" && h != "localhost" {
+				return false
+			}
+		} else {
+			return false
+		}
+	}
+	if ref := r.Header.Get("Referer"); ref != "" {
+		if u, err := url.Parse(ref); err == nil {
+			h := u.Hostname()
+			if h != "127.0.0.1" && h != "localhost" {
+				return false
+			}
+		} else {
+			return false
+		}
+	}
+
+	// 2. Validate token from Header X-Local-Token or Cookie ra_local_token
+	token := r.Header.Get("X-Local-Token")
+	if token == "" {
+		if c, err := r.Cookie("ra_local_token"); err == nil {
+			token = c.Value
+		}
+	}
+	if token == "" || s.sessionToken == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(token), []byte(s.sessionToken)) == 1
+}
+
 func NewLocalServer(cfg *config.ConfigManager) *LocalServer {
+	tokenBytes := make([]byte, 24)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		tokenBytes = []byte(fmt.Sprintf("%d-%d", time.Now().UnixNano(), os.Getpid()))
+	}
+	token := hex.EncodeToString(tokenBytes)
+
 	return &LocalServer{
-		Config:      cfg,
-		Signaling:   signaling.NewServer(),
-		cloudStatus: "local",
-		stopCloud:   make(chan struct{}),
+		Config:       cfg,
+		Signaling:    signaling.NewServer(),
+		cloudStatus:  "local",
+		stopCloud:    make(chan struct{}),
+		sessionToken: token,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
-				return true
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true // desktop apps / edge app mode without Origin header
+				}
+				u, err := url.Parse(origin)
+				if err != nil {
+					return false
+				}
+				h := u.Hostname()
+				return h == "127.0.0.1" || h == "localhost"
 			},
 		},
 	}
@@ -101,7 +158,25 @@ func (s *LocalServer) Start(port int) error {
 		return fmt.Errorf("failed to load embedded web assets: %w", err)
 	}
 
-	mux.Handle("/", http.FileServer(http.FS(webContent)))
+	fileHandler := http.FileServer(http.FS(webContent))
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{
+			Name:     "ra_local_token",
+			Value:    s.sessionToken,
+			Path:     "/",
+			HttpOnly: false, // Accessible to app.js
+			SameSite: http.SameSiteStrictMode,
+		})
+		fileHandler.ServeHTTP(w, r)
+	})
+
+	mux.HandleFunc("/api/csrf-token", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"token": s.sessionToken,
+		})
+	})
+
 	mux.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
 		s.Signaling.HandleDashboard(w, r)
 	})
@@ -124,8 +199,12 @@ func (s *LocalServer) Start(port int) error {
 	mux.HandleFunc("/api/elevate", s.handleElevate)
 	mux.HandleFunc("/api/install", s.handleInstall)
 	mux.HandleFunc("/api/app-close", func(w http.ResponseWriter, r *http.Request) {
+		if !s.validateLocalRequest(r) {
+			http.Error(w, "Acesso não autorizado", http.StatusForbidden)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
-		log.Println("[Janela] Solicitação de encerramento recebida pela interface (app-close).")
+		log.Println("[Janela] Solicitação de encerramento recebida pela interface autorizada (app-close).")
 		go func() {
 			time.Sleep(100 * time.Millisecond)
 			s.Shutdown()
@@ -135,8 +214,8 @@ func (s *LocalServer) Start(port int) error {
 
 	mux.HandleFunc("/ws", s.handleWS)
 
-	addr := fmt.Sprintf(":%d", port)
-	log.Printf("[RemoteAccess] Painel Web iniciado em http://localhost:%d", port)
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	log.Printf("[RemoteAccess] Painel Web iniciado em http://127.0.0.1:%d (Loopback estrito)", port)
 	return http.ListenAndServe(addr, mux)
 }
 
@@ -331,6 +410,10 @@ func (s *LocalServer) handleSystemInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *LocalServer) handleElevate(w http.ResponseWriter, r *http.Request) {
+	if !s.validateLocalRequest(r) {
+		http.Error(w, "Acesso não autorizado", http.StatusForbidden)
+		return
+	}
 	if config.IsAdmin() {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -356,6 +439,10 @@ func (s *LocalServer) handleElevate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *LocalServer) handleInstall(w http.ResponseWriter, r *http.Request) {
+	if !s.validateLocalRequest(r) {
+		http.Error(w, "Acesso não autorizado", http.StatusForbidden)
+		return
+	}
 	if !config.IsAdmin() {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -396,11 +483,17 @@ func (s *LocalServer) handleHostInfo(w http.ResponseWriter, r *http.Request) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	pwd := s.Config.Data.Password
+	if !s.validateLocalRequest(r) {
+		pwd = "••••••••"
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"id":            s.Config.Data.ID,
 		"alias":         s.Config.Data.Alias,
-		"password":      s.Config.Data.Password,
+		"password":      pwd,
+		"has_password":  len(s.Config.Data.Password) > 0,
 		"quality":       s.Config.Data.Quality,
 		"fps":           s.Config.Data.FPS,
 		"auto_start":    s.Config.Data.AutoStart,
@@ -414,6 +507,10 @@ func (s *LocalServer) handleHostInfo(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *LocalServer) handleSetAlias(w http.ResponseWriter, r *http.Request) {
+	if !s.validateLocalRequest(r) {
+		http.Error(w, "Acesso não autorizado", http.StatusForbidden)
+		return
+	}
 	var req struct {
 		Alias string `json:"alias"`
 	}
@@ -456,6 +553,10 @@ func (s *LocalServer) handleSetAlias(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *LocalServer) handleSetSignaling(w http.ResponseWriter, r *http.Request) {
+	if !s.validateLocalRequest(r) {
+		http.Error(w, "Acesso não autorizado", http.StatusForbidden)
+		return
+	}
 	var req struct {
 		SignalingURL string `json:"signaling_url"`
 	}
@@ -484,11 +585,15 @@ func (s *LocalServer) handleSetSignaling(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *LocalServer) handleSetPassword(w http.ResponseWriter, r *http.Request) {
+	if !s.validateLocalRequest(r) {
+		http.Error(w, "Acesso não autorizado", http.StatusForbidden)
+		return
+	}
 	var req struct {
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Password) < 3 {
-		http.Error(w, "Senha inválida (mínimo 3 caracteres)", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Password) < 6 {
+		http.Error(w, "Senha inválida (mínimo 6 caracteres)", http.StatusBadRequest)
 		return
 	}
 
@@ -525,6 +630,10 @@ func (s *LocalServer) handleSetPassword(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *LocalServer) handleAutoStart(w http.ResponseWriter, r *http.Request) {
+	if !s.validateLocalRequest(r) {
+		http.Error(w, "Acesso não autorizado", http.StatusForbidden)
+		return
+	}
 	var req struct {
 		Enable bool `json:"enable"`
 	}
@@ -548,6 +657,10 @@ func (s *LocalServer) handleAutoStart(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *LocalServer) handleConfig(w http.ResponseWriter, r *http.Request) {
+	if !s.validateLocalRequest(r) {
+		http.Error(w, "Acesso não autorizado", http.StatusForbidden)
+		return
+	}
 	var req struct {
 		Quality int `json:"quality"`
 		FPS     int `json:"fps"`

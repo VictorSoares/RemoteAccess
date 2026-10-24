@@ -338,13 +338,13 @@ func PlayNotificationSound() {
 // OpenTaskManager launches Windows Task Manager directly without any console flashes
 func OpenTaskManager() {
 	// 1. Synthesize Ctrl + Shift + Esc (the native Windows shortcut for Task Manager)
-	procKeybdEvent.Call(0x11, 0, 0, 0) // Ctrl down
-	procKeybdEvent.Call(0x10, 0, 0, 0) // Shift down
-	procKeybdEvent.Call(0x1B, 0, 0, 0) // Esc down
-	time.Sleep(30 * time.Millisecond)
-	procKeybdEvent.Call(0x1B, 0, keyeventfKeyup, 0) // Esc up
-	procKeybdEvent.Call(0x10, 0, keyeventfKeyup, 0) // Shift up
-	procKeybdEvent.Call(0x11, 0, keyeventfKeyup, 0) // Ctrl up
+	procKeybdEvent.Call(0x11, 0, 0, remoteAccessMagicExtraInfo) // Ctrl down
+	procKeybdEvent.Call(0x10, 0, 0, remoteAccessMagicExtraInfo) // Shift down
+	procKeybdEvent.Call(0x1B, 0, 0, remoteAccessMagicExtraInfo) // Esc down
+	time.Sleep(35 * time.Millisecond)
+	procKeybdEvent.Call(0x1B, 0, keyeventfKeyup, remoteAccessMagicExtraInfo) // Esc up
+	procKeybdEvent.Call(0x10, 0, keyeventfKeyup, remoteAccessMagicExtraInfo) // Shift up
+	procKeybdEvent.Call(0x11, 0, keyeventfKeyup, remoteAccessMagicExtraInfo) // Ctrl up
 
 	// 2. Also invoke ShellExecute for taskmgr.exe
 	verb, _ := syscall.UTF16PtrFromString("open")
@@ -362,34 +362,59 @@ func SendCtrlAltDel() {
 		}
 	}
 	// 2. Synthesize Ctrl + Alt + Del keystrokes
-	procKeybdEvent.Call(0x11, 0, 0, 0) // Ctrl down
-	procKeybdEvent.Call(0x12, 0, 0, 0) // Alt down
-	procKeybdEvent.Call(0x2E, 0, 0, 0) // Del down
+	procKeybdEvent.Call(0x11, 0, 0, remoteAccessMagicExtraInfo) // Ctrl down
+	procKeybdEvent.Call(0x12, 0, 0, remoteAccessMagicExtraInfo) // Alt down
+	procKeybdEvent.Call(0x2E, 0, 0, remoteAccessMagicExtraInfo) // Del down
 	time.Sleep(50 * time.Millisecond)
-	procKeybdEvent.Call(0x2E, 0, keyeventfKeyup, 0) // Del up
-	procKeybdEvent.Call(0x12, 0, keyeventfKeyup, 0) // Alt up
-	procKeybdEvent.Call(0x11, 0, keyeventfKeyup, 0) // Ctrl up
+	procKeybdEvent.Call(0x2E, 0, keyeventfKeyup, remoteAccessMagicExtraInfo) // Del up
+	procKeybdEvent.Call(0x12, 0, keyeventfKeyup, remoteAccessMagicExtraInfo) // Alt up
+	procKeybdEvent.Call(0x11, 0, keyeventfKeyup, remoteAccessMagicExtraInfo) // Ctrl up
 
 	// 3. Fallback when not running as a system service: open Task Manager directly
 	OpenTaskManager()
 }
 
-// ShowDesktop minimizes or restores all windows cleanly
+// ShowDesktop minimizes or restores all windows cleanly (Win+D)
 func ShowDesktop() {
-	// 1. Primary: Windows Shell COM ToggleDesktop (100% reliable, works across UIPI and all window states)
-	cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", "(New-Object -ComObject Shell.Application).ToggleDesktop()")
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow:    true,
-		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
-	}
-	if err := cmd.Run(); err != nil {
-		// 2. Fallback: Synthesize standard Win + D keystrokes (0x5B is VK_LWIN, 0x44 is 'D'; NO extended key flag)
-		procKeybdEvent.Call(0x5B, 0, 0, 0)
-		procKeybdEvent.Call(0x44, 0, 0, 0)
-		time.Sleep(35 * time.Millisecond)
-		procKeybdEvent.Call(0x44, 0, keyeventfKeyup, 0)
-		procKeybdEvent.Call(0x5B, 0, keyeventfKeyup, 0)
-	}
+	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+	procKeybdEvent.Call(0x44, 0, 0, remoteAccessMagicExtraInfo) // 'D'
+	time.Sleep(35 * time.Millisecond)
+	procKeybdEvent.Call(0x44, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey|keyeventfKeyup, remoteAccessMagicExtraInfo)
+}
+
+// OpenStartMenu toggles the Windows Start menu (Win key)
+func OpenStartMenu() {
+	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+	time.Sleep(35 * time.Millisecond)
+	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey|keyeventfKeyup, remoteAccessMagicExtraInfo)
+}
+
+// OpenFileExplorer opens Windows File Explorer (Win+E)
+func OpenFileExplorer() {
+	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+	procKeybdEvent.Call(0x45, 0, 0, remoteAccessMagicExtraInfo) // 'E'
+	time.Sleep(35 * time.Millisecond)
+	procKeybdEvent.Call(0x45, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey|keyeventfKeyup, remoteAccessMagicExtraInfo)
+}
+
+// OpenRunDialog opens the Windows Run dialog (Win+R)
+func OpenRunDialog() {
+	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+	procKeybdEvent.Call(0x52, 0, 0, remoteAccessMagicExtraInfo) // 'R'
+	time.Sleep(35 * time.Millisecond)
+	procKeybdEvent.Call(0x52, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey|keyeventfKeyup, remoteAccessMagicExtraInfo)
+}
+
+// SendCtrlShortcut synthesizes Ctrl + specified Virtual Key combo cleanly
+func SendCtrlShortcut(vk uint16) {
+	procKeybdEvent.Call(0x11, 0, 0, remoteAccessMagicExtraInfo) // Ctrl down
+	procKeybdEvent.Call(uintptr(vk), 0, 0, remoteAccessMagicExtraInfo)
+	time.Sleep(35 * time.Millisecond)
+	procKeybdEvent.Call(uintptr(vk), 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+	procKeybdEvent.Call(0x11, 0, keyeventfKeyup, remoteAccessMagicExtraInfo) // Ctrl up
 }
 
 // CloseActiveWindow synthesizes Alt+F4 to gracefully close the active foreground window
@@ -569,40 +594,60 @@ func ReleaseAllModifierKeys() {
 	}
 }
 
-// AutoUnstickModifiers ensures ghost modifier keys are released before typing
-func AutoUnstickModifiers(alt, ctrl, shift, meta bool) {
-	if !alt {
-		if IsKeyDownAsync(0x12) || IsKeyDownAsync(0xA4) || IsKeyDownAsync(0xA5) {
-			procKeybdEvent.Call(0x12, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
-			procKeybdEvent.Call(0xA4, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
-			procKeybdEvent.Call(0xA5, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
-		}
+// SyncModifiers synchronizes the virtual modifier keys with the event's modifier states
+func SyncModifiers(alt, ctrl, shift, meta bool) {
+	// 1. If modifier is desired (true) but not currently down, press it down
+	if ctrl && !IsKeyDownAsync(0x11) {
+		procKeybdEvent.Call(0x11, 0, 0, remoteAccessMagicExtraInfo)
 	}
-	if !meta {
-		if IsKeyDownAsync(0x5B) || IsKeyDownAsync(0x5C) {
-			procKeybdEvent.Call(0x5B, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
-			procKeybdEvent.Call(0x5C, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
-		}
+	if alt && !IsKeyDownAsync(0x12) {
+		procKeybdEvent.Call(0x12, 0, 0, remoteAccessMagicExtraInfo)
 	}
-	if !ctrl {
-		if IsKeyDownAsync(0x11) || IsKeyDownAsync(0xA2) || IsKeyDownAsync(0xA3) {
-			procKeybdEvent.Call(0x11, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
-			procKeybdEvent.Call(0xA2, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
-			procKeybdEvent.Call(0xA3, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
-		}
+	if shift && !IsKeyDownAsync(0x10) {
+		procKeybdEvent.Call(0x10, 0, 0, remoteAccessMagicExtraInfo)
+	}
+	if meta && !IsKeyDownAsync(0x5B) {
+		procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+	}
+
+	// 2. If modifier is NOT desired (false) but currently stuck down, release it
+	if !ctrl && (IsKeyDownAsync(0x11) || IsKeyDownAsync(0xA2) || IsKeyDownAsync(0xA3)) {
+		procKeybdEvent.Call(0x11, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0xA2, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0xA3, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+	}
+	if !alt && (IsKeyDownAsync(0x12) || IsKeyDownAsync(0xA4) || IsKeyDownAsync(0xA5)) {
+		procKeybdEvent.Call(0x12, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0xA4, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0xA5, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+	}
+	if !shift && (IsKeyDownAsync(0x10) || IsKeyDownAsync(0xA0) || IsKeyDownAsync(0xA1)) {
+		procKeybdEvent.Call(0x10, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0xA0, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0xA1, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+	}
+	if !meta && (IsKeyDownAsync(0x5B) || IsKeyDownAsync(0x5C)) {
+		procKeybdEvent.Call(0x5B, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0x5C, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
 	}
 }
 
-// KeyDownEx simulates key press with modifier unstick validation
+// AutoUnstickModifiers ensures ghost modifier keys are released before typing
+func AutoUnstickModifiers(alt, ctrl, shift, meta bool) {
+	SyncModifiers(alt, ctrl, shift, meta)
+}
+
+// KeyDownEx simulates key press with bidirectional modifier synchronization
 func KeyDownEx(key, code string, keyCode int, alt, ctrl, shift, meta bool) error {
 	if code != "AltLeft" && code != "AltRight" && code != "ControlLeft" && code != "ControlRight" &&
 		code != "MetaLeft" && code != "MetaRight" && code != "ShiftLeft" && code != "ShiftRight" {
-		AutoUnstickModifiers(alt, ctrl, shift, meta)
+		SyncModifiers(alt, ctrl, shift, meta)
 	}
 
 	runes := []rune(key)
 	// Check if this is a printable non-ASCII Unicode character (e.g. ç, ã, é, ^, ~, etc.)
-	if len(runes) == 1 && runes[0] > 127 {
+	// BUT only when not part of modifier shortcuts (Ctrl, Alt, Meta)
+	if len(runes) == 1 && runes[0] > 127 && !ctrl && !alt && !meta {
 		return SendUnicodeChar(runes[0])
 	}
 
@@ -623,10 +668,10 @@ func KeyDown(key, code string, keyCode int) error {
 	return KeyDownEx(key, code, keyCode, false, false, false, false)
 }
 
-// KeyUp simulates key release
-func KeyUp(key, code string, keyCode int) error {
+// KeyUpEx simulates key release with modifier synchronization
+func KeyUpEx(key, code string, keyCode int, alt, ctrl, shift, meta bool) error {
 	runes := []rune(key)
-	if len(runes) == 1 && runes[0] > 127 {
+	if len(runes) == 1 && runes[0] > 127 && !ctrl && !alt && !meta {
 		// Unicode char was already sent atomically (down + up)
 		return nil
 	}
@@ -638,9 +683,21 @@ func KeyUp(key, code string, keyCode int) error {
 			flags |= keyeventfExtendedkey
 		}
 		procKeybdEvent.Call(uintptr(vk), 0, flags, remoteAccessMagicExtraInfo)
-		return nil
 	}
+
+	// If the key is a modifier or modifiers changed state, ensure synchronization
+	if code == "AltLeft" || code == "AltRight" || code == "ControlLeft" || code == "ControlRight" ||
+		code == "MetaLeft" || code == "MetaRight" || code == "ShiftLeft" || code == "ShiftRight" ||
+		!ctrl || !alt || !shift || !meta {
+		SyncModifiers(alt, ctrl, shift, meta)
+	}
+
 	return nil
+}
+
+// KeyUp simulates key release
+func KeyUp(key, code string, keyCode int) error {
+	return KeyUpEx(key, code, keyCode, false, false, false, false)
 }
 
 func isExtendedKey(vk uint16) bool {

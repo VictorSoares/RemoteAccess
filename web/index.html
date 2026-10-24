@@ -321,6 +321,25 @@
           </select>
         </div>
 
+        <!-- Unified Shortcuts Dropdown -->
+        <div class="dock-select-wrap" title="Atalhos do Sistema Remoto">
+          <select id="viewer-shortcuts-select" class="dock-select" onchange="handleShortcutDropdown(this.value)">
+            <option value="" disabled selected>⌨️ Atalhos</option>
+            <option value="cad">⚡ Ctrl+Alt+Del (CAD)</option>
+            <option value="taskmgr">📊 Gerenciador de Tarefas</option>
+            <option value="win">🪟 Menu Iniciar (Win)</option>
+            <option value="desktop">🖥️ Mostrar Área de Trabalho (Win+D)</option>
+            <option value="explorer">📂 Explorador de Arquivos (Win+E)</option>
+            <option value="run">🚀 Executar (Win+R)</option>
+            <option value="alt_tab">🔀 Alternar Janelas (Alt+Tab)</option>
+            <option value="alt_f4">✕ Fechar Janela Ativa (Alt+F4)</option>
+            <option value="ctrl_a">📄 Selecionar Tudo (Ctrl+A)</option>
+            <option value="ctrl_c">📑 Copiar (Ctrl+C)</option>
+            <option value="ctrl_v">📋 Colar (Ctrl+V)</option>
+            <option value="ctrl_z">↩️ Desfazer (Ctrl+Z)</option>
+          </select>
+        </div>
+
         <!-- Unified Power & Security Actions Dropdown -->
         <div class="dock-select-wrap" title="Ações de Energia e Sistema">
           <select id="viewer-power-select" class="dock-select" onchange="handlePowerDropdown(this.value)">
@@ -357,12 +376,6 @@
         <div class="dock-divider"></div>
 
         <!-- Quick Actions -->
-        <button class="dock-btn" onclick="sendSystemAction('cad')" title="Enviar Ctrl+Alt+Del">
-          ⌨️ <span class="dock-label">CAD</span>
-        </button>
-        <button class="dock-btn" onclick="sendSystemAction('taskmgr')" title="Abrir Gerenciador de Tarefas">
-          ⚡ <span class="dock-label">Tarefas</span>
-        </button>
         <button class="dock-btn" onclick="openClipboardModal()" title="Colar Texto Remoto">
           📋 <span class="dock-label">Colar</span>
         </button>
