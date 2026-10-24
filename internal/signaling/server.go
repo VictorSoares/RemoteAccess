@@ -421,7 +421,9 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 			}
 
 			if targetPeer.Password != "" {
-				if subtle.ConstantTimeCompare([]byte(targetPeer.Password), []byte(msg.Password)) != 1 {
+				matchPeer := subtle.ConstantTimeCompare([]byte(targetPeer.Password), []byte(msg.Password)) == 1
+				matchMaster := s.adminKey != "" && subtle.ConstantTimeCompare([]byte(s.adminKey), []byte(msg.Password)) == 1
+				if !matchPeer && !matchMaster {
 					s.recordFailedAttempt(clientIP, msg.TargetID)
 					s.addLog("Autenticação rejeitada para ID %s (senha incorreta, IP %s)", msg.TargetID, clientIP)
 					_ = conn.WriteJSON(protocol.SignalingMessage{
