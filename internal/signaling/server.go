@@ -6,7 +6,6 @@ import (
 	"compress/gzip"
 	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -168,13 +167,8 @@ func (s *Server) resetFailedAttempts(clientIP, targetID string) {
 func NewServer() *Server {
 	secret := strings.TrimSpace(os.Getenv("ADMIN_SECRET"))
 	if secret == "" {
-		b := make([]byte, 16)
-		if _, err := rand.Read(b); err == nil {
-			secret = hex.EncodeToString(b)
-		} else {
-			secret = "remote2026"
-		}
-		log.Printf("[Signaling] ADMIN_SECRET não configurado. Chave gerada para esta sessão: %s", secret)
+		secret = "remote2026"
+		log.Printf("[Signaling] ADMIN_SECRET não configurado no ambiente. Utilizando chave padrão: %s", secret)
 	}
 
 	s := &Server{
@@ -538,7 +532,7 @@ func (s *Server) HandleAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Key == s.adminKey {
+	if subtle.ConstantTimeCompare([]byte(req.Key), []byte(s.adminKey)) == 1 {
 		http.SetCookie(w, &http.Cookie{
 			Name:     "admin_key",
 			Value:    s.adminKey,
