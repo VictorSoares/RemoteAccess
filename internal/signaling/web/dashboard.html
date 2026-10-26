@@ -2896,6 +2896,10 @@
         return; // Allow typing in chat input and dialogs!
       }
 
+      if (e.key === 'Dead') {
+        return; // Allow browser to compose dead keys (accents: ~, ^, ´, `) with the next character
+      }
+
       pressedWebKeyCodes.add(e.code || e.key);
 
       // Intercept Alt+F4 to prevent closing operator's browser window
@@ -2938,6 +2942,9 @@
       if (!viewerConnected || !viewerControlEnabled || e.key === 'F12') return;
       if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'SELECT')) {
         return; // Allow typing in chat input and dialogs!
+      }
+      if (e.key === 'Dead') {
+        return;
       }
       pressedWebKeyCodes.delete(e.code || e.key);
       e.preventDefault();

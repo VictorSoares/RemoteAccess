@@ -2068,6 +2068,10 @@ function setupKeyboardEvents() {
     if (!isConnected || isObserverMode || e.key === 'F12') return;
     if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
 
+    if (e.key === 'Dead') {
+      return; // Allow browser to compose dead keys (accents: ~, ^, ´, `) with the next character
+    }
+
     pressedKeyCodes.add(e.code || e.key);
 
     // Intercept Alt+F4 to prevent closing operator's desktop window
@@ -2110,6 +2114,9 @@ function setupKeyboardEvents() {
   window.addEventListener('keyup', (e) => {
     if (!isConnected || isObserverMode || e.key === 'F12') return;
     if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
+    if (e.key === 'Dead') {
+      return;
+    }
     pressedKeyCodes.delete(e.code || e.key);
     e.preventDefault();
     sendControl({

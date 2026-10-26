@@ -566,8 +566,23 @@ func IsKeyDownAsync(vk uint16) bool {
 	return (ret & 0x8000) != 0
 }
 
+var (
+	modifierStateMu sync.Mutex
+	stateCtrl       bool
+	stateAlt        bool
+	stateShift      bool
+	stateMeta       bool
+)
+
 // ReleaseAllModifierKeys forcefully releases all modifier keys (Ctrl, Alt, Shift, Win)
 func ReleaseAllModifierKeys() {
+	modifierStateMu.Lock()
+	stateCtrl = false
+	stateAlt = false
+	stateShift = false
+	stateMeta = false
+	modifierStateMu.Unlock()
+
 	modifiers := []struct {
 		vk       uint16
 		extended bool
@@ -596,39 +611,50 @@ func ReleaseAllModifierKeys() {
 
 // SyncModifiers synchronizes the virtual modifier keys with the event's modifier states
 func SyncModifiers(alt, ctrl, shift, meta bool) {
-	// 1. If modifier is desired (true) but not currently down, press it down
-	if ctrl && !IsKeyDownAsync(0x11) {
-		procKeybdEvent.Call(0x11, 0, 0, remoteAccessMagicExtraInfo)
-	}
-	if alt && !IsKeyDownAsync(0x12) {
-		procKeybdEvent.Call(0x12, 0, 0, remoteAccessMagicExtraInfo)
-	}
-	if shift && !IsKeyDownAsync(0x10) {
-		procKeybdEvent.Call(0x10, 0, 0, remoteAccessMagicExtraInfo)
-	}
-	if meta && !IsKeyDownAsync(0x5B) {
-		procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey, remoteAccessMagicExtraInfo)
-	}
+	modifierStateMu.Lock()
+	defer modifierStateMu.Unlock()
 
-	// 2. If modifier is NOT desired (false) but currently stuck down, release it
-	if !ctrl && (IsKeyDownAsync(0x11) || IsKeyDownAsync(0xA2) || IsKeyDownAsync(0xA3)) {
+	// 1. Synchronize Ctrl
+	if ctrl && !stateCtrl {
+		procKeybdEvent.Call(0x11, 0, 0, remoteAccessMagicExtraInfo) // VK_CONTROL down
+		stateCtrl = true
+	} else if !ctrl && stateCtrl {
 		procKeybdEvent.Call(0x11, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
 		procKeybdEvent.Call(0xA2, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
 		procKeybdEvent.Call(0xA3, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+		stateCtrl = false
 	}
-	if !alt && (IsKeyDownAsync(0x12) || IsKeyDownAsync(0xA4) || IsKeyDownAsync(0xA5)) {
+
+	// 2. Synchronize Alt
+	if alt && !stateAlt {
+		procKeybdEvent.Call(0x12, 0, 0, remoteAccessMagicExtraInfo) // VK_MENU down
+		stateAlt = true
+	} else if !alt && stateAlt {
 		procKeybdEvent.Call(0x12, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
 		procKeybdEvent.Call(0xA4, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
 		procKeybdEvent.Call(0xA5, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+		stateAlt = false
 	}
-	if !shift && (IsKeyDownAsync(0x10) || IsKeyDownAsync(0xA0) || IsKeyDownAsync(0xA1)) {
+
+	// 3. Synchronize Shift
+	if shift && !stateShift {
+		procKeybdEvent.Call(0x10, 0, 0, remoteAccessMagicExtraInfo) // VK_SHIFT down
+		stateShift = true
+	} else if !shift && stateShift {
 		procKeybdEvent.Call(0x10, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
 		procKeybdEvent.Call(0xA0, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
 		procKeybdEvent.Call(0xA1, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		stateShift = false
 	}
-	if !meta && (IsKeyDownAsync(0x5B) || IsKeyDownAsync(0x5C)) {
+
+	// 4. Synchronize Meta (Win)
+	if meta && !stateMeta {
+		procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey, remoteAccessMagicExtraInfo) // VK_LWIN down
+		stateMeta = true
+	} else if !meta && stateMeta {
 		procKeybdEvent.Call(0x5B, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
 		procKeybdEvent.Call(0x5C, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+		stateMeta = false
 	}
 }
 
@@ -639,18 +665,64 @@ func AutoUnstickModifiers(alt, ctrl, shift, meta bool) {
 
 // KeyDownEx simulates key press with bidirectional modifier synchronization
 func KeyDownEx(key, code string, keyCode int, alt, ctrl, shift, meta bool) error {
-	if code != "AltLeft" && code != "AltRight" && code != "ControlLeft" && code != "ControlRight" &&
-		code != "MetaLeft" && code != "MetaRight" && code != "ShiftLeft" && code != "ShiftRight" {
-		SyncModifiers(alt, ctrl, shift, meta)
+	// 1. Direct handling of standalone modifier keys
+	switch code {
+	case "ShiftLeft", "ShiftRight":
+		modifierStateMu.Lock()
+		stateShift = true
+		modifierStateMu.Unlock()
+		vk := resolveVK(key, code, keyCode)
+		procKeybdEvent.Call(uintptr(vk), 0, 0, remoteAccessMagicExtraInfo)
+		return nil
+	case "ControlLeft", "ControlRight":
+		modifierStateMu.Lock()
+		stateCtrl = true
+		modifierStateMu.Unlock()
+		vk := resolveVK(key, code, keyCode)
+		flags := uintptr(0)
+		if isExtendedKey(vk) {
+			flags |= keyeventfExtendedkey
+		}
+		procKeybdEvent.Call(uintptr(vk), 0, flags, remoteAccessMagicExtraInfo)
+		return nil
+	case "AltLeft", "AltRight", "AltGraph":
+		modifierStateMu.Lock()
+		stateAlt = true
+		modifierStateMu.Unlock()
+		vk := resolveVK(key, code, keyCode)
+		flags := uintptr(0)
+		if isExtendedKey(vk) {
+			flags |= keyeventfExtendedkey
+		}
+		procKeybdEvent.Call(uintptr(vk), 0, flags, remoteAccessMagicExtraInfo)
+		return nil
+	case "MetaLeft", "MetaRight":
+		modifierStateMu.Lock()
+		stateMeta = true
+		modifierStateMu.Unlock()
+		vk := resolveVK(key, code, keyCode)
+		procKeybdEvent.Call(uintptr(vk), 0, keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+		return nil
 	}
 
+	// 2. Synchronize modifiers for any standard non-modifier key
+	SyncModifiers(alt, ctrl, shift, meta)
+
+	// 3. Printable characters (symbols, accents, non-ASCII Unicode):
+	// When no Control/Alt/Meta modifier is active, any character that is non-alphanumeric
+	// (e.g. @, #, $, %, &, *, ?, /, \, |, ~, ^, `, etc.) or accented Unicode (ç, ã, é, etc.)
+	// is injected directly via SendUnicodeChar. This guarantees 100% typing accuracy
+	// regardless of layout mismatches between remote client and host.
 	runes := []rune(key)
-	// Check if this is a printable non-ASCII Unicode character (e.g. ç, ã, é, ^, ~, etc.)
-	// BUT only when not part of modifier shortcuts (Ctrl, Alt, Meta)
-	if len(runes) == 1 && runes[0] > 127 && !ctrl && !alt && !meta {
-		return SendUnicodeChar(runes[0])
+	if len(runes) == 1 && !ctrl && !alt && !meta {
+		r := runes[0]
+		isPlainAlphaNum := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == ' '
+		if !isPlainAlphaNum {
+			return SendUnicodeChar(r)
+		}
 	}
 
+	// 4. Standard key injection via Virtual Key
 	vk := resolveVK(key, code, keyCode)
 	if vk != 0 {
 		flags := uintptr(0)
@@ -670,12 +742,52 @@ func KeyDown(key, code string, keyCode int) error {
 
 // KeyUpEx simulates key release with modifier synchronization
 func KeyUpEx(key, code string, keyCode int, alt, ctrl, shift, meta bool) error {
-	runes := []rune(key)
-	if len(runes) == 1 && runes[0] > 127 && !ctrl && !alt && !meta {
-		// Unicode char was already sent atomically (down + up)
+	// 1. Direct release of standalone modifier keys
+	switch code {
+	case "ShiftLeft", "ShiftRight":
+		modifierStateMu.Lock()
+		stateShift = false
+		modifierStateMu.Unlock()
+		procKeybdEvent.Call(0x10, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0xA0, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0xA1, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		return nil
+	case "ControlLeft", "ControlRight":
+		modifierStateMu.Lock()
+		stateCtrl = false
+		modifierStateMu.Unlock()
+		procKeybdEvent.Call(0x11, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0xA2, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0xA3, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+		return nil
+	case "AltLeft", "AltRight", "AltGraph":
+		modifierStateMu.Lock()
+		stateAlt = false
+		modifierStateMu.Unlock()
+		procKeybdEvent.Call(0x12, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0xA4, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0xA5, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+		return nil
+	case "MetaLeft", "MetaRight":
+		modifierStateMu.Lock()
+		stateMeta = false
+		modifierStateMu.Unlock()
+		procKeybdEvent.Call(0x5B, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0x5C, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
 		return nil
 	}
 
+	// 2. Printable symbols / non-ASCII unicode were already injected atomically in KeyDownEx
+	runes := []rune(key)
+	if len(runes) == 1 && !ctrl && !alt && !meta {
+		r := runes[0]
+		isPlainAlphaNum := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == ' '
+		if !isPlainAlphaNum {
+			return nil
+		}
+	}
+
+	// 3. Virtual Key release
 	vk := resolveVK(key, code, keyCode)
 	if vk != 0 {
 		flags := uintptr(keyeventfKeyup)
@@ -685,13 +797,8 @@ func KeyUpEx(key, code string, keyCode int, alt, ctrl, shift, meta bool) error {
 		procKeybdEvent.Call(uintptr(vk), 0, flags, remoteAccessMagicExtraInfo)
 	}
 
-	// If the key is a modifier or modifiers changed state, ensure synchronization
-	if code == "AltLeft" || code == "AltRight" || code == "ControlLeft" || code == "ControlRight" ||
-		code == "MetaLeft" || code == "MetaRight" || code == "ShiftLeft" || code == "ShiftRight" ||
-		!ctrl || !alt || !shift || !meta {
-		SyncModifiers(alt, ctrl, shift, meta)
-	}
-
+	// 4. Ensure modifier states stay synchronized
+	SyncModifiers(alt, ctrl, shift, meta)
 	return nil
 }
 
@@ -783,6 +890,9 @@ var jsKeyToVK = map[string]uint16{
 	"Backslash":    0xDC,
 	"BracketRight": 0xDD,
 	"Quote":        0xDE,
+	"IntlRo":        0xC1, // ABNT2 ? / ° key (VK_OEM_102 / VK_ABNT_C1)
+	"IntlBackslash": 0xE2, // ABNT2 \ | key (VK_OEM_102)
+	"NumpadComma":   0x6C, // Keypad separator
 }
 
 func resolveVK(key, code string, keyCode int) uint16 {

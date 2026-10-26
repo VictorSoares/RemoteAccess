@@ -5,6 +5,7 @@ services:
     plan: free
     region: oregon
     healthCheckPath: /healthz
+    autoDeploy: true
     envVars:
       - key: PORT
         value: 8080

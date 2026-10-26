@@ -23,6 +23,9 @@ func TestResolveVK(t *testing.T) {
 		{"Alt", "AltLeft", 18, 0xA4},
 		{"Shift", "ShiftLeft", 16, 0xA0},
 		{"Meta", "MetaLeft", 91, 0x5B},
+		{"?", "IntlRo", 193, 0xC1},
+		{"\\", "IntlBackslash", 226, 0xE2},
+		{",", "NumpadComma", 194, 0x6C},
 	}
 
 	for _, tt := range tests {
@@ -43,4 +46,27 @@ func TestIsExtendedKey(t *testing.T) {
 	if isExtendedKey(0x43) { // 'C'
 		t.Errorf("expected 'C' not to be extended key")
 	}
+}
+
+func TestModifiersSyncAndSpecialChars(t *testing.T) {
+	// Standalone modifier press and release
+	if err := KeyDownEx("Shift", "ShiftLeft", 16, false, false, true, false); err != nil {
+		t.Errorf("KeyDownEx ShiftLeft failed: %v", err)
+	}
+	if err := KeyUpEx("Shift", "ShiftLeft", 16, false, false, false, false); err != nil {
+		t.Errorf("KeyUpEx ShiftLeft failed: %v", err)
+	}
+
+	// Non-alphanumeric printable symbols (e.g. @, ?, ç, ~)
+	symbols := []string{"@", "?", "/", "\\", "|", "~", "^", "´", "ç", "ã", "!"}
+	for _, sym := range symbols {
+		if err := KeyDownEx(sym, "KeySym", 0, false, false, false, false); err != nil {
+			t.Errorf("KeyDownEx symbol %q failed: %v", sym, err)
+		}
+		if err := KeyUpEx(sym, "KeySym", 0, false, false, false, false); err != nil {
+			t.Errorf("KeyUpEx symbol %q failed: %v", sym, err)
+		}
+	}
+
+	ReleaseAllModifierKeys()
 }
