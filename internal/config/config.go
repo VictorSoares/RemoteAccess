@@ -160,7 +160,7 @@ func (cm *ConfigManager) Save() error {
 
 	primaryErr := os.WriteFile(cm.filePath, data, 0666)
 
-	// Dual-persistence: Always keep ProgramData and APPDATA in sync
+	// Dual-persistence: Always keep ProgramData and APPDATA in sync (only for production config paths)
 	progData := os.Getenv("ProgramData")
 	if progData == "" {
 		progData = `C:\ProgramData`
@@ -173,14 +173,19 @@ func (cm *ConfigManager) Save() error {
 		userFile = filepath.Join(appData, "RemoteAccess", "config.json")
 	}
 
-	if sharedFile != "" && !strings.EqualFold(filepath.Clean(sharedFile), filepath.Clean(cm.filePath)) {
-		_ = os.MkdirAll(filepath.Dir(sharedFile), 0777)
-		_ = os.WriteFile(sharedFile, data, 0666)
-	}
+	isProdConfig := strings.EqualFold(filepath.Clean(cm.filePath), filepath.Clean(sharedFile)) ||
+		(userFile != "" && strings.EqualFold(filepath.Clean(cm.filePath), filepath.Clean(userFile)))
 
-	if userFile != "" && !strings.EqualFold(filepath.Clean(userFile), filepath.Clean(cm.filePath)) {
-		_ = os.MkdirAll(filepath.Dir(userFile), 0755)
-		_ = os.WriteFile(userFile, data, 0666)
+	if isProdConfig {
+		if sharedFile != "" && !strings.EqualFold(filepath.Clean(sharedFile), filepath.Clean(cm.filePath)) {
+			_ = os.MkdirAll(filepath.Dir(sharedFile), 0777)
+			_ = os.WriteFile(sharedFile, data, 0666)
+		}
+
+		if userFile != "" && !strings.EqualFold(filepath.Clean(userFile), filepath.Clean(cm.filePath)) {
+			_ = os.MkdirAll(filepath.Dir(userFile), 0755)
+			_ = os.WriteFile(userFile, data, 0666)
+		}
 	}
 
 	return primaryErr
