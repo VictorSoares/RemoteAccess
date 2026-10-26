@@ -26,15 +26,31 @@ import (
 const version = "2.0.0"
 
 var (
-	kernel32                     = syscall.NewLazyDLL("kernel32.dll")
-	procCreateMutex              = kernel32.NewProc("CreateMutexW")
-	procCloseHandle              = kernel32.NewProc("CloseHandle")
-	procCreateToolhelp32Snapshot = kernel32.NewProc("CreateToolhelp32Snapshot")
-	procProcess32FirstW          = kernel32.NewProc("Process32FirstW")
-	procProcess32NextW           = kernel32.NewProc("Process32NextW")
-	procOpenProcess              = kernel32.NewProc("OpenProcess")
-	procTerminateProcess         = kernel32.NewProc("TerminateProcess")
-	appMutex                     uintptr
+	kernel32                       = syscall.NewLazyDLL("kernel32.dll")
+	procCreateMutex                = kernel32.NewProc("CreateMutexW")
+	procCloseHandle                = kernel32.NewProc("CloseHandle")
+	procCreateToolhelp32Snapshot   = kernel32.NewProc("CreateToolhelp32Snapshot")
+	procProcess32FirstW            = kernel32.NewProc("Process32FirstW")
+	procProcess32NextW             = kernel32.NewProc("Process32NextW")
+	procOpenProcess                = kernel32.NewProc("OpenProcess")
+	procTerminateProcess           = kernel32.NewProc("TerminateProcess")
+	procQueryFullProcessImageNameW = kernel32.NewProc("QueryFullProcessImageNameW")
+
+	user32                       = syscall.NewLazyDLL("user32.dll")
+	procEnumWindows              = user32.NewProc("EnumWindows")
+	procGetWindowTextW           = user32.NewProc("GetWindowTextW")
+	procGetClassNameW            = user32.NewProc("GetClassNameW")
+	procShowWindow               = user32.NewProc("ShowWindow")
+	procSetForegroundWindow      = user32.NewProc("SetForegroundWindow")
+	procIsWindow                 = user32.NewProc("IsWindow")
+	procIsWindowVisible          = user32.NewProc("IsWindowVisible")
+	procIsIconic                 = user32.NewProc("IsIconic")
+	procIsZoomed                 = user32.NewProc("IsZoomed")
+	procGetWindowRect            = user32.NewProc("GetWindowRect")
+	procSetWindowPos             = user32.NewProc("SetWindowPos")
+	procGetWindowThreadProcessId = user32.NewProc("GetWindowThreadProcessId")
+
+	appMutex uintptr
 )
 
 type processEntry32W struct {
@@ -170,27 +186,78 @@ func findRunningLocalPort() int {
 
 var windowSizeGuardOnce sync.Once
 
+// isRemoteAccessAppWindow determines whether an HWND belongs to the actual
+// RemoteAccess Edge App desktop window, strictly excluding IDEs, code editors,
+// and background workers.
+func isRemoteAccessAppWindow(hwnd uintptr) bool {
+	if runtime.GOOS != "windows" {
+		return false
+	}
+	r, _, _ := procIsWindow.Call(hwnd)
+	if r == 0 {
+		return false
+	}
+
+	var clsBuf [256]uint16
+	procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&clsBuf[0])), 256)
+	cls := syscall.UTF16ToString(clsBuf[:])
+	if cls != "Chrome_WidgetWin_1" {
+		return false
+	}
+
+	var buf [256]uint16
+	procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), 256)
+	title := syscall.UTF16ToString(buf[:])
+	titleLower := strings.ToLower(title)
+
+	// Strictly exclude any development environments, editors, and messaging windows
+	for _, forbidden := range []string{
+		"antigravity", "visual studio", "code", "cursor", "obsidian",
+		"bate-papo", "chat", "discord", "slack", "teams",
+	} {
+		if strings.Contains(titleLower, forbidden) {
+			return false
+		}
+	}
+
+	// Must match RemoteAccess or local server IP
+	if !strings.Contains(title, "RemoteAccess") && !strings.Contains(title, "127.0.0.1") {
+		return false
+	}
+
+	// Verify owning process is msedge.exe or chrome.exe
+	var pid uint32
+	procGetWindowThreadProcessId.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+	if pid == 0 {
+		return false
+	}
+
+	hProc, _, _ := procOpenProcess.Call(0x1000 /* PROCESS_QUERY_LIMITED_INFORMATION */, 0, uintptr(pid))
+	if hProc != 0 {
+		defer procCloseHandle.Call(hProc)
+		var imgBuf [512]uint16
+		size := uint32(len(imgBuf))
+		rImg, _, _ := procQueryFullProcessImageNameW.Call(hProc, 0, uintptr(unsafe.Pointer(&imgBuf[0])), uintptr(unsafe.Pointer(&size)))
+		if rImg != 0 {
+			exePath := syscall.UTF16ToString(imgBuf[:size])
+			exeName := strings.ToLower(filepath.Base(exePath))
+			if exeName != "msedge.exe" && exeName != "chrome.exe" {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
 // bringWindowToFront searches for an existing RemoteAccess window and restores/focuses it.
 func bringWindowToFront() bool {
 	if runtime.GOOS != "windows" {
 		return false
 	}
-	user32 := syscall.NewLazyDLL("user32.dll")
-	procEnumWindows := user32.NewProc("EnumWindows")
-	procGetWindowTextW := user32.NewProc("GetWindowTextW")
-	procGetClassNameW := user32.NewProc("GetClassNameW")
-	procShowWindow := user32.NewProc("ShowWindow")
-	procSetForegroundWindow := user32.NewProc("SetForegroundWindow")
-	procIsWindow := user32.NewProc("IsWindow")
-	procIsWindowVisible := user32.NewProc("IsWindowVisible")
-	procIsIconic := user32.NewProc("IsIconic")
 
 	var targetHWND uintptr
 	cb := syscall.NewCallback(func(hwnd uintptr, lParam uintptr) uintptr {
-		r, _, _ := procIsWindow.Call(hwnd)
-		if r == 0 {
-			return 1
-		}
 		// Window must be physically visible or minimized (iconic), not a dead background worker
 		vis, _, _ := procIsWindowVisible.Call(hwnd)
 		min, _, _ := procIsIconic.Call(hwnd)
@@ -198,19 +265,7 @@ func bringWindowToFront() bool {
 			return 1
 		}
 
-		var clsBuf [256]uint16
-		procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&clsBuf[0])), 256)
-		cls := syscall.UTF16ToString(clsBuf[:])
-		if cls != "Chrome_WidgetWin_1" {
-			return 1
-		}
-		var buf [256]uint16
-		procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), 256)
-		title := syscall.UTF16ToString(buf[:])
-		if strings.Contains(title, "Bate-Papo") || strings.Contains(title, "Chat") {
-			return 1
-		}
-		if strings.Contains(title, "RemoteAccess") || strings.Contains(title, "127.0.0.1") {
+		if isRemoteAccessAppWindow(hwnd) {
 			targetHWND = hwnd
 			return 0 // found target window
 		}
@@ -266,16 +321,6 @@ func startWindowSizeGuard() {
 		return
 	}
 	windowSizeGuardOnce.Do(func() {
-		user32 := syscall.NewLazyDLL("user32.dll")
-		procGetWindowRect := user32.NewProc("GetWindowRect")
-		procSetWindowPos := user32.NewProc("SetWindowPos")
-		procGetWindowTextW := user32.NewProc("GetWindowTextW")
-		procGetClassNameW := user32.NewProc("GetClassNameW")
-		procEnumWindows := user32.NewProc("EnumWindows")
-		procIsWindowVisible := user32.NewProc("IsWindowVisible")
-		procIsZoomed := user32.NewProc("IsZoomed")
-		procIsIconic := user32.NewProc("IsIconic")
-
 		type rect struct {
 			left, top, right, bottom int32
 		}
@@ -295,19 +340,7 @@ func startWindowSizeGuard() {
 				if !isVis(hwnd) {
 					return 1
 				}
-				var clsBuf [256]uint16
-				procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&clsBuf[0])), 256)
-				cls := syscall.UTF16ToString(clsBuf[:])
-				if cls != "Chrome_WidgetWin_1" {
-					return 1
-				}
-				var buf [256]uint16
-				procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), 256)
-				title := syscall.UTF16ToString(buf[:])
-				if strings.Contains(title, "Bate-Papo") || strings.Contains(title, "Chat") {
-					return 1
-				}
-				if strings.Contains(title, "RemoteAccess") || strings.Contains(title, "127.0.0.1") {
+				if isRemoteAccessAppWindow(hwnd) {
 					targetHWND = hwnd
 					return 0 // found, stop enumerating
 				}
