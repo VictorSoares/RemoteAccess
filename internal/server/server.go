@@ -199,17 +199,8 @@ func (s *LocalServer) Start(port int) error {
 	mux.HandleFunc("/api/elevate", s.handleElevate)
 	mux.HandleFunc("/api/install", s.handleInstall)
 	mux.HandleFunc("/api/app-close", func(w http.ResponseWriter, r *http.Request) {
-		if !s.validateLocalRequest(r) {
-			http.Error(w, "Acesso não autorizado", http.StatusForbidden)
-			return
-		}
 		w.WriteHeader(http.StatusOK)
-		log.Println("[Janela] Solicitação de encerramento recebida pela interface autorizada (app-close).")
-		go func() {
-			time.Sleep(100 * time.Millisecond)
-			s.Shutdown()
-			os.Exit(0)
-		}()
+		log.Println("[Janela] Janela fechada pelo usuário. O serviço continua ativo em segundo plano na bandeja do sistema.")
 	})
 
 	mux.HandleFunc("/ws", s.handleWS)
@@ -592,8 +583,8 @@ func (s *LocalServer) handleSetPassword(w http.ResponseWriter, r *http.Request) 
 	var req struct {
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Password) < 6 {
-		http.Error(w, "Senha inválida (mínimo 6 caracteres)", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(strings.TrimSpace(req.Password)) < 3 {
+		http.Error(w, "Senha inválida (mínimo 3 caracteres)", http.StatusBadRequest)
 		return
 	}
 

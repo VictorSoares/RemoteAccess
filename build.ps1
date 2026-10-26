@@ -50,6 +50,14 @@ if ($LASTEXITCODE -eq 0) {
             }
         }
     }
+
+    $pfExe = "C:\Program Files\RemoteAccess\RemoteAccess.exe"
+    if (Test-Path $pfExe) {
+        try {
+            Copy-Item -Path "RemoteAccess.exe" -Destination $pfExe -Force -ErrorAction SilentlyContinue
+            Write-Host " [SYNC] Executavel em '$pfExe' atualizado." -ForegroundColor Cyan
+        } catch {}
+    }
 } else {
     Write-Host "[ERRO] Falha na compilacao." -ForegroundColor Red
 }

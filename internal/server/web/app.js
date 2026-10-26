@@ -1120,6 +1120,11 @@ async function openCustomPasswordModal() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: newPwd.trim() })
     });
+    if (!res.ok) {
+      const errText = await res.text();
+      await showModalAlert('Erro', errText || 'Erro ao salvar nova senha.', '❌');
+      return;
+    }
     const data = await res.json();
     if (data.status === 'ok') {
       myHostInfo.rawPwd = data.password;

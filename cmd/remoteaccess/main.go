@@ -182,6 +182,8 @@ func bringWindowToFront() bool {
 	procShowWindow := user32.NewProc("ShowWindow")
 	procSetForegroundWindow := user32.NewProc("SetForegroundWindow")
 	procIsWindow := user32.NewProc("IsWindow")
+	procIsWindowVisible := user32.NewProc("IsWindowVisible")
+	procIsIconic := user32.NewProc("IsIconic")
 
 	var targetHWND uintptr
 	cb := syscall.NewCallback(func(hwnd uintptr, lParam uintptr) uintptr {
@@ -189,6 +191,13 @@ func bringWindowToFront() bool {
 		if r == 0 {
 			return 1
 		}
+		// Window must be physically visible or minimized (iconic), not a dead background worker
+		vis, _, _ := procIsWindowVisible.Call(hwnd)
+		min, _, _ := procIsIconic.Call(hwnd)
+		if vis == 0 && min == 0 {
+			return 1
+		}
+
 		var clsBuf [256]uint16
 		procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&clsBuf[0])), 256)
 		cls := syscall.UTF16ToString(clsBuf[:])

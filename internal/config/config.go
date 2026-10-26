@@ -157,13 +157,39 @@ func (cm *ConfigManager) Save() error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(cm.filePath, data, 0644)
+
+	primaryErr := os.WriteFile(cm.filePath, data, 0666)
+
+	// Dual-persistence: Always keep ProgramData and APPDATA in sync
+	progData := os.Getenv("ProgramData")
+	if progData == "" {
+		progData = `C:\ProgramData`
+	}
+	sharedFile := filepath.Join(progData, "RemoteAccess", "config.json")
+
+	appData := os.Getenv("APPDATA")
+	var userFile string
+	if appData != "" {
+		userFile = filepath.Join(appData, "RemoteAccess", "config.json")
+	}
+
+	if sharedFile != "" && !strings.EqualFold(filepath.Clean(sharedFile), filepath.Clean(cm.filePath)) {
+		_ = os.MkdirAll(filepath.Dir(sharedFile), 0777)
+		_ = os.WriteFile(sharedFile, data, 0666)
+	}
+
+	if userFile != "" && !strings.EqualFold(filepath.Clean(userFile), filepath.Clean(cm.filePath)) {
+		_ = os.MkdirAll(filepath.Dir(userFile), 0755)
+		_ = os.WriteFile(userFile, data, 0666)
+	}
+
+	return primaryErr
 }
 
 func (cm *ConfigManager) SetPassword(newPwd string) error {
 	newPwd = strings.TrimSpace(newPwd)
-	if len(newPwd) < 6 {
-		return fmt.Errorf("senha muito curta: mínimo de 6 caracteres")
+	if len(newPwd) < 3 {
+		return fmt.Errorf("senha muito curta: mínimo de 3 caracteres")
 	}
 	cm.mu.Lock()
 	cm.Data.Password = newPwd
