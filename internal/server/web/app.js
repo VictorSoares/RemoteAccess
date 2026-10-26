@@ -109,13 +109,31 @@ const viewerContainer = document.getElementById('viewer-container');
 // Dialog helper for Custom In-App Glassmorphic Modals
 let dialogResolve = null;
 
+function toggleTargetPwdVisibility() {
+  const input = document.getElementById('target-pwd');
+  const eye = document.getElementById('btn-target-pwd-eye');
+  if (!input) return;
+  if (input.type === 'password') {
+    input.type = 'text';
+    if (eye) eye.innerText = '🙈';
+  } else {
+    input.type = 'password';
+    if (eye) eye.innerText = '👁️';
+  }
+}
+
 function showModalAlert(title, message, icon = 'ℹ️') {
   return new Promise((resolve) => {
     dialogResolve = resolve;
     document.getElementById('dialog-icon').innerText = icon;
     document.getElementById('dialog-title').innerText = title;
     document.getElementById('dialog-message').innerText = message;
-    document.getElementById('dialog-input').style.display = 'none';
+    const container = document.getElementById('dialog-input-container');
+    if (container) container.style.display = 'none';
+    const input = document.getElementById('dialog-input');
+    if (input) input.style.display = 'none';
+    const eye = document.getElementById('dialog-pwd-eye');
+    if (eye) eye.style.display = 'none';
     document.getElementById('dialog-btn-cancel').style.display = 'none';
     document.getElementById('dialog-btn-ok').innerText = 'OK';
     document.getElementById('app-dialog-modal').style.display = 'flex';
@@ -128,7 +146,12 @@ function showModalConfirm(title, message, icon = '⚠️', okText = 'Confirmar',
     document.getElementById('dialog-icon').innerText = icon;
     document.getElementById('dialog-title').innerText = title;
     document.getElementById('dialog-message').innerText = message;
-    document.getElementById('dialog-input').style.display = 'none';
+    const container = document.getElementById('dialog-input-container');
+    if (container) container.style.display = 'none';
+    const input = document.getElementById('dialog-input');
+    if (input) input.style.display = 'none';
+    const eye = document.getElementById('dialog-pwd-eye');
+    if (eye) eye.style.display = 'none';
     document.getElementById('dialog-btn-cancel').innerText = cancelText;
     document.getElementById('dialog-btn-cancel').style.display = 'inline-block';
     document.getElementById('dialog-btn-ok').innerText = okText;
@@ -136,34 +159,75 @@ function showModalConfirm(title, message, icon = '⚠️', okText = 'Confirmar',
   });
 }
 
-function showModalPrompt(title, message, defaultValue = '', icon = '✏️', okText = 'Salvar', cancelText = 'Cancelar') {
+function showModalPrompt(title, message, defaultValue = '', icon = '✏️', okText = 'Salvar', cancelText = 'Cancelar', inputType = '') {
   return new Promise((resolve) => {
     dialogResolve = resolve;
     document.getElementById('dialog-icon').innerText = icon;
     document.getElementById('dialog-title').innerText = title;
     document.getElementById('dialog-message').innerText = message;
+    const container = document.getElementById('dialog-input-container');
     const input = document.getElementById('dialog-input');
-    input.style.display = 'block';
-    input.value = defaultValue;
+    const eye = document.getElementById('dialog-pwd-eye');
+
+    const isPwd = inputType === 'password' ||
+                  title.toLowerCase().includes('senha') ||
+                  title.toLowerCase().includes('password') ||
+                  message.toLowerCase().includes('senha') ||
+                  message.toLowerCase().includes('password');
+
+    if (container) container.style.display = 'block';
+    if (input) {
+      input.style.display = 'block';
+      input.type = isPwd ? 'password' : 'text';
+      input.value = defaultValue;
+    }
+    if (eye) {
+      eye.style.display = isPwd ? 'block' : 'none';
+      eye.innerText = '👁️';
+    }
+
     document.getElementById('dialog-btn-cancel').innerText = cancelText;
     document.getElementById('dialog-btn-cancel').style.display = 'inline-block';
     document.getElementById('dialog-btn-ok').innerText = okText;
     document.getElementById('app-dialog-modal').style.display = 'flex';
     setTimeout(() => {
-      input.focus();
-      input.select();
+      if (input) {
+        input.focus();
+        input.select();
+      }
     }, 60);
   });
+}
+
+function toggleDialogPwdVisibility() {
+  const input = document.getElementById('dialog-input');
+  const eye = document.getElementById('dialog-pwd-eye');
+  if (!input) return;
+  if (input.type === 'password') {
+    input.type = 'text';
+    if (eye) eye.innerText = '🙈';
+  } else {
+    input.type = 'password';
+    if (eye) eye.innerText = '👁️';
+  }
 }
 
 function closeAppDialog(result) {
   const modal = document.getElementById('app-dialog-modal');
   modal.style.display = 'none';
+  const container = document.getElementById('dialog-input-container');
   const input = document.getElementById('dialog-input');
-  const isPrompt = input.style.display !== 'none';
+  const eye = document.getElementById('dialog-pwd-eye');
+  const isPrompt = (container && container.style.display !== 'none') || (input && input.style.display !== 'none');
+  const val = input ? input.value : '';
+  if (input) {
+    input.value = '';
+    input.type = 'text';
+  }
+  if (eye) eye.style.display = 'none';
   if (dialogResolve) {
     if (isPrompt) {
-      dialogResolve(result ? input.value : null);
+      dialogResolve(result ? val : null);
     } else {
       dialogResolve(result);
     }
@@ -1107,7 +1171,7 @@ function togglePasswordVisibility() {
 }
 
 async function openCustomPasswordModal() {
-  const newPwd = await showModalPrompt('Definir Senha Fixa', 'Digite a nova senha fixa permanente que deseja usar para este computador (mínimo 3 caracteres):', myHostInfo.rawPwd, '🔑');
+  const newPwd = await showModalPrompt('Definir Senha Fixa', 'Digite a nova senha fixa permanente que deseja usar para este computador (mínimo 3 caracteres):', myHostInfo.rawPwd, '🔑', 'Salvar', 'Cancelar', 'password');
   if (newPwd === null) return;
   if (!newPwd || newPwd.trim().length < 3) {
     await showModalAlert('Senha Inválida', 'A senha precisa ter pelo menos 3 caracteres.', '⚠️');

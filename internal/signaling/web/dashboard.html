@@ -1116,7 +1116,10 @@
       <div id="dialog-icon" style="font-size: 2.2rem; margin-bottom: 0.5rem;">⚡</div>
       <h3 id="dialog-title" style="font-size: 1.15rem; font-weight: 800; margin-bottom: 0.5rem; color: #fff;">Aviso</h3>
       <p id="dialog-message" style="font-size: 0.88rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 1.25rem; white-space: pre-line;">Mensagem</p>
-      <input type="text" id="dialog-input" class="dialog-input" style="display: none;" autocomplete="off">
+      <div id="dialog-input-container" style="position: relative; width: 100%; display: none; margin-bottom: 1.25rem;">
+        <input type="text" id="dialog-input" class="dialog-input" style="width: 100%; margin-bottom: 0; padding-right: 2.5rem;" autocomplete="off">
+        <button type="button" id="dialog-pwd-eye" onclick="toggleDialogPwdVisibility()" style="display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: transparent; border: none; cursor: pointer; color: #94a3b8; font-size: 1.1rem; padding: 4px;" title="Mostrar/Ocultar Senha">👁️</button>
+      </div>
       <div id="dialog-actions" style="display: flex; gap: 0.6rem; justify-content: center;">
         <button id="dialog-btn-cancel" class="btn-action" style="display: none; background: rgba(255,255,255,0.08); color: #cbd5e1; padding: 0.55rem 1.1rem; border-radius: 8px; font-size: 0.85rem;" onclick="closeAppDialog(false)">Cancelar</button>
         <button id="dialog-btn-ok" class="btn-action btn-connect-direct" style="padding: 0.55rem 1.4rem; border-radius: 8px; font-size: 0.85rem;" onclick="closeAppDialog(true)">OK</button>
@@ -1359,7 +1362,12 @@
         document.getElementById('dialog-icon').innerText = icon;
         document.getElementById('dialog-title').innerText = title;
         document.getElementById('dialog-message').innerText = message;
-        document.getElementById('dialog-input').style.display = 'none';
+        const container = document.getElementById('dialog-input-container');
+        if (container) container.style.display = 'none';
+        const input = document.getElementById('dialog-input');
+        if (input) input.style.display = 'none';
+        const eye = document.getElementById('dialog-pwd-eye');
+        if (eye) eye.style.display = 'none';
         document.getElementById('dialog-btn-cancel').style.display = 'none';
         document.getElementById('dialog-btn-ok').innerText = 'OK';
         document.getElementById('app-dialog-modal').style.display = 'flex';
@@ -1372,7 +1380,12 @@
         document.getElementById('dialog-icon').innerText = icon;
         document.getElementById('dialog-title').innerText = title;
         document.getElementById('dialog-message').innerText = message;
-        document.getElementById('dialog-input').style.display = 'none';
+        const container = document.getElementById('dialog-input-container');
+        if (container) container.style.display = 'none';
+        const input = document.getElementById('dialog-input');
+        if (input) input.style.display = 'none';
+        const eye = document.getElementById('dialog-pwd-eye');
+        if (eye) eye.style.display = 'none';
         document.getElementById('dialog-btn-cancel').innerText = cancelText;
         document.getElementById('dialog-btn-cancel').style.display = 'inline-block';
         document.getElementById('dialog-btn-ok').innerText = okText;
@@ -1380,34 +1393,75 @@
       });
     }
 
-    function showModalPrompt(title, message, defaultValue = '', icon = '✏️', okText = 'Salvar', cancelText = 'Cancelar') {
+    function showModalPrompt(title, message, defaultValue = '', icon = '✏️', okText = 'Salvar', cancelText = 'Cancelar', inputType = '') {
       return new Promise((resolve) => {
         dialogResolve = resolve;
         document.getElementById('dialog-icon').innerText = icon;
         document.getElementById('dialog-title').innerText = title;
         document.getElementById('dialog-message').innerText = message;
+        const container = document.getElementById('dialog-input-container');
         const input = document.getElementById('dialog-input');
-        input.style.display = 'block';
-        input.value = defaultValue;
+        const eye = document.getElementById('dialog-pwd-eye');
+
+        const isPwd = inputType === 'password' ||
+                      title.toLowerCase().includes('senha') ||
+                      title.toLowerCase().includes('password') ||
+                      message.toLowerCase().includes('senha') ||
+                      message.toLowerCase().includes('password');
+
+        if (container) container.style.display = 'block';
+        if (input) {
+          input.style.display = 'block';
+          input.type = isPwd ? 'password' : 'text';
+          input.value = defaultValue;
+        }
+        if (eye) {
+          eye.style.display = isPwd ? 'block' : 'none';
+          eye.innerText = '👁️';
+        }
+
         document.getElementById('dialog-btn-cancel').innerText = cancelText;
         document.getElementById('dialog-btn-cancel').style.display = 'inline-block';
         document.getElementById('dialog-btn-ok').innerText = okText;
         document.getElementById('app-dialog-modal').style.display = 'flex';
         setTimeout(() => {
-          input.focus();
-          input.select();
+          if (input) {
+            input.focus();
+            input.select();
+          }
         }, 60);
       });
+    }
+
+    function toggleDialogPwdVisibility() {
+      const input = document.getElementById('dialog-input');
+      const eye = document.getElementById('dialog-pwd-eye');
+      if (!input) return;
+      if (input.type === 'password') {
+        input.type = 'text';
+        if (eye) eye.innerText = '🙈';
+      } else {
+        input.type = 'password';
+        if (eye) eye.innerText = '👁️';
+      }
     }
 
     function closeAppDialog(result) {
       const modal = document.getElementById('app-dialog-modal');
       modal.style.display = 'none';
+      const container = document.getElementById('dialog-input-container');
       const input = document.getElementById('dialog-input');
-      const isPrompt = input.style.display !== 'none';
+      const eye = document.getElementById('dialog-pwd-eye');
+      const isPrompt = (container && container.style.display !== 'none') || (input && input.style.display !== 'none');
+      const val = input ? input.value : '';
+      if (input) {
+        input.value = '';
+        input.type = 'text';
+      }
+      if (eye) eye.style.display = 'none';
       if (dialogResolve) {
         if (isPrompt) {
-          dialogResolve(result ? input.value : null);
+          dialogResolve(result ? val : null);
         } else {
           dialogResolve(result);
         }
@@ -1464,7 +1518,7 @@
     async function accessHost(targetId, hasPassword, monitorsCount) {
       let pwd = '';
       if (hasPassword) {
-        pwd = await showModalPrompt('Senha de Acesso', 'Informe a senha de acesso para o host ' + formatID(targetId) + ':', '', '🔑');
+        pwd = await showModalPrompt('Senha de Acesso', 'Informe a senha de acesso para o host ' + formatID(targetId) + ':', '', '🔑', 'Conectar', 'Cancelar', 'password');
         if (pwd === null) return;
       }
       connectDirect(targetId, pwd, monitorsCount);

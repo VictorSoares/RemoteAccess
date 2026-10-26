@@ -246,9 +246,10 @@
 
             <div class="form-group flex-2">
               <label class="form-label" for="target-pwd">Senha de Acesso</label>
-              <div class="input-wrap">
+              <div class="input-wrap" style="position: relative;">
                 <span class="input-icon">🔒</span>
-                <input type="password" id="target-pwd" class="form-input" placeholder="Digite a senha" required autocomplete="current-password">
+                <input type="password" id="target-pwd" class="form-input" placeholder="Digite a senha" required autocomplete="current-password" style="padding-right: 2.5rem;">
+                <button type="button" onclick="toggleTargetPwdVisibility()" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: transparent; border: none; cursor: pointer; color: #94a3b8; font-size: 1rem; padding: 4px;" title="Mostrar/Ocultar Senha" id="btn-target-pwd-eye">👁️</button>
               </div>
             </div>
           </div>
@@ -491,7 +492,10 @@
       <div id="dialog-icon" style="font-size: 2.2rem; margin-bottom: 0.5rem;">⚡</div>
       <h3 id="dialog-title" style="font-size: 1.15rem; font-weight: 800; margin-bottom: 0.5rem;">Aviso</h3>
       <p id="dialog-message" style="font-size: 0.88rem; color: var(--text-sub); line-height: 1.5; margin-bottom: 1.25rem;">Mensagem</p>
-      <input type="text" id="dialog-input" class="form-input" style="display: none; width: 100%; margin-bottom: 1.25rem;" autocomplete="off">
+      <div id="dialog-input-container" style="position: relative; width: 100%; display: none; margin-bottom: 1.25rem;">
+        <input type="text" id="dialog-input" class="form-input" style="width: 100%; margin-bottom: 0; padding-right: 2.5rem;" autocomplete="off">
+        <button type="button" id="dialog-pwd-eye" onclick="toggleDialogPwdVisibility()" style="display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); background: transparent; border: none; cursor: pointer; color: #94a3b8; font-size: 1.1rem; padding: 4px;" title="Mostrar/Ocultar Senha">👁️</button>
+      </div>
       <div id="dialog-actions" style="display: flex; gap: 0.6rem; justify-content: center;">
         <button id="dialog-btn-cancel" class="btn-action" style="display: none; background: rgba(255,255,255,0.08); color: #cbd5e1; padding: 0.55rem 1.1rem; border-radius: 8px; font-size: 0.85rem;" onclick="closeAppDialog(false)">Cancelar</button>
         <button id="dialog-btn-ok" class="btn-action btn-connect-primary" style="padding: 0.55rem 1.4rem; border-radius: 8px; font-size: 0.85rem;" onclick="closeAppDialog(true)">OK</button>
