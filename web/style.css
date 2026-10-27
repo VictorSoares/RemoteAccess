@@ -819,21 +819,22 @@ body {
 /* FLOATING ACTION TOOLBAR (Top-Center Dock with Ultra-Smooth Auto-Hide) */
 .viewer-dock {
   position: fixed;
-  top: 10px;
-  left: 50%;
-  transform: translateX(-50%) translateY(-130%);
+  top: 0;
+  left: 0;
+  right: 0;
+  width: 100vw;
+  transform: translateY(-105%);
   z-index: 10000;
   transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease;
   opacity: 0;
   pointer-events: none;
-  max-width: min(96vw, 1320px);
   box-sizing: border-box;
 }
 
 .viewer-dock.dock-visible,
 .viewer-dock:hover,
 .viewer-dock:focus-within {
-  transform: translateX(-50%) translateY(0);
+  transform: translateY(0);
   opacity: 1;
   pointer-events: auto;
 }

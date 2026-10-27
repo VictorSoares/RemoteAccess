@@ -397,57 +397,78 @@
       top: 0;
       left: 50%;
       transform: translateX(-50%);
-      width: 140px;
-      height: 4px;
-      background: rgba(56, 189, 248, 0.45);
-      border-bottom-left-radius: 6px;
-      border-bottom-right-radius: 6px;
-      box-shadow: 0 0 8px rgba(56, 189, 248, 0.3);
+      width: 220px;
+      height: 5px;
+      background: rgba(56, 189, 248, 0.55);
+      border-bottom-left-radius: 8px;
+      border-bottom-right-radius: 8px;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
       z-index: 100002;
       cursor: pointer;
       transition: all 0.2s ease;
     }
     .viewer-tab-handle:hover {
-      height: 7px;
+      height: 8px;
       background: #38bdf8;
-      box-shadow: 0 0 14px rgba(56, 189, 248, 0.7);
+      box-shadow: 0 0 16px rgba(56, 189, 248, 0.8);
     }
     .web-viewer-dock {
       position: fixed;
-      top: 10px;
-      left: 50%;
-      transform: translateX(-50%) translateY(-130%);
+      top: 0;
+      left: 0;
+      right: 0;
+      width: 100vw;
+      transform: translateY(-105%);
       opacity: 0;
       pointer-events: none;
       z-index: 100000;
       background: rgba(15, 23, 42, 0.96);
       backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      border-radius: 12px;
-      padding: 6px 14px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 0 0 14px 14px;
+      padding: 6px 16px;
       display: flex;
       flex-wrap: nowrap;
-      justify-content: flex-start;
+      justify-content: space-between;
       align-items: center;
-      gap: 8px;
-      max-width: 98vw;
-      width: max-content;
-      overflow-x: auto;
+      gap: 10px;
       box-sizing: border-box;
-      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.8), 0 0 16px rgba(56, 189, 248, 0.25);
-      transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.8), 0 0 20px rgba(56, 189, 248, 0.2);
+      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.2s;
     }
-    .web-viewer-dock::-webkit-scrollbar {
-      height: 4px;
+    .dock-zone {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
     }
-    .web-viewer-dock::-webkit-scrollbar-thumb {
+    .dock-zone-left {
+      flex-shrink: 0;
+    }
+    .dock-zone-center {
+      flex: 1;
+      justify-content: center;
+      overflow-x: auto;
+      padding: 0 4px;
+      gap: 8px;
+    }
+    .dock-zone-center::-webkit-scrollbar {
+      height: 3px;
+    }
+    .dock-zone-center::-webkit-scrollbar-thumb {
       background: rgba(255, 255, 255, 0.2);
-      border-radius: 4px;
+      border-radius: 3px;
+    }
+    .dock-zone-right {
+      flex-shrink: 0;
+      margin-left: auto;
+      justify-content: flex-end;
+      gap: 6px;
     }
     .web-viewer-dock.dock-visible,
     .web-viewer-dock:hover,
     .web-viewer-dock:focus-within {
-      transform: translateX(-50%) translateY(0);
+      transform: translateY(0);
       opacity: 1;
       pointer-events: auto;
     }
@@ -999,85 +1020,89 @@
     <div class="viewer-tab-handle" id="web-viewer-tab-handle" title="Passar o mouse para exibir a barra de controle"></div>
 
     <div class="web-viewer-dock" id="web-viewer-toolbar">
-      <!-- Integrated Stats Group -->
-      <div style="display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.74rem; padding: 0 4px; flex-shrink: 0;">
-        <span id="web-stat-target" style="color: #60a5fa; font-weight: 700;">Host: ---</span>
-        <span style="opacity: 0.3;">|</span>
-        <span id="web-stat-mode" style="color: #4ade80; font-weight: 700;">● P2P</span>
-        <span style="opacity: 0.3;">|</span>
-        <span id="web-stat-lat" style="color: #38bdf8; font-weight: 700;">⚡ 0 ms</span>
-        <span style="opacity: 0.3;">|</span>
-        <span id="web-stat-fps" style="color: #a78bfa; font-weight: 700;">0 FPS</span>
-        <span style="opacity: 0.3;">|</span>
-        <span id="web-stat-bandwidth" style="color: #38bdf8; font-weight: 700;">0 KB/s</span>
-        <span style="opacity: 0.3;">|</span>
-        <span id="web-stat-timer" style="color: #fbbf24; font-weight: 700;">⏱️ 00:00</span>
+      <!-- Left Zone: Stats & Session Info -->
+      <div class="dock-zone dock-zone-left">
+        <div style="display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 0.74rem; padding: 0 4px; flex-shrink: 0;">
+          <span id="web-stat-target" style="color: #60a5fa; font-weight: 700;">Host: ---</span>
+          <span style="opacity: 0.3;">|</span>
+          <span id="web-stat-mode" style="color: #4ade80; font-weight: 700;">● P2P</span>
+          <span style="opacity: 0.3;">|</span>
+          <span id="web-stat-lat" style="color: #38bdf8; font-weight: 700;">⚡ 0 ms</span>
+          <span style="opacity: 0.3;">|</span>
+          <span id="web-stat-fps" style="color: #a78bfa; font-weight: 700;">0 FPS</span>
+          <span style="opacity: 0.3;">|</span>
+          <span id="web-stat-bandwidth" style="color: #38bdf8; font-weight: 700;">0 KB/s</span>
+          <span style="opacity: 0.3;">|</span>
+          <span id="web-stat-timer" style="color: #fbbf24; font-weight: 700;">⏱️ 00:00</span>
+        </div>
       </div>
 
-      <div class="dock-divider"></div>
+      <!-- Center Zone: Displays, Performance, Quick Keys & System Commands -->
+      <div class="dock-zone dock-zone-center">
+        <!-- Remote Monitor Switcher (1-Click Pills for Multi-Monitor) -->
+        <div id="web-viewer-mon-pills" class="dock-segmented-group" style="display: none;" title="Alternar Monitores Remotos (Ctrl+Alt+M)"></div>
 
-      <!-- Remote Monitor Switcher (1-Click Pills for Multi-Monitor) -->
-      <div id="web-viewer-mon-pills" class="dock-segmented-group" style="display: none;" title="Alternar Monitores Remotos (Ctrl+Alt+M)"></div>
+        <!-- Quality / FPS Preset Selector -->
+        <div class="dock-select-wrap" title="Ajustar Qualidade e Taxa de Quadros">
+          <select id="web-viewer-quality-select" class="dock-select" onchange="setWebViewerQuality(this.value)">
+            <option value="speed">⚡ 60 FPS</option>
+            <option value="balanced" selected>⚖️ 30 FPS</option>
+            <option value="hd">💎 HD</option>
+          </select>
+        </div>
 
-      <!-- Quality / FPS Preset Selector -->
-      <div class="dock-select-wrap" title="Ajustar Qualidade e Taxa de Quadros">
-        <select id="web-viewer-quality-select" class="dock-select" onchange="setWebViewerQuality(this.value)">
-          <option value="speed">⚡ 60 FPS</option>
-          <option value="balanced" selected>⚖️ 30 FPS</option>
-          <option value="hd">💎 HD</option>
-        </select>
+        <div class="dock-divider"></div>
+
+        <!-- Quick Action: Ctrl+Alt+Del -->
+        <button class="btn-action" onclick="sendViewerSys('cad')" title="Enviar Ctrl+Alt+Del para o computador remoto"><span>⚡</span> <span class="dock-label">Ctrl+Alt+Del</span></button>
+
+        <!-- Unified Shortcuts Dropdown -->
+        <div class="dock-select-wrap" title="Atalhos do Sistema Remoto">
+          <select id="web-viewer-shortcuts-select" class="dock-select" onchange="handleWebViewerShortcutDropdown(this.value)">
+            <option value="" disabled selected>⌨️ Atalhos</option>
+            <option value="taskmgr">📊 Gerenciador de Tarefas</option>
+            <option value="desktop">🖥️ Mostrar Área de Trabalho (Win+D)</option>
+            <option value="explorer">📂 Explorador de Arquivos (Win+E)</option>
+            <option value="run">🚀 Executar (Win+R)</option>
+            <option value="alt_tab">🔀 Alternar Janelas (Alt+Tab)</option>
+            <option value="alt_f4">✕ Fechar Janela Ativa (Alt+F4)</option>
+            <option value="ctrl_a">📄 Selecionar Tudo (Ctrl+A)</option>
+            <option value="ctrl_c">📑 Copiar (Ctrl+C)</option>
+            <option value="ctrl_v">📋 Colar (Ctrl+V)</option>
+            <option value="ctrl_z">↩️ Desfazer (Ctrl+Z)</option>
+          </select>
+        </div>
+
+        <!-- Unified Power & Security Actions Dropdown -->
+        <div class="dock-select-wrap" title="Ações de Energia e Sistema">
+          <select id="web-viewer-power-select" class="dock-select" onchange="handleWebViewerPowerDropdown(this.value)">
+            <option value="" disabled selected>⚡ Energia</option>
+            <option value="lock">🔒 Bloquear PC (Win+L)</option>
+            <option value="reboot">🔄 Reiniciar PC</option>
+            <option value="suspend">🌙 Suspender / Repouso</option>
+            <option value="shutdown">🛑 Desligar PC</option>
+          </select>
+        </div>
       </div>
 
-      <div class="dock-divider"></div>
+      <!-- Right Zone: Controls, View Tools, Fullscreen & Disconnect (Never cut off!) -->
+      <div class="dock-zone dock-zone-right">
+        <!-- Control Mode Toggle (Controle Ativo vs Modo Observador) -->
+        <button id="btn-viewer-control-toggle" class="btn-action" onclick="toggleViewerControl()" title="Alternar entre Controle Ativo e Modo Observador" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4);"><span id="viewer-control-icon">🖱️</span> <span id="viewer-control-label" class="dock-label">Controlando</span></button>
+        <button id="btn-viewer-scale-toggle" class="btn-action" onclick="toggleViewerScale()" title="Alternar Escala (Ajustar vs 100% Original)"><span>🔍</span> <span id="viewer-scale-label" class="dock-label">Ajustar</span></button>
+        <button id="btn-viewer-curtain-toggle" class="btn-action" onclick="toggleViewerCurtain()" title="Modo Cortina: Oculta a tela física no host remoto"><span id="viewer-curtain-icon">🕶️</span> <span class="dock-label">Cortina</span></button>
+        <button id="btn-viewer-autolock-toggle" class="btn-action" onclick="toggleViewerAutoLock()" title="Bloquear automaticamente o computador remoto ao desconectar"><span id="viewer-autolock-icon">🔓</span> <span class="dock-label">Auto-Lock</span></button>
 
-      <!-- Quick Action: Ctrl+Alt+Del -->
-      <button class="btn-action" onclick="sendViewerSys('cad')" title="Enviar Ctrl+Alt+Del para o computador remoto"><span>⚡</span> <span class="dock-label">Ctrl+Alt+Del</span></button>
-
-      <!-- Unified Shortcuts Dropdown -->
-      <div class="dock-select-wrap" title="Atalhos do Sistema Remoto">
-        <select id="web-viewer-shortcuts-select" class="dock-select" onchange="handleWebViewerShortcutDropdown(this.value)">
-          <option value="" disabled selected>⌨️ Atalhos</option>
-          <option value="taskmgr">📊 Gerenciador de Tarefas</option>
-          <option value="desktop">🖥️ Mostrar Área de Trabalho (Win+D)</option>
-          <option value="explorer">📂 Explorador de Arquivos (Win+E)</option>
-          <option value="run">🚀 Executar (Win+R)</option>
-          <option value="alt_tab">🔀 Alternar Janelas (Alt+Tab)</option>
-          <option value="alt_f4">✕ Fechar Janela Ativa (Alt+F4)</option>
-          <option value="ctrl_a">📄 Selecionar Tudo (Ctrl+A)</option>
-          <option value="ctrl_c">📑 Copiar (Ctrl+C)</option>
-          <option value="ctrl_v">📋 Colar (Ctrl+V)</option>
-          <option value="ctrl_z">↩️ Desfazer (Ctrl+Z)</option>
-        </select>
+        <!-- Quick Actions -->
+        <button id="btn-viewer-audio-toggle" class="btn-action" onclick="toggleViewerAudio()" title="Alternar Áudio Remoto" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4);"><span id="viewer-audio-icon">🔊</span> <span id="viewer-audio-label" class="dock-label">Áudio</span></button>
+        <button id="btn-viewer-block-input" class="btn-action" onclick="toggleViewerBlockInput()" title="Bloquear Mouse e Teclado Físico do Cliente Acessado"><span>🚫</span> <span class="dock-label">Bloquear</span></button>
+        <button class="btn-action" onclick="openWebClipboardModal()" title="Colar Texto Remoto"><span>📋</span> <span class="dock-label">Colar</span></button>
+        <button class="btn-action" onclick="triggerWebFileUpload()" title="Enviar/Colar Arquivo"><span>📁</span> <span class="dock-label">Arquivo</span></button>
+        <input type="file" id="web-viewer-file-input" style="display: none;" multiple onchange="handleWebFileSelect(this.files)">
+        <button class="btn-action" onclick="toggleViewerChat()" title="Bate-Papo"><span>💬</span> <span class="dock-label">Chat</span> <span id="viewer-chat-badge" class="chat-badge" style="display: none;">0</span></button>
+        <button class="btn-action" onclick="toggleViewerFullscreen()" title="Alternar Tela Cheia"><span>⛶</span> <span class="dock-label">Tela Cheia</span></button>
+        <button class="btn-action btn-kill" onclick="closeWebViewer()" title="Desconectar e Sair"><span class="dock-label">✕ Sair</span></button>
       </div>
-
-      <!-- Unified Power & Security Actions Dropdown -->
-      <div class="dock-select-wrap" title="Ações de Energia e Sistema">
-        <select id="web-viewer-power-select" class="dock-select" onchange="handleWebViewerPowerDropdown(this.value)">
-          <option value="" disabled selected>⚡ Energia</option>
-          <option value="lock">🔒 Bloquear PC (Win+L)</option>
-          <option value="reboot">🔄 Reiniciar PC</option>
-          <option value="suspend">🌙 Suspender / Repouso</option>
-          <option value="shutdown">🛑 Desligar PC</option>
-        </select>
-      </div>
-
-      <div class="dock-divider"></div>
-
-      <!-- Control Mode Toggle (Controle Ativo vs Modo Observador) -->
-      <button id="btn-viewer-control-toggle" class="btn-action" onclick="toggleViewerControl()" title="Alternar entre Controle Ativo e Modo Observador" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4);"><span id="viewer-control-icon">🖱️</span> <span id="viewer-control-label" class="dock-label">Controlando</span></button>
-      <button id="btn-viewer-scale-toggle" class="btn-action" onclick="toggleViewerScale()" title="Alternar Escala (Ajustar vs 100% Original)"><span>🔍</span> <span id="viewer-scale-label" class="dock-label">Ajustar</span></button>
-      <button id="btn-viewer-curtain-toggle" class="btn-action" onclick="toggleViewerCurtain()" title="Modo Cortina: Oculta a tela física no host remoto"><span id="viewer-curtain-icon">🕶️</span> <span class="dock-label">Cortina</span></button>
-      <button id="btn-viewer-autolock-toggle" class="btn-action" onclick="toggleViewerAutoLock()" title="Bloquear automaticamente o computador remoto ao desconectar"><span id="viewer-autolock-icon">🔓</span> <span class="dock-label">Auto-Lock</span></button>
-
-      <!-- Quick Actions -->
-      <button id="btn-viewer-audio-toggle" class="btn-action" onclick="toggleViewerAudio()" title="Alternar Áudio Remoto" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4);"><span id="viewer-audio-icon">🔊</span> <span id="viewer-audio-label" class="dock-label">Áudio</span></button>
-      <button id="btn-viewer-block-input" class="btn-action" onclick="toggleViewerBlockInput()" title="Bloquear Mouse e Teclado Físico do Cliente Acessado"><span>🚫</span> <span class="dock-label">Bloquear</span></button>
-      <button class="btn-action" onclick="openWebClipboardModal()" title="Colar Texto Remoto"><span>📋</span> <span class="dock-label">Colar</span></button>
-      <button class="btn-action" onclick="triggerWebFileUpload()" title="Enviar/Colar Arquivo"><span>📁</span> <span class="dock-label">Arquivo</span></button>
-      <input type="file" id="web-viewer-file-input" style="display: none;" multiple onchange="handleWebFileSelect(this.files)">
-      <button class="btn-action" onclick="toggleViewerChat()" title="Bate-Papo"><span>💬</span> <span class="dock-label">Chat</span> <span id="viewer-chat-badge" class="chat-badge" style="display: none;">0</span></button>
-      <button class="btn-action" onclick="toggleViewerFullscreen()" title="Alternar Tela Cheia"><span>⛶</span> <span class="dock-label">Tela Cheia</span></button>
-      <button class="btn-action btn-kill" onclick="closeWebViewer()" title="Desconectar e Sair"><span class="dock-label">✕ Sair</span></button>
     </div>
 
     <div style="flex: 1; display: flex; align-items: center; justify-content: center; position: relative; width: 100%; height: 100%; overflow: hidden; background: #000;">
