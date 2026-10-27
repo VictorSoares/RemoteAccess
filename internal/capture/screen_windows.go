@@ -200,6 +200,25 @@ func (sc *ScreenCapturer) SetDisplayIndex(index int) error {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 
+	if index == -1 {
+		// Unified virtual desktop across all connected displays
+		sc.DisplayIndex = -1
+		vl, _, _ := procGetSystemMetrics.Call(76) // SM_XVIRTUALSCREEN
+		vt, _, _ := procGetSystemMetrics.Call(77) // SM_YVIRTUALSCREEN
+		vw, _, _ := procGetSystemMetrics.Call(78) // SM_CXVIRTUALSCREEN
+		vh, _, _ := procGetSystemMetrics.Call(79) // SM_CYVIRTUALSCREEN
+		w := int(vw)
+		h := int(vh)
+		if w <= 0 {
+			w = 1920
+		}
+		if h <= 0 {
+			h = 1080
+		}
+		sc.Bounds = image.Rect(int(vl), int(vt), int(vl)+w, int(vt)+h)
+		return nil
+	}
+
 	n := screenshot.NumActiveDisplays()
 	if n > 0 && index < n && index >= 0 {
 		sc.DisplayIndex = index

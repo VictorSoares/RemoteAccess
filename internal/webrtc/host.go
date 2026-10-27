@@ -355,7 +355,16 @@ func (h *HostSession) HandleControlData(data []byte) {
 		}
 	case protocol.TypeMonitorSwitch:
 		_ = h.capturer.SetDisplayIndex(ctrl.Monitor)
-		input.SetActiveMonitorBounds(h.capturer.GetBounds())
+		bounds := h.capturer.GetBounds()
+		input.SetActiveMonitorBounds(bounds)
+		if h.inputChannel != nil {
+			info, _ := json.Marshal(protocol.ControlMessage{
+				Type:      protocol.TypeInitInfo,
+				Monitor:   capture.GetNumDisplays(),
+				ActiveMon: ctrl.Monitor,
+			})
+			_ = h.inputChannel.Send(info)
+		}
 	case protocol.TypeConfig:
 		if ctrl.Quality > 0 {
 			h.capturer.SetQuality(ctrl.Quality)

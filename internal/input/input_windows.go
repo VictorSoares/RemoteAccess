@@ -663,9 +663,25 @@ func AutoUnstickModifiers(alt, ctrl, shift, meta bool) {
 	SyncModifiers(alt, ctrl, shift, meta)
 }
 
+func isMetaKey(key, code string) bool {
+	return key == "Meta" || key == "OS" || code == "MetaLeft" || code == "MetaRight" || code == "OSLeft" || code == "OSRight" || code == "Meta"
+}
+
 // KeyDownEx simulates key press with bidirectional modifier synchronization
 func KeyDownEx(key, code string, keyCode int, alt, ctrl, shift, meta bool) error {
 	// 1. Direct handling of standalone modifier keys
+	if isMetaKey(key, code) {
+		modifierStateMu.Lock()
+		stateMeta = true
+		modifierStateMu.Unlock()
+		vk := resolveVK(key, code, keyCode)
+		if vk == 0 {
+			vk = 0x5B
+		}
+		procKeybdEvent.Call(uintptr(vk), 0, keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+		return nil
+	}
+
 	switch code {
 	case "ShiftLeft", "ShiftRight":
 		modifierStateMu.Lock()
@@ -696,12 +712,27 @@ func KeyDownEx(key, code string, keyCode int, alt, ctrl, shift, meta bool) error
 		}
 		procKeybdEvent.Call(uintptr(vk), 0, flags, remoteAccessMagicExtraInfo)
 		return nil
-	case "MetaLeft", "MetaRight":
+	}
+
+	if key == "Shift" {
 		modifierStateMu.Lock()
-		stateMeta = true
+		stateShift = true
 		modifierStateMu.Unlock()
-		vk := resolveVK(key, code, keyCode)
-		procKeybdEvent.Call(uintptr(vk), 0, keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0x10, 0, 0, remoteAccessMagicExtraInfo)
+		return nil
+	}
+	if key == "Control" {
+		modifierStateMu.Lock()
+		stateCtrl = true
+		modifierStateMu.Unlock()
+		procKeybdEvent.Call(0x11, 0, 0, remoteAccessMagicExtraInfo)
+		return nil
+	}
+	if key == "Alt" || key == "AltGraph" {
+		modifierStateMu.Lock()
+		stateAlt = true
+		modifierStateMu.Unlock()
+		procKeybdEvent.Call(0x12, 0, 0, remoteAccessMagicExtraInfo)
 		return nil
 	}
 
@@ -743,6 +774,15 @@ func KeyDown(key, code string, keyCode int) error {
 // KeyUpEx simulates key release with modifier synchronization
 func KeyUpEx(key, code string, keyCode int, alt, ctrl, shift, meta bool) error {
 	// 1. Direct release of standalone modifier keys
+	if isMetaKey(key, code) {
+		modifierStateMu.Lock()
+		stateMeta = false
+		modifierStateMu.Unlock()
+		procKeybdEvent.Call(0x5B, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0x5C, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+		return nil
+	}
+
 	switch code {
 	case "ShiftLeft", "ShiftRight":
 		modifierStateMu.Lock()
@@ -768,12 +808,33 @@ func KeyUpEx(key, code string, keyCode int, alt, ctrl, shift, meta bool) error {
 		procKeybdEvent.Call(0xA4, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
 		procKeybdEvent.Call(0xA5, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
 		return nil
-	case "MetaLeft", "MetaRight":
+	}
+
+	if key == "Shift" {
 		modifierStateMu.Lock()
-		stateMeta = false
+		stateShift = false
 		modifierStateMu.Unlock()
-		procKeybdEvent.Call(0x5B, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
-		procKeybdEvent.Call(0x5C, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0x10, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0xA0, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0xA1, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		return nil
+	}
+	if key == "Control" {
+		modifierStateMu.Lock()
+		stateCtrl = false
+		modifierStateMu.Unlock()
+		procKeybdEvent.Call(0x11, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0xA2, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0xA3, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
+		return nil
+	}
+	if key == "Alt" || key == "AltGraph" {
+		modifierStateMu.Lock()
+		stateAlt = false
+		modifierStateMu.Unlock()
+		procKeybdEvent.Call(0x12, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0xA4, 0, keyeventfKeyup, remoteAccessMagicExtraInfo)
+		procKeybdEvent.Call(0xA5, 0, keyeventfKeyup|keyeventfExtendedkey, remoteAccessMagicExtraInfo)
 		return nil
 	}
 
@@ -849,6 +910,9 @@ var jsKeyToVK = map[string]uint16{
 	"Meta":         0x5B,
 	"MetaLeft":     0x5B,
 	"MetaRight":    0x5C,
+	"OS":           0x5B,
+	"OSLeft":       0x5B,
+	"OSRight":      0x5C,
 	"ContextMenu":  0x5D,
 	"Numpad0":      0x60,
 	"Numpad1":      0x61,

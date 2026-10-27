@@ -641,7 +641,13 @@ function updateViewerMonitors(count, activeMon) {
     opt.innerText = `🖥️ Mon ${i + 1}`;
     monSelect.appendChild(opt);
   }
-  if (activeMon !== undefined && parseInt(activeMon) >= 0 && parseInt(activeMon) < total) {
+  if (total > 1) {
+    const optAll = document.createElement('option');
+    optAll.value = -1;
+    optAll.innerText = '🌐 Ambas as Telas';
+    monSelect.appendChild(optAll);
+  }
+  if (activeMon !== undefined && parseInt(activeMon) >= -1 && parseInt(activeMon) < total) {
     monSelect.value = parseInt(activeMon);
   } else if (currentVal && parseInt(currentVal) < total) {
     monSelect.value = currentVal;
@@ -2074,6 +2080,20 @@ function setupKeyboardEvents() {
 
     pressedKeyCodes.add(e.code || e.key);
 
+    // Intercept Ctrl+Alt+M to cycle remote monitors
+    if (e.ctrlKey && e.altKey && (e.key === 'm' || e.key === 'M' || e.code === 'KeyM')) {
+      e.preventDefault();
+      const sel = document.getElementById('viewer-monitor-select');
+      if (sel && sel.options.length > 1) {
+        let cur = parseInt(sel.value) || 0;
+        let total = sel.options.length - 1; // excluding Ambas
+        let next = cur === -1 ? 0 : (cur < total - 1 ? cur + 1 : -1);
+        sel.value = next;
+        switchRemoteMonitor(next);
+      }
+      return;
+    }
+
     // Intercept Alt+F4 to prevent closing operator's desktop window
     if (e.altKey && (e.key === 'F4' || e.keyCode === 115)) {
       e.preventDefault();
@@ -2098,6 +2118,10 @@ function setupKeyboardEvents() {
       return;
     }
 
+    if (e.key === 'Meta' || e.code === 'MetaLeft' || e.code === 'MetaRight' || e.code === 'OSLeft' || e.code === 'OSRight') {
+      e.preventDefault();
+    }
+
     e.preventDefault();
     sendControl({
       t: 'kd',
@@ -2116,6 +2140,9 @@ function setupKeyboardEvents() {
     if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA')) return;
     if (e.key === 'Dead') {
       return;
+    }
+    if (e.key === 'Meta' || e.code === 'MetaLeft' || e.code === 'MetaRight' || e.code === 'OSLeft' || e.code === 'OSRight') {
+      e.preventDefault();
     }
     pressedKeyCodes.delete(e.code || e.key);
     e.preventDefault();

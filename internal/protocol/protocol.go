@@ -81,10 +81,11 @@ type ControlMessage struct {
 	Command  string  `json:"cmd,omitempty"`
 	Block    bool    `json:"block,omitempty"`
 	Time     float64 `json:"ts,omitempty"`
-	Quality  int     `json:"q,omitempty"`
-	FPS      int     `json:"fps,omitempty"`
-	Monitor  int     `json:"mon,omitempty"`
-	Sender   string  `json:"sender,omitempty"`
+	Quality   int     `json:"q,omitempty"`
+	FPS       int     `json:"fps,omitempty"`
+	Monitor   int     `json:"mon,omitempty"`
+	ActiveMon int     `json:"active_mon,omitempty"`
+	Sender    string  `json:"sender,omitempty"`
 	Password string  `json:"pwd,omitempty"`
 	FileName string  `json:"file_name,omitempty"`
 	FileSize int64   `json:"file_size,omitempty"`
