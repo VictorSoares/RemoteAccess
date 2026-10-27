@@ -826,7 +826,7 @@ body {
   transition: transform 0.26s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease;
   opacity: 0;
   pointer-events: none;
-  max-width: min(98vw, 1360px);
+  max-width: calc(100vw - 24px);
   width: max-content;
   box-sizing: border-box;
 }
