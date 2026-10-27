@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 	"image/jpeg"
+	"runtime"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -30,7 +31,20 @@ var (
 	procDeleteDC               = gdi32Capture.NewProc("DeleteDC")
 	procGetDIBits              = gdi32Capture.NewProc("GetDIBits")
 	procLoadCursorW            = user32Capture.NewProc("LoadCursorW")
+	procOpenInputDesktop       = user32Capture.NewProc("OpenInputDesktop")
+	procSetThreadDesktop       = user32Capture.NewProc("SetThreadDesktop")
+	procCloseDesktop           = user32Capture.NewProc("CloseDesktop")
 )
+
+// attachThreadToInputDesktop ensures the calling OS thread is attached to the active
+// interactive input desktop (handling UAC, lock screens, and Windows station switches).
+func attachThreadToInputDesktop() {
+	hDesk, _, _ := procOpenInputDesktop.Call(0, 0, 0x10000000)
+	if hDesk != 0 {
+		procSetThreadDesktop.Call(hDesk)
+		procCloseDesktop.Call(hDesk)
+	}
+}
 
 const (
 	idcArrow      = 32512
@@ -296,6 +310,8 @@ func (sc *ScreenCapturer) drawCursor(img *image.RGBA) {
 }
 
 func captureDirectGDI(bounds image.Rectangle) (*image.RGBA, error) {
+	attachThreadToInputDesktop()
+
 	w := bounds.Dx()
 	h := bounds.Dy()
 	if w <= 0 || h <= 0 {
@@ -333,10 +349,14 @@ func captureDirectGDI(bounds image.Rectangle) (*image.RGBA, error) {
 	hbmOld, _, _ := procSelectObject.Call(hdcMem, hbmScreen)
 	defer procSelectObject.Call(hdcMem, hbmOld)
 
-	const srccopy = 0x00CC0020
+	const srccopy = 0x00CC0020 | 0x40000000 // SRCCOPY | CAPTUREBLT (includes layered & composite windows)
 	ret, _, _ := procBitBlt.Call(hdcMem, 0, 0, uintptr(w), uintptr(h), hdcScreen, uintptr(bounds.Min.X), uintptr(bounds.Min.Y), srccopy)
 	if ret == 0 {
-		return nil, fmt.Errorf("BitBlt failed")
+		// Fallback without CAPTUREBLT if driver restricts it
+		ret, _, _ = procBitBlt.Call(hdcMem, 0, 0, uintptr(w), uintptr(h), hdcScreen, uintptr(bounds.Min.X), uintptr(bounds.Min.Y), 0x00CC0020)
+		if ret == 0 {
+			return nil, fmt.Errorf("BitBlt failed")
+		}
 	}
 
 	var bi bitmapInfoHeader
@@ -367,6 +387,9 @@ func captureDirectGDI(bounds image.Rectangle) (*image.RGBA, error) {
 
 // CaptureFrame captures a single frame, burns the mouse cursor, and compresses to JPEG
 func (sc *ScreenCapturer) CaptureFrame() ([]byte, error) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	sc.mu.Lock()
 	quality := sc.Quality
 	displayIdx := sc.DisplayIndex
@@ -375,8 +398,14 @@ func (sc *ScreenCapturer) CaptureFrame() ([]byte, error) {
 
 	var img *image.RGBA
 	var err error
-	if screenshot.NumActiveDisplays() > displayIdx {
+	if screenshot.NumActiveDisplays() > displayIdx && displayIdx >= 0 {
 		img, err = screenshot.CaptureDisplay(displayIdx)
+	}
+	if err != nil || img == nil {
+		attachThreadToInputDesktop()
+		if screenshot.NumActiveDisplays() > displayIdx && displayIdx >= 0 {
+			img, err = screenshot.CaptureDisplay(displayIdx)
+		}
 	}
 	if err != nil || img == nil {
 		img, err = captureDirectGDI(bounds)
@@ -403,6 +432,9 @@ func (sc *ScreenCapturer) CaptureFrame() ([]byte, error) {
 
 // CaptureImage returns raw *image.RGBA with cursor
 func (sc *ScreenCapturer) CaptureImage() (*image.RGBA, error) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	sc.mu.Lock()
 	displayIdx := sc.DisplayIndex
 	bounds := sc.Bounds
@@ -410,8 +442,14 @@ func (sc *ScreenCapturer) CaptureImage() (*image.RGBA, error) {
 
 	var img *image.RGBA
 	var err error
-	if screenshot.NumActiveDisplays() > displayIdx {
+	if screenshot.NumActiveDisplays() > displayIdx && displayIdx >= 0 {
 		img, err = screenshot.CaptureDisplay(displayIdx)
+	}
+	if err != nil || img == nil {
+		attachThreadToInputDesktop()
+		if screenshot.NumActiveDisplays() > displayIdx && displayIdx >= 0 {
+			img, err = screenshot.CaptureDisplay(displayIdx)
+		}
 	}
 	if err != nil || img == nil {
 		img, err = captureDirectGDI(bounds)
