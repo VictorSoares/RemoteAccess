@@ -630,10 +630,10 @@ function updateViewerMonitors(count, activeMon) {
   if (!monSelect) return;
   const currentVal = monSelect.value;
   monSelect.innerHTML = '';
-  const total = Math.max(1, count || 1);
+  const total = Math.max(2, count || 2);
   const monWrap = document.getElementById('viewer-mon-wrap');
   if (monWrap) {
-    monWrap.style.display = total > 1 ? 'inline-flex' : 'none';
+    monWrap.style.display = 'inline-flex';
   }
   for (let i = 0; i < total; i++) {
     const opt = document.createElement('option');
@@ -641,12 +641,10 @@ function updateViewerMonitors(count, activeMon) {
     opt.innerText = `🖥️ Mon ${i + 1}`;
     monSelect.appendChild(opt);
   }
-  if (total > 1) {
-    const optAll = document.createElement('option');
-    optAll.value = -1;
-    optAll.innerText = '🌐 Ambas as Telas';
-    monSelect.appendChild(optAll);
-  }
+  const optAll = document.createElement('option');
+  optAll.value = -1;
+  optAll.innerText = '🌐 Ambas as Telas';
+  monSelect.appendChild(optAll);
   if (activeMon !== undefined && parseInt(activeMon) >= -1 && parseInt(activeMon) < total) {
     monSelect.value = parseInt(activeMon);
   } else if (currentVal && parseInt(currentVal) < total) {
