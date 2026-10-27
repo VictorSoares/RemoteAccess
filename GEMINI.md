@@ -38,8 +38,35 @@ Este arquivo define regras de arquitetura e integridade que **NUNCA DEVEM SER MO
 
 ---
 
-## 6. Documentação no Obsidian
-- Toda e qualquer alteração de arquitetura ou comportamento deve ser registrada e mantida em sincronia no vault em D:\Obsidian\Victor-Vault\01-Projetos\RemoteAccess.md.
+## 6. Captura de Tela Sem Tela Preta (Desktop Synchronization & CAPTUREBLT)
+- **Sincronização de Desktop**: `internal/capture/screen_windows.go` DEVE invocar `attachThreadToInputDesktop()` (via `OpenInputDesktop` e `SetThreadDesktop`) antes de qualquer chamada GDI (`BitBlt` / `GetDC`), garantindo que o thread do Go acompanhe o Input Desktop interativo ativo do Windows. Sem essa associação explícita, o Windows rejeita o `BitBlt` silenciosamente (código 0) caso o processo rode em segundo plano ou haja troca de desktop, gerando tela 100% preta no visualizador.
+- **Inclusão de DWM e Camadas**: Chamadas de captura GDI diretas devem conter `0x00CC0020 | 0x40000000` (`SRCCOPY | CAPTUREBLT`) para capturar janelas translúcidas e renderização composta do DWM (Windows 11/10).
+
+---
+
+## 7. Permanência dos Monitores Remotos (`[ 🖥️ 1 ] [ 🖥️ 2 ] [ 🌐 Ambas ]`)
+- **Seletores Sempre Visíveis**: Os seletores de tela no visualizador web (`#web-viewer-mon-pills`) e desktop **NUNCA DEVEM SER OCULTADOS** com `display: none`.
+- **Modo Ambas**: `updateWebViewerMonitors` deve sempre renderizar no mínimo `[ 🖥️ 1 ] [ 🖥️ 2 ] [ 🌐 Ambas ]` (`Math.max(2, total)`), permitindo alternar de monitor ou unificar todas as telas em um único canvas panorâmico via atalho `Ctrl+Alt+M` ou clique direto.
+
+---
+
+## 8. Dimensões da Dock Toolbar e Proteção contra Clipping
+- **Largura Contida**: A barra dock do viewer web deve ter largura contida em torno de ~890px (`max-width: calc(100vw - 24px); width: max-content; padding: 4px 8px; gap: 4px;`).
+- **Ações Secundárias em Ícones**: Ferramentas secundárias devem usar ícones compactos (`🕶️ Cortina`, `🔓 Auto-Lock`, `🔊 Áudio`, `📁 Arquivo`, `⛶ Tela Cheia`).
+- **Proteção das Extremidades**: O alinhamento centralizado (`translateX(-50%)`) nunca pode empurrar o Host ID (esquerda) nem o botão `[ ✕ Sair ]` (direita) para fora das bordas da janela em nenhuma resolução (1080p escalada, 1366x768 ou 1280x720).
+- **Breakpoint Responsivo**: `@media (max-width: 900px)` oculta labels mantendo os ícones para evitar quebras em telas reduzidas.
+
+---
+
+## 9. Teclado Físico, Tecla Windows & Dead Keys
+- **Estado de Modificadores**: O módulo `internal/input/input_windows.go` deve rastrear o estado atômico de modificadores (`Ctrl`, `Alt`, `Shift`, `AltGr`) e invocar `ReleaseAllModifierKeys()` ao término da sessão.
+- **Tecla Windows Física**: Tecla física Windows (`MetaLeft` / `MetaRight`) deve ser injetada como `VK_LWIN` / `VK_RWIN`, protegida por `navigator.keyboard.lock` para não acionar o menu Iniciar do computador do operador.
+- **Acentuação**: Acentuação e composição por dead keys devem ser preservadas.
+
+---
+
+## 10. Documentação no Obsidian
+- Toda e qualquer alteração de arquitetura ou comportamento deve ser registrada e mantida em sincronia no vault em D:\Obsidian\Victor-Vault\01-Projetos\RemoteAccess.md e notas relacionadas em `01-Projetos/RemoteAccess/`.
 
 ## Regra de ouro — arquivos e Git compartilhados (2026-10-21)
 
