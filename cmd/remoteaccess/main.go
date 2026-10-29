@@ -50,8 +50,43 @@ var (
 	procSetWindowPos             = user32.NewProc("SetWindowPos")
 	procGetWindowThreadProcessId = user32.NewProc("GetWindowThreadProcessId")
 
+	advapi32                                                 = syscall.NewLazyDLL("advapi32.dll")
+	procConvertStringSecurityDescriptorToSecurityDescriptorW = advapi32.NewProc("ConvertStringSecurityDescriptorToSecurityDescriptorW")
+	procLocalFree                                            = kernel32.NewProc("LocalFree")
+
 	appMutex uintptr
 )
+
+type securityAttributes struct {
+	nLength              uint32
+	lpSecurityDescriptor uintptr
+	bInheritHandle       int32
+}
+
+func getEveryoneSecurityAttributes() (*securityAttributes, uintptr) {
+	if runtime.GOOS != "windows" {
+		return nil, 0
+	}
+	// "D:(A;;GA;;;WD)" = DACL with Generic All granted to Everyone (World)
+	// Ensures mutex can be accessed across both Medium and High integrity (UAC) processes
+	sddl, _ := syscall.UTF16PtrFromString("D:(A;;GA;;;WD)")
+	var pSD uintptr
+	ret, _, _ := procConvertStringSecurityDescriptorToSecurityDescriptorW.Call(
+		uintptr(unsafe.Pointer(sddl)),
+		1, // SDDL_REVISION_1
+		uintptr(unsafe.Pointer(&pSD)),
+		0,
+	)
+	if ret != 0 && pSD != 0 {
+		sa := &securityAttributes{
+			nLength:              uint32(unsafe.Sizeof(securityAttributes{})),
+			lpSecurityDescriptor: pSD,
+			bInheritHandle:       0,
+		}
+		return sa, pSD
+	}
+	return nil, 0
+}
 
 type processEntry32W struct {
 	dwSize              uint32
@@ -77,6 +112,9 @@ func sweepExistingInstances(currentPID int, forceTakeover bool) {
 	}
 	defer procCloseHandle.Call(hSnap)
 
+	currentExe, _ := os.Executable()
+	currentBase := filepath.Base(currentExe)
+
 	var entry processEntry32W
 	entry.dwSize = uint32(unsafe.Sizeof(entry))
 
@@ -87,7 +125,10 @@ func sweepExistingInstances(currentPID int, forceTakeover bool) {
 		pid := entry.th32ProcessID
 		if int(pid) != currentPID && pid > 4 {
 			exeName := syscall.UTF16ToString(entry.szExeFile[:])
-			if strings.EqualFold(exeName, "RemoteAccess.exe") {
+			isMatch := strings.EqualFold(exeName, "RemoteAccess.exe") ||
+				(currentBase != "" && strings.EqualFold(exeName, currentBase)) ||
+				(strings.HasSuffix(strings.ToLower(exeName), ".exe") && strings.Contains(strings.ToLower(exeName), "remoteaccess"))
+			if isMatch {
 				targetPIDs = append(targetPIDs, pid)
 			}
 		}
@@ -98,13 +139,13 @@ func sweepExistingInstances(currentPID int, forceTakeover bool) {
 		return
 	}
 
-	log.Printf("[Instâncias] Detectadas %d instâncias anteriores de RemoteAccess.exe (PIDs: %v)", len(targetPIDs), targetPIDs)
+	log.Printf("[Instâncias] Detectadas %d instâncias anteriores de RemoteAccess (PIDs: %v)", len(targetPIDs), targetPIDs)
 
 	if forceTakeover {
 		// 1. Tentar encerramento gracioso via HTTP se porta estiver aberta
 		client := &http.Client{Timeout: 300 * time.Millisecond}
 		for port := 8080; port < 8090; port++ {
-			resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/app-close", port))
+			resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/api/app-terminate", port))
 			if err == nil && resp != nil {
 				_ = resp.Body.Close()
 			}
@@ -121,6 +162,9 @@ func sweepExistingInstances(currentPID int, forceTakeover bool) {
 			}
 		}
 		time.Sleep(200 * time.Millisecond)
+
+		profileDir := filepath.Join(os.TempDir(), "RemoteAccess_WebProfile")
+		cleanupStaleEdgeProfile(profileDir)
 	}
 }
 
@@ -156,8 +200,19 @@ func acquireSingleInstanceLock(maxWait time.Duration) bool {
 	}
 	name, _ := syscall.UTF16PtrFromString("Local\\RemoteAccess_SingleInstance_Mutex")
 	deadline := time.Now().Add(maxWait)
+
+	sa, pSD := getEveryoneSecurityAttributes()
+	if pSD != 0 {
+		defer procLocalFree.Call(pSD)
+	}
+
+	var saPtr uintptr
+	if sa != nil {
+		saPtr = uintptr(unsafe.Pointer(sa))
+	}
+
 	for {
-		hMutex, _, err := procCreateMutex.Call(0, 1, uintptr(unsafe.Pointer(name)))
+		hMutex, _, err := procCreateMutex.Call(saPtr, 1, uintptr(unsafe.Pointer(name)))
 		if hMutex != 0 {
 			if err == syscall.ERROR_ALREADY_EXISTS {
 				procCloseHandle.Call(hMutex)
@@ -170,6 +225,13 @@ func acquireSingleInstanceLock(maxWait time.Duration) bool {
 			return false
 		}
 		time.Sleep(150 * time.Millisecond)
+	}
+}
+
+func releaseSingleInstanceLock() {
+	if appMutex != 0 {
+		procCloseHandle.Call(appMutex)
+		appMutex = 0
 	}
 }
 
@@ -220,12 +282,15 @@ func isRemoteAccessAppWindow(hwnd uintptr) bool {
 		}
 	}
 
-	// Must match RemoteAccess or local server IP
-	if !strings.Contains(title, "RemoteAccess") && !strings.Contains(title, "127.0.0.1") {
+	// Title must strictly match RemoteAccess desktop app (or local loopback IP), never a regular browser tab
+	if !strings.EqualFold(title, "RemoteAccess") && !strings.HasPrefix(title, "RemoteAccess - http") && !strings.Contains(title, "127.0.0.1") {
+		return false
+	}
+	if strings.Contains(titleLower, "google chrome") || strings.Contains(titleLower, "microsoft edge") {
 		return false
 	}
 
-	// Verify owning process is msedge.exe or chrome.exe
+	// Verify owning process is STRICTLY msedge.exe (never chrome.exe or general browsers)
 	var pid uint32
 	procGetWindowThreadProcessId.Call(hwnd, uintptr(unsafe.Pointer(&pid)))
 	if pid == 0 {
@@ -241,7 +306,7 @@ func isRemoteAccessAppWindow(hwnd uintptr) bool {
 		if rImg != 0 {
 			exePath := syscall.UTF16ToString(imgBuf[:size])
 			exeName := strings.ToLower(filepath.Base(exePath))
-			if exeName != "msedge.exe" && exeName != "chrome.exe" {
+			if exeName != "msedge.exe" {
 				return false
 			}
 		}
@@ -286,32 +351,68 @@ func bringWindowToFront() bool {
 // cleanupStaleEdgeProfile ensures no stale lock files or lingering headless Edge processes
 // prevent Edge from launching cleanly.
 func cleanupStaleEdgeProfile(profileDir string) {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	// Always terminate any lingering Edge processes tied to RemoteAccess_WebProfile
+	psCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
+		`Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'msedge.exe' -and $_.CommandLine -like '*RemoteAccess_WebProfile*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
+	)
+	psCmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow:    true,
+		CreationFlags: 0x08000000, // CREATE_NO_WINDOW
+	}
+	_ = psCmd.Run()
+
 	lockFiles := []string{
 		filepath.Join(profileDir, "SingletonLock"),
 		filepath.Join(profileDir, "SingletonCookie"),
 		filepath.Join(profileDir, "SingletonSocket"),
 		filepath.Join(profileDir, "lockfile"),
 	}
-	allClean := true
 	for _, f := range lockFiles {
-		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
-			allClean = false
+		_ = os.Remove(f)
+	}
+}
+
+var (
+	appWindowCmd   *exec.Cmd
+	appWindowCmdMu sync.Mutex
+)
+
+// killActiveAppWindow terminates the dedicated Edge App desktop window and processes.
+func killActiveAppWindow() {
+	appWindowCmdMu.Lock()
+	if appWindowCmd != nil && appWindowCmd.Process != nil {
+		pid := appWindowCmd.Process.Pid
+		_ = exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", pid)).Run()
+		appWindowCmd = nil
+	}
+	appWindowCmdMu.Unlock()
+
+	profileDir := filepath.Join(os.TempDir(), "RemoteAccess_WebProfile")
+	cleanupStaleEdgeProfile(profileDir)
+}
+
+// terminateAppSession performs complete, graceful and guaranteed process termination.
+func terminateAppSession(srv *server.LocalServer) {
+	log.Println("[RemoteAccess] Encerrando instância e liberando recursos...")
+	killActiveAppWindow()
+	releaseSingleInstanceLock()
+
+	if srv != nil {
+		done := make(chan struct{})
+		go func() {
+			srv.Shutdown()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(350 * time.Millisecond):
+			log.Println("[RemoteAccess] Shutdown finalizado por timeout de segurança.")
 		}
 	}
-	if !allClean {
-		// Stale Edge processes may be holding lock files. Terminate only Edge processes tied to RemoteAccess_WebProfile.
-		psCmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command",
-			`Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'msedge.exe' -and $_.CommandLine -like '*RemoteAccess_WebProfile*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`,
-		)
-		psCmd.SysProcAttr = &syscall.SysProcAttr{
-			HideWindow:    true,
-			CreationFlags: 0x08000000, // CREATE_NO_WINDOW
-		}
-		_ = psCmd.Run()
-		for _, f := range lockFiles {
-			_ = os.Remove(f)
-		}
-	}
+	os.Exit(0)
 }
 
 // startWindowSizeGuard enforces a rigid native minimum window size (540x580)
@@ -405,7 +506,7 @@ func runNativeAppWindow(url string) {
 					fmt.Sprintf("--app=%s", url),
 					fmt.Sprintf("--user-data-dir=%s", profileDir),
 					"--window-size=960,720",
-					"--app-id=RemoteAccessPortable",
+					"--new-window",
 					"--no-first-run",
 					"--no-default-browser-check",
 					"--disable-background-mode",
@@ -414,6 +515,9 @@ func runNativeAppWindow(url string) {
 					"--disable-sync",
 				)
 				if err := cmd.Start(); err == nil {
+					appWindowCmdMu.Lock()
+					appWindowCmd = cmd
+					appWindowCmdMu.Unlock()
 					log.Printf("[Janela] Janela desktop nativa iniciada via Edge (%s)", edgePath)
 					startWindowSizeGuard()
 					return
@@ -512,35 +616,24 @@ func main() {
 		}
 	}
 
-	// 3. Varredura ativa de instâncias: apenas se for elevação explícita
+	// 3. Varredura ativa e takeover de instâncias anteriores:
+	// Encerra qualquer processo anterior do RemoteAccess para que a nova execução assuma o controle limpo.
 	isElevated := config.IsAdmin()
-	if *elevateFlag {
-		sweepExistingInstances(os.Getpid(), true)
-	}
+	sweepExistingInstances(os.Getpid(), true)
 
-	// Acquire single-instance lock with retry for smooth transitions during elevation
-	maxWait := 300 * time.Millisecond
+	// Acquire single-instance lock with retry
+	maxWait := 1500 * time.Millisecond
 	if *elevateFlag || isElevated {
 		maxWait = 3 * time.Second
 	}
 
 	if !acquireSingleInstanceLock(maxWait) {
-		if *elevateFlag {
-			// Se está elevando e ainda não liberou o lock, tenta uma última varredura forçada
-			sweepExistingInstances(os.Getpid(), true)
-			if acquireSingleInstanceLock(1 * time.Second) {
-				goto instanceAcquired
-			}
+		sweepExistingInstances(os.Getpid(), true)
+		if !acquireSingleInstanceLock(1 * time.Second) {
+			log.Println("[Instâncias] Assumindo execução como instância primária do sistema.")
 		}
-		log.Println("[Aviso] Outra instância do RemoteAccess já está em execução.")
-		if !*noBrowser {
-			runningPort := findRunningLocalPort()
-			runNativeAppWindow(fmt.Sprintf("http://127.0.0.1:%d", runningPort))
-		}
-		os.Exit(0)
 	}
 
-instanceAcquired:
 	if isElevated {
 		syncProgramFilesExe()
 	}
@@ -599,13 +692,21 @@ instanceAcquired:
 	trayMgr := tray.StartTray(cfg.Data.ID, config.IsAdmin(), func() {
 		runNativeAppWindow(url)
 	}, func() {
-		srv.Shutdown()
-		_ = config.ElevateSelf("")
-		os.Exit(0)
+		go func() {
+			log.Println("[Bandeja] Solicitando elevação de privilégios UAC...")
+			releaseSingleInstanceLock()
+			err := config.ElevateSelf("")
+			if err != nil {
+				log.Printf("[Bandeja] Elevação cancelada ou falhou: %v. Mantendo serviço ativo.", err)
+				_ = acquireSingleInstanceLock(500 * time.Millisecond)
+				return
+			}
+			log.Println("[Bandeja] Processo elevado iniciado com sucesso! Transferindo controle...")
+			time.Sleep(300 * time.Millisecond)
+			terminateAppSession(srv)
+		}()
 	}, func() {
-		srv.Shutdown()
-		time.Sleep(100 * time.Millisecond)
-		os.Exit(0)
+		terminateAppSession(srv)
 	})
 	defer trayMgr.Remove()
 
@@ -615,8 +716,6 @@ instanceAcquired:
 	}
 
 	<-stop
-	log.Println("[RemoteAccess] Notificando nuvem e encerrando com segurança...")
-	srv.Shutdown()
-	time.Sleep(200 * time.Millisecond)
-	os.Exit(0)
+	trayMgr.Remove()
+	terminateAppSession(srv)
 }

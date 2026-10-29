@@ -67,6 +67,22 @@ func getConfigPath() string {
 		}
 	}
 
+	// Priority 2b: Search other user profiles if running under elevated secondary admin account
+	if runtime.GOOS == "windows" {
+		if matches, err := filepath.Glob(`C:\Users\*\AppData\Roaming\RemoteAccess\config.json`); err == nil {
+			for _, m := range matches {
+				if data, err := os.ReadFile(m); err == nil && len(data) > 0 {
+					if err := os.MkdirAll(sharedDir, 0777); err == nil {
+						if err := os.WriteFile(sharedFile, data, 0666); err == nil {
+							return sharedFile
+						}
+					}
+					return m
+				}
+			}
+		}
+	}
+
 	// Create in ProgramData if possible
 	if err := os.MkdirAll(sharedDir, 0777); err == nil {
 		return sharedFile
@@ -297,13 +313,15 @@ func ElevateSelf(args string) error {
 	verb, _ := syscall.UTF16PtrFromString("runas")
 	file, _ := syscall.UTF16PtrFromString(exePath)
 	params, _ := syscall.UTF16PtrFromString(trimmed)
+	dir := filepath.Dir(exePath)
+	dirPtr, _ := syscall.UTF16PtrFromString(dir)
 
 	ret, _, _ := procShellExecuteW.Call(
 		0,
 		uintptr(unsafe.Pointer(verb)),
 		uintptr(unsafe.Pointer(file)),
 		uintptr(unsafe.Pointer(params)),
-		0,
+		uintptr(unsafe.Pointer(dirPtr)),
 		1, // SW_SHOWNORMAL
 	)
 	if ret <= 32 {

@@ -26,6 +26,7 @@ var (
 	procCreateCompatibleDC     = gdi32Capture.NewProc("CreateCompatibleDC")
 	procCreateCompatibleBitmap = gdi32Capture.NewProc("CreateCompatibleBitmap")
 	procSelectObject           = gdi32Capture.NewProc("SelectObject")
+	procCreateDIBSection       = gdi32Capture.NewProc("CreateDIBSection")
 	procBitBlt                 = gdi32Capture.NewProc("BitBlt")
 	procDeleteObject           = gdi32Capture.NewProc("DeleteObject")
 	procDeleteDC               = gdi32Capture.NewProc("DeleteDC")
@@ -221,15 +222,17 @@ func (sc *ScreenCapturer) SetDisplayIndex(index int) error {
 		vt, _, _ := procGetSystemMetrics.Call(77) // SM_YVIRTUALSCREEN
 		vw, _, _ := procGetSystemMetrics.Call(78) // SM_CXVIRTUALSCREEN
 		vh, _, _ := procGetSystemMetrics.Call(79) // SM_CYVIRTUALSCREEN
-		w := int(vw)
-		h := int(vh)
+		w := int(int32(vw))
+		h := int(int32(vh))
 		if w <= 0 {
 			w = 1920
 		}
 		if h <= 0 {
 			h = 1080
 		}
-		sc.Bounds = image.Rect(int(vl), int(vt), int(vl)+w, int(vt)+h)
+		minX := int(int32(vl))
+		minY := int(int32(vt))
+		sc.Bounds = image.Rect(minX, minY, minX+w, minY+h)
 		return nil
 	}
 
@@ -340,13 +343,22 @@ func captureDirectGDI(bounds image.Rectangle) (*image.RGBA, error) {
 	}
 	defer procDeleteDC.Call(hdcMem)
 
-	hbmScreen, _, _ := procCreateCompatibleBitmap.Call(hdcScreen, uintptr(w), uintptr(h))
-	if hbmScreen == 0 {
-		return nil, fmt.Errorf("failed to create compatible bitmap")
-	}
-	defer procDeleteObject.Call(hbmScreen)
+	var bi bitmapInfoHeader
+	bi.BiSize = uint32(unsafe.Sizeof(bi))
+	bi.BiWidth = int32(w)
+	bi.BiHeight = -int32(h) // top-down
+	bi.BiPlanes = 1
+	bi.BiBitCount = 32
+	bi.BiCompression = 0 // BI_RGB
 
-	hbmOld, _, _ := procSelectObject.Call(hdcMem, hbmScreen)
+	var pBits uintptr
+	hbmDIB, _, err := procCreateDIBSection.Call(hdcMem, uintptr(unsafe.Pointer(&bi)), 0, uintptr(unsafe.Pointer(&pBits)), 0, 0)
+	if hbmDIB == 0 || pBits == 0 {
+		return nil, fmt.Errorf("CreateDIBSection failed: %w", err)
+	}
+	defer procDeleteObject.Call(hbmDIB)
+
+	hbmOld, _, _ := procSelectObject.Call(hdcMem, hbmDIB)
 	defer procSelectObject.Call(hdcMem, hbmOld)
 
 	const srccopy = 0x00CC0020 | 0x40000000 // SRCCOPY | CAPTUREBLT (includes layered & composite windows)
@@ -359,25 +371,14 @@ func captureDirectGDI(bounds image.Rectangle) (*image.RGBA, error) {
 		}
 	}
 
-	var bi bitmapInfoHeader
-	bi.BiSize = uint32(unsafe.Sizeof(bi))
-	bi.BiWidth = int32(w)
-	bi.BiHeight = -int32(h) // top-down
-	bi.BiPlanes = 1
-	bi.BiBitCount = 32
-	bi.BiCompression = 0 // BI_RGB
-
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	ret, _, _ = procGetDIBits.Call(hdcMem, hbmScreen, 0, uintptr(h), uintptr(unsafe.Pointer(&img.Pix[0])), uintptr(unsafe.Pointer(&bi)), 0)
-	if ret == 0 {
-		return nil, fmt.Errorf("GetDIBits failed")
-	}
-
-	// Convert BGRA to RGBA
+	rawSlice := unsafe.Slice((*byte)(unsafe.Pointer(pBits)), w*h*4)
 	for i := 0; i < len(img.Pix); i += 4 {
-		b := img.Pix[i]
-		r := img.Pix[i+2]
+		b := rawSlice[i]
+		g := rawSlice[i+1]
+		r := rawSlice[i+2]
 		img.Pix[i] = r
+		img.Pix[i+1] = g
 		img.Pix[i+2] = b
 		img.Pix[i+3] = 255
 	}

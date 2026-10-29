@@ -203,6 +203,7 @@ func trayWndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 						go globalTray.onAdmin()
 					}
 				case idmExit:
+					globalTray.Remove()
 					if globalTray.onExit != nil {
 						go globalTray.onExit()
 					}

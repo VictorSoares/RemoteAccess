@@ -42,6 +42,11 @@ func main() {
 		w.Write([]byte("OK"))
 	})
 
+	// Static favicon and logo icon endpoints
+	http.HandleFunc("/favicon.ico", srv.HandleFavicon)
+	http.HandleFunc("/icon.png", srv.HandleIcon)
+	http.HandleFunc("/icon_32.png", srv.HandleIcon32)
+
 	// Render modern Web Dashboard on root path
 	http.HandleFunc("/", srv.HandleDashboard)
 

@@ -6,12 +6,12 @@
   <title>RemoteAccess</title>
   
   <!-- App Icons for Window Titlebar, Taskbar & Browser Tabs -->
+  <link rel="icon" type="image/png" sizes="32x32" href="icon_32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="icon_16.png">
   <link rel="icon" type="image/png" sizes="256x256" href="icon.png">
   <link rel="icon" type="image/png" sizes="128x128" href="icon_128.png">
   <link rel="icon" type="image/png" sizes="48x48" href="icon_48.png">
-  <link rel="icon" type="image/png" sizes="32x32" href="icon_32.png">
-  <link rel="icon" type="image/png" sizes="16x16" href="icon_16.png">
-  <link rel="shortcut icon" href="icon.png">
+  <link rel="shortcut icon" href="icon_32.png">
   <link rel="apple-touch-icon" href="icon.png">
   
   <link rel="stylesheet" href="style.css">
@@ -73,6 +73,44 @@
 
     <!-- HOST VIEW (Servidor / Permitir Controle) -->
     <section id="host-view" class="view-panel">
+      <!-- Incoming Connection Request Alert (Interactive Acceptance) -->
+      <div id="incoming-request-box" class="incoming-request-card" style="display: none;">
+        <div class="incoming-request-header">
+          <div class="incoming-alert-left">
+            <div class="request-pulse-ring"></div>
+            <div>
+              <div class="incoming-title">SOLICITAÇÃO DE CONEXÃO RECEBIDA</div>
+              <div class="incoming-details">
+                <span id="incoming-client-alias" class="highlight-client">Operador Remoto</span> 
+                (<span id="incoming-client-id">---</span>) deseja controlar seu computador.
+              </div>
+              <div class="incoming-timer-wrap">
+                Tempo restante para resposta: <span id="incoming-timer" class="highlight-timer">45s</span>
+              </div>
+            </div>
+          </div>
+          <div class="incoming-permissions">
+            <label class="perm-checkbox" title="Permitir controle de mouse e teclado">
+              <input type="checkbox" id="perm-input" checked> <span>🖱️ Teclado & Mouse</span>
+            </label>
+            <label class="perm-checkbox" title="Permitir transferência de arquivos">
+              <input type="checkbox" id="perm-files" checked> <span>📁 Arquivos</span>
+            </label>
+            <label class="perm-checkbox" title="Permitir áudio do sistema">
+              <input type="checkbox" id="perm-audio" checked> <span>🔊 Áudio</span>
+            </label>
+          </div>
+          <div class="incoming-request-actions">
+            <button class="btn-accept-request" id="btn-accept-request" onclick="respondIncomingRequest(true)" title="Autorizar conexão remota">
+              ✅ Aceitar
+            </button>
+            <button class="btn-reject-request" id="btn-reject-request" onclick="respondIncomingRequest(false)" title="Recusar conexão">
+              ❌ Recusar
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Live Active Session Alert (Visible when controlled) -->
       <div id="active-session-box" class="active-session-card" style="display: none;">
         <div class="session-card-header">

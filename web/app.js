@@ -662,6 +662,23 @@ async function fetchSessionStatus() {
     const res = await fetch('/api/session-status');
     const data = await res.json();
     const box = document.getElementById('active-session-box');
+    const reqBox = document.getElementById('incoming-request-box');
+
+    if (data.has_pending_request && data.pending_request) {
+      if (reqBox) {
+        reqBox.style.display = 'flex';
+        const pr = data.pending_request;
+        const aliasEl = document.getElementById('incoming-client-alias');
+        if (aliasEl) aliasEl.innerText = pr.client_alias || 'Operador Remoto';
+        const idEl = document.getElementById('incoming-client-id');
+        if (idEl) idEl.innerText = formatID(pr.client_id || '');
+        const timerEl = document.getElementById('incoming-timer');
+        if (timerEl) timerEl.innerText = `${pr.seconds_left}s`;
+      }
+    } else {
+      if (reqBox) reqBox.style.display = 'none';
+    }
+
     if (data.active) {
       box.style.display = 'flex';
       const clientLabel = data.client_alias ? `${data.client_alias} (${formatID(data.client_id)})` : (data.client_id || 'Controlador');
@@ -695,6 +712,28 @@ async function fetchSessionStatus() {
       hideHostToast();
     }
   } catch (err) {}
+}
+
+async function respondIncomingRequest(accepted) {
+  try {
+    const endpoint = accepted ? '/api/accept-connection' : '/api/reject-connection';
+    const body = accepted ? {
+      allow_input: document.getElementById('perm-input') ? document.getElementById('perm-input').checked : true,
+      allow_files: document.getElementById('perm-files') ? document.getElementById('perm-files').checked : true,
+      allow_audio: document.getElementById('perm-audio') ? document.getElementById('perm-audio').checked : true,
+    } : {};
+
+    await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    const reqBox = document.getElementById('incoming-request-box');
+    if (reqBox) reqBox.style.display = 'none';
+    await fetchSessionStatus();
+  } catch (err) {
+    console.error('Erro ao responder pedido de conexão:', err);
+  }
 }
 
 async function toggleHostRemoteControl() {
@@ -1303,12 +1342,16 @@ function connectSignaling() {
       switch (msg.action) {
         case 'status':
           if (msg.status === 'auth_ok') {
+            hidePendingApprovalModal();
             openViewer();
             startPingLoop();
+          } else if (msg.status === 'pending_approval') {
+            showPendingApprovalModal(msg.alias || 'o computador remoto');
           }
           break;
 
         case 'error':
+          hidePendingApprovalModal();
           await showModalAlert('Erro na Conexão', msg.message || 'Falha ao conectar com o computador remoto.', '❌');
           resetConnectButton();
           break;
@@ -1361,14 +1404,62 @@ function connectSignaling() {
 }
 
 // Client: Connect to Remote Host
+function showPendingApprovalModal(targetName) {
+  const btn = document.getElementById('btn-connect');
+  if (btn) btn.innerHTML = '<span>⏳ Aguardando aceite...</span>';
+
+  let modal = document.getElementById('pending-approval-modal');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'pending-approval-modal';
+    modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(6px); display: flex; align-items: center; justify-content: center; z-index: 99999;';
+    modal.innerHTML = `
+      <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 16px; padding: 2rem; max-width: 440px; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,0.6); color: #fff;">
+        <div style="font-size: 2.8rem; margin-bottom: 0.8rem; animation: pulse 1.5s infinite;">⏱️</div>
+        <h3 style="font-size: 1.25rem; font-weight: 800; margin-bottom: 0.6rem; color: #38bdf8;">Aguardando Autorização</h3>
+        <p style="font-size: 0.88rem; color: #94a3b8; line-height: 1.45; margin-bottom: 1.5rem;" id="pending-approval-text">
+          Uma solicitação de acesso foi enviada para <strong>${targetName}</strong>. O usuário remoto precisa clicar em <strong>Aceitar</strong> para liberar a tela.
+        </p>
+        <button onclick="cancelPendingApproval()" style="background: rgba(239, 68, 68, 0.2); border: 1px solid rgba(239, 68, 68, 0.5); color: #fca5a5; font-weight: 700; font-size: 0.85rem; padding: 0.6rem 1.6rem; border-radius: 8px; cursor: pointer;">
+          Cancelar Solicitação
+        </button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+  } else {
+    const textEl = document.getElementById('pending-approval-text');
+    if (textEl) textEl.innerHTML = `Uma solicitação de acesso foi enviada para <strong>${targetName}</strong>. O usuário remoto precisa clicar em <strong>Aceitar</strong> para liberar a tela.`;
+    modal.style.display = 'flex';
+  }
+}
+
+function hidePendingApprovalModal() {
+  const modal = document.getElementById('pending-approval-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function cancelPendingApproval() {
+  hidePendingApprovalModal();
+  if (signalingWS && signalingWS.readyState === WebSocket.OPEN && currentTargetId) {
+    signalingWS.send(JSON.stringify({
+      action: 'close',
+      id: currentClientSessionId,
+      targetId: currentTargetId,
+      message: 'Operador cancelou o pedido de conexão.'
+    }));
+  }
+  closeViewer();
+  resetConnectButton();
+}
+
 async function connectToRemote(e) {
   if (e) e.preventDefault();
   getAppAudioContext();
   const rawTargetId = document.getElementById('target-id').value.replace(/\D/g, '');
   const targetPwd = document.getElementById('target-pwd').value;
 
-  if (!rawTargetId || !targetPwd) {
-    await showModalAlert('Campos Obrigatórios', 'Por favor, informe o ID e a Senha do computador remoto.', '⚠️');
+  if (!rawTargetId) {
+    await showModalAlert('Campo Obrigatório', 'Por favor, informe o ID do computador remoto.', '⚠️');
     return;
   }
 

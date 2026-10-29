@@ -2,6 +2,7 @@ package signaling
 
 import (
 	_ "embed"
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"crypto/rand"
@@ -9,10 +10,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"math/big"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,6 +29,15 @@ import (
 
 //go:embed web/dashboard.html
 var dashboardHTML []byte
+
+//go:embed web/icon_32.png
+var icon32PNG []byte
+
+//go:embed web/icon.png
+var iconPNG []byte
+
+//go:embed web/favicon.ico
+var faviconICO []byte
 
 var (
 	dashboardGzOnce sync.Once
@@ -83,6 +96,7 @@ type Peer struct {
 	Monitors       int             `json:"monitors"`
 	MAC            string          `json:"mac,omitempty"`
 	IsHost         bool            `json:"is_host"`
+	IsAdmin        bool            `json:"is_admin,omitempty"`
 	Password       string          `json:"password,omitempty"`
 	RemoteAddr     string          `json:"remote_addr"`
 	ConnectedAt    time.Time       `json:"connected_at"`
@@ -110,18 +124,38 @@ type loginAttempt struct {
 	lockUntil time.Time
 }
 
+type PendingRequest struct {
+	ClientID    string
+	ClientAlias string
+	ClientIP    string
+	TargetID    string
+	ClientConn  *websocket.Conn
+	RequestedAt time.Time
+	OriginalMsg protocol.SignalingMessage
+}
+
+type LogEntry struct {
+	Timestamp time.Time `json:"timestamp"`
+	TimeStr   string    `json:"time"`
+	Message   string    `json:"message"`
+}
+
 type Server struct {
-	mu           sync.RWMutex
-	peers        map[string]*Peer
-	startTime    time.Time
-	totalPackets uint64
-	logsMu       sync.RWMutex
-	logs         []string
-	historyMu    sync.RWMutex
-	history      []SessionRecord
-	adminKey     string
-	rateMu       sync.Mutex
-	failedLogins map[string]*loginAttempt
+	mu              sync.RWMutex
+	peers           map[string]*Peer
+	startTime       time.Time
+	totalPackets    uint64
+	logsMu          sync.RWMutex
+	logs            []LogEntry
+	legacyLogs      []string
+	historyMu       sync.RWMutex
+	history         []SessionRecord
+	adminKey        string
+	rateMu          sync.Mutex
+	failedLogins    map[string]*loginAttempt
+	pendingMu       sync.Mutex
+	pendingRequests map[string]*PendingRequest
+	logFilePath     string
 }
 
 func (s *Server) isRateLimited(clientIP, targetID string) bool {
@@ -171,16 +205,106 @@ func NewServer() *Server {
 		log.Printf("[Signaling] ADMIN_SECRET não configurado no ambiente. Utilizando chave padrão: %s", secret)
 	}
 
-	s := &Server{
-		peers:        make(map[string]*Peer),
-		startTime:    time.Now(),
-		logs:         make([]string, 0, 200),
-		history:      make([]SessionRecord, 0, 500),
-		adminKey:     secret,
-		failedLogins: make(map[string]*loginAttempt),
+	logDir := os.Getenv("SIGNALING_DATA_DIR")
+	if logDir == "" {
+		progData := os.Getenv("ProgramData")
+		if progData != "" {
+			logDir = filepath.Join(progData, "RemoteAccess")
+		} else {
+			logDir = "."
+		}
 	}
+	_ = os.MkdirAll(logDir, 0755)
+	logFilePath := filepath.Join(logDir, "signaling_events.jsonl")
+
+	s := &Server{
+		peers:           make(map[string]*Peer),
+		startTime:       time.Now(),
+		logs:            make([]LogEntry, 0, 500),
+		legacyLogs:      make([]string, 0, 200),
+		history:         make([]SessionRecord, 0, 500),
+		adminKey:        secret,
+		failedLogins:    make(map[string]*loginAttempt),
+		pendingRequests: make(map[string]*PendingRequest),
+		logFilePath:     logFilePath,
+	}
+
+	// Carrega histórico de logs dos últimos 7 dias gravados em disco
+	s.loadPersistedLogs()
+
+	// Goroutine de purga automática de logs com mais de 7 dias
+	go s.startRetentionCleaner()
+
 	s.addLog("Servidor Cloud Relay inicializado com sucesso. Chave Admin configurada.")
 	return s
+}
+
+func (s *Server) loadPersistedLogs() {
+	if s.logFilePath == "" {
+		return
+	}
+	file, err := os.Open(s.logFilePath)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var entry LogEntry
+		if err := json.Unmarshal(line, &entry); err == nil {
+			if !entry.Timestamp.Before(cutoff) {
+				s.logs = append(s.logs, entry)
+				legacyStr := fmt.Sprintf("[%s] %s", entry.Timestamp.Format("15:04:05"), entry.Message)
+				s.legacyLogs = append(s.legacyLogs, legacyStr)
+				if len(s.legacyLogs) > 200 {
+					s.legacyLogs = s.legacyLogs[len(s.legacyLogs)-200:]
+				}
+			}
+		}
+	}
+}
+
+func (s *Server) startRetentionCleaner() {
+	ticker := time.NewTicker(1 * time.Hour)
+	for range ticker.C {
+		s.purgeExpiredLogs()
+	}
+}
+
+func (s *Server) purgeExpiredLogs() {
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+	s.logsMu.Lock()
+	defer s.logsMu.Unlock()
+
+	idx := 0
+	for idx < len(s.logs) && s.logs[idx].Timestamp.Before(cutoff) {
+		idx++
+	}
+	if idx > 0 {
+		s.logs = s.logs[idx:]
+		if s.logFilePath != "" {
+			tmpPath := s.logFilePath + ".tmp"
+			f, err := os.Create(tmpPath)
+			if err == nil {
+				w := bufio.NewWriter(f)
+				for _, entry := range s.logs {
+					if b, err := json.Marshal(entry); err == nil {
+						_, _ = w.Write(b)
+						_ = w.WriteByte('\n')
+					}
+				}
+				_ = w.Flush()
+				_ = f.Close()
+				_ = os.Rename(tmpPath, s.logFilePath)
+			}
+		}
+	}
 }
 
 func (s *Server) addHistory(rec SessionRecord) {
@@ -230,14 +354,36 @@ func (s *Server) checkAdminAuth(r *http.Request) bool {
 }
 
 func (s *Server) addLog(format string, a ...interface{}) {
-	entry := fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), fmt.Sprintf(format, a...))
-	log.Println("[Signaling]", entry)
+	now := time.Now()
+	msg := fmt.Sprintf(format, a...)
+	entry := LogEntry{
+		Timestamp: now,
+		TimeStr:   now.Format("02/01 15:04:05"),
+		Message:   msg,
+	}
+	legacyEntry := fmt.Sprintf("[%s] %s", now.Format("15:04:05"), msg)
+	log.Println("[Signaling]", legacyEntry)
 
 	s.logsMu.Lock()
-	defer s.logsMu.Unlock()
 	s.logs = append(s.logs, entry)
-	if len(s.logs) > 200 {
-		s.logs = s.logs[len(s.logs)-200:]
+	s.legacyLogs = append(s.legacyLogs, legacyEntry)
+	if len(s.legacyLogs) > 200 {
+		s.legacyLogs = s.legacyLogs[len(s.legacyLogs)-200:]
+	}
+	filePath := s.logFilePath
+	s.logsMu.Unlock()
+
+	if filePath != "" {
+		go func(e LogEntry, path string) {
+			b, err := json.Marshal(e)
+			if err == nil {
+				f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+				if err == nil {
+					_, _ = f.Write(append(b, '\n'))
+					_ = f.Close()
+				}
+			}
+		}(entry, filePath)
 	}
 }
 
@@ -282,9 +428,14 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 			peerAlias = "Dispositivo"
 		}
 		isHost := peer.IsHost
-		delete(s.peers, peer.ID)
+		// Apenas remove de s.peers se o peer registrado ainda for esta exata conexão
+		if currentPeer, ok := s.peers[peer.ID]; ok && currentPeer == peer {
+			delete(s.peers, peer.ID)
+		}
 		if peer.ID != peerID {
-			delete(s.peers, peerID)
+			if currentPeer, ok := s.peers[peerID]; ok && currentPeer == peer {
+				delete(s.peers, peerID)
+			}
 		}
 		if activeTarget != "" {
 			if targetPeer, ok := s.peers[activeTarget]; ok {
@@ -297,6 +448,18 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 			s.endHistorySession(peer.ID, activeTarget)
 			s.addLog("Sessão encerrada por desconexão de %s (%s) com %s", peerAlias, peer.ID, activeTarget)
 		}
+		s.pendingMu.Lock()
+		delete(s.pendingRequests, peer.ID)
+		for cid, req := range s.pendingRequests {
+			if req.TargetID == peer.ID {
+				delete(s.pendingRequests, cid)
+				_ = req.ClientConn.WriteJSON(protocol.SignalingMessage{
+					Action:  protocol.ActionError,
+					Message: "Host desconectou-se do servidor de sinalização.",
+				})
+			}
+		}
+		s.pendingMu.Unlock()
 		if isHost {
 			s.addLog("Host desconectado: %s (%s)", peerAlias, peer.ID)
 		} else {
@@ -328,7 +491,15 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 		switch msg.Action {
 		case protocol.ActionRegister:
 			s.mu.Lock()
-			delete(s.peers, peer.ID)
+			// Se já existe uma conexão anterior registrada sob este ID, fecha a conexão antiga
+			if oldPeer, exists := s.peers[msg.ID]; exists && oldPeer != peer {
+				if oldPeer.Conn != nil {
+					_ = oldPeer.Conn.Close()
+				}
+			}
+			if currentPeer, ok := s.peers[peer.ID]; ok && currentPeer == peer {
+				delete(s.peers, peer.ID)
+			}
 			peer.ID = msg.ID
 			if msg.Alias != "" {
 				peer.Alias = msg.Alias
@@ -340,11 +511,16 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 				peer.MAC = msg.MAC
 			}
 			peer.IsHost = true
+			peer.IsAdmin = msg.IsAdmin
 			peer.Password = msg.Password
 			s.peers[msg.ID] = peer
 			s.mu.Unlock()
 
-			s.addLog("Host registrado: %s [Nome: %s, Monitores: %d, MAC: %s] (Pronto para conexões)", msg.ID, peer.Alias, peer.Monitors, peer.MAC)
+			adminTag := ""
+			if msg.IsAdmin {
+				adminTag = " [🛡️ Modo Admin]"
+			}
+			s.addLog("Host registrado: %s [Nome: %s, Monitores: %d, MAC: %s]%s (Pronto para conexões)", msg.ID, peer.Alias, peer.Monitors, peer.MAC, adminTag)
 			_ = conn.WriteJSON(protocol.SignalingMessage{
 				Action:   protocol.ActionStatus,
 				Status:   "registered",
@@ -353,13 +529,18 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 				Alias:    peer.Alias,
 				Monitors: peer.Monitors,
 				MAC:      peer.MAC,
+				IsAdmin:  peer.IsAdmin,
 			})
 
 		case protocol.ActionUnregister:
 			s.mu.Lock()
 			activeTarget := peer.ActiveTargetID
-			delete(s.peers, peer.ID)
-			delete(s.peers, msg.ID)
+			if currentPeer, ok := s.peers[peer.ID]; ok && currentPeer == peer {
+				delete(s.peers, peer.ID)
+			}
+			if currentPeer, ok := s.peers[msg.ID]; ok && currentPeer == peer {
+				delete(s.peers, msg.ID)
+			}
 			if activeTarget != "" {
 				if targetPeer, ok := s.peers[activeTarget]; ok {
 					targetPeer.ActiveTargetID = ""
@@ -420,56 +601,205 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			if targetPeer.Password != "" {
-				matchPeer := subtle.ConstantTimeCompare([]byte(targetPeer.Password), []byte(msg.Password)) == 1
-				matchMaster := s.adminKey != "" && subtle.ConstantTimeCompare([]byte(s.adminKey), []byte(msg.Password)) == 1
-				if !matchPeer && !matchMaster {
-					s.recordFailedAttempt(clientIP, msg.TargetID)
-					s.addLog("Autenticação rejeitada para ID %s (senha incorreta, IP %s)", msg.TargetID, clientIP)
-					_ = conn.WriteJSON(protocol.SignalingMessage{
-						Action:  protocol.ActionError,
-						Message: "Senha incorreta.",
-					})
-					continue
+			isUnattended := false
+			if targetPeer.Password != "" && msg.Password != "" {
+				if subtle.ConstantTimeCompare([]byte(targetPeer.Password), []byte(msg.Password)) == 1 {
+					isUnattended = true
 				}
 			}
-			s.resetFailedAttempts(clientIP, msg.TargetID)
 
-			if msg.ID == "" {
-				msg.ID = peer.ID
+			if isUnattended {
+				s.resetFailedAttempts(clientIP, msg.TargetID)
+
+				if msg.ID == "" {
+					msg.ID = peer.ID
+				}
+				if msg.Alias != "" {
+					peer.Alias = msg.Alias
+				}
+				peer.IsHost = false
+
+				peer.ActiveTargetID = msg.TargetID
+				targetPeer.ActiveTargetID = peer.ID
+
+				s.addLog("Sessão iniciada (acesso direto com senha): %s (%s) está controlando o Host %s (%s)", peer.Alias, peer.ID, targetPeer.Alias, msg.TargetID)
+
+				// Record in session history
+				s.addHistory(SessionRecord{
+					ID:          fmt.Sprintf("sess_%d", time.Now().UnixNano()),
+					StartedAt:   time.Now(),
+					HostID:      targetPeer.ID,
+					HostAlias:   targetPeer.Alias,
+					ClientID:    peer.ID,
+					ClientAlias: peer.Alias,
+					Status:      "active",
+				})
+
+				targetPeer.mu.Lock()
+				_ = targetPeer.Conn.WriteJSON(msg)
+				targetPeer.mu.Unlock()
+
+				_ = conn.WriteJSON(protocol.SignalingMessage{
+					Action:  protocol.ActionStatus,
+					Status:  "auth_ok",
+					Message: "Autenticado com sucesso! Conectando à tela remota...",
+					ID:      msg.TargetID,
+					Alias:   targetPeer.Alias,
+				})
+			} else {
+				// Attended Access: Sem senha ou senha divergente -> Requer aprovação explícita na tela do Host
+				if msg.ID == "" {
+					msg.ID = peer.ID
+				}
+				if msg.Alias != "" {
+					peer.Alias = msg.Alias
+				}
+				peer.IsHost = false
+
+				s.pendingMu.Lock()
+				s.pendingRequests[peer.ID] = &PendingRequest{
+					ClientID:    peer.ID,
+					ClientAlias: peer.Alias,
+					ClientIP:    clientIP,
+					TargetID:    msg.TargetID,
+					ClientConn:  conn,
+					RequestedAt: time.Now(),
+					OriginalMsg: msg,
+				}
+				s.pendingMu.Unlock()
+
+				s.addLog("Solicitação de autorização pendente: %s (%s) pediu para acessar o Host %s (%s)", peer.Alias, peer.ID, targetPeer.Alias, msg.TargetID)
+
+				// 1. Notifica o Operador
+				_ = conn.WriteJSON(protocol.SignalingMessage{
+					Action:  protocol.ActionStatus,
+					Status:  "pending_approval",
+					Message: "Aguardando autorização no computador remoto...",
+					ID:      msg.TargetID,
+					Alias:   targetPeer.Alias,
+				})
+
+				// 2. Notifica o Host
+				clientDisplayName := peer.Alias
+				if clientDisplayName == "" {
+					clientDisplayName = msg.Alias
+				}
+				if clientDisplayName == "" {
+					clientDisplayName = "Operador Remoto"
+				}
+
+				targetPeer.mu.Lock()
+				_ = targetPeer.Conn.WriteJSON(protocol.SignalingMessage{
+					Action:   protocol.ActionIncomingRequest,
+					ID:       peer.ID,
+					Alias:    clientDisplayName,
+					ClientIP: clientIP,
+					Message:  fmt.Sprintf("%s deseja controlar o seu computador.", clientDisplayName),
+				})
+				targetPeer.mu.Unlock()
+
+				// 3. Timeout automático de 45 segundos
+				go func(clientID, targetID string) {
+					time.Sleep(45 * time.Second)
+					s.pendingMu.Lock()
+					req, ok := s.pendingRequests[clientID]
+					if ok && req.TargetID == targetID {
+						delete(s.pendingRequests, clientID)
+						s.pendingMu.Unlock()
+
+						_ = req.ClientConn.WriteJSON(protocol.SignalingMessage{
+							Action:  protocol.ActionError,
+							Message: "Tempo limite esgotado. Ninguém autorizou o acesso no computador remoto.",
+						})
+					} else {
+						s.pendingMu.Unlock()
+					}
+				}(peer.ID, msg.TargetID)
 			}
-			if msg.Alias != "" {
-				peer.Alias = msg.Alias
+
+		case protocol.ActionAccept:
+			s.pendingMu.Lock()
+			pending, exists := s.pendingRequests[msg.TargetID]
+			if exists && pending.TargetID == peer.ID {
+				delete(s.pendingRequests, msg.TargetID)
+			} else {
+				pending = nil
 			}
-			peer.IsHost = false
+			s.pendingMu.Unlock()
 
-			peer.ActiveTargetID = msg.TargetID
-			targetPeer.ActiveTargetID = peer.ID
+			if pending == nil {
+				s.addLog("Aceite ignorado ou expirado para Cliente %s pelo Host %s", msg.TargetID, peer.ID)
+				continue
+			}
 
-			s.addLog("Sessão iniciada: %s (%s) está controlando o Host %s (%s)", peer.Alias, peer.ID, targetPeer.Alias, msg.TargetID)
+			s.mu.RLock()
+			clientPeer, cExists := s.peers[msg.TargetID]
+			s.mu.RUnlock()
 
-			// Record in session history
+			if !cExists {
+				s.addLog("Aceite falhou: Cliente %s já desconectado", msg.TargetID)
+				continue
+			}
+
+			clientPeer.IsHost = false
+			clientPeer.ActiveTargetID = peer.ID
+			peer.ActiveTargetID = clientPeer.ID
+
+			s.addLog("Sessão autorizada na tela: %s (%s) está controlando o Host %s (%s)", clientPeer.Alias, clientPeer.ID, peer.Alias, peer.ID)
+
 			s.addHistory(SessionRecord{
 				ID:          fmt.Sprintf("sess_%d", time.Now().UnixNano()),
 				StartedAt:   time.Now(),
-				HostID:      targetPeer.ID,
-				HostAlias:   targetPeer.Alias,
-				ClientID:    peer.ID,
-				ClientAlias: peer.Alias,
+				HostID:      peer.ID,
+				HostAlias:   peer.Alias,
+				ClientID:    clientPeer.ID,
+				ClientAlias: clientPeer.Alias,
 				Status:      "active",
 			})
 
-			targetPeer.mu.Lock()
-			_ = targetPeer.Conn.WriteJSON(msg)
-			targetPeer.mu.Unlock()
-
-			_ = conn.WriteJSON(protocol.SignalingMessage{
-				Action:  protocol.ActionStatus,
-				Status:  "auth_ok",
-				Message: "Autenticado com sucesso! Conectando à tela remota...",
-				ID:      msg.TargetID,
-				Alias:   targetPeer.Alias,
+			// 1. Notifica o Cliente com auth_ok e permissões
+			clientPeer.mu.Lock()
+			_ = clientPeer.Conn.WriteJSON(protocol.SignalingMessage{
+				Action:      protocol.ActionStatus,
+				Status:      "auth_ok",
+				Message:     "Conexão aceita pelo usuário remoto! Conectando à tela remota...",
+				ID:          peer.ID,
+				Alias:       peer.Alias,
+				Permissions: msg.Permissions,
 			})
+			clientPeer.mu.Unlock()
+
+			// 2. Repassa a mensagem original (ActionConnect) com as permissões ao Host para iniciar a sessão
+			peer.mu.Lock()
+			origMsg := pending.OriginalMsg
+			origMsg.Permissions = msg.Permissions
+			_ = peer.Conn.WriteJSON(origMsg)
+			peer.mu.Unlock()
+
+		case protocol.ActionReject:
+			s.pendingMu.Lock()
+			pending, exists := s.pendingRequests[msg.TargetID]
+			if exists && pending.TargetID == peer.ID {
+				delete(s.pendingRequests, msg.TargetID)
+			} else {
+				pending = nil
+			}
+			s.pendingMu.Unlock()
+
+			if pending != nil {
+				s.mu.RLock()
+				clientPeer, cExists := s.peers[msg.TargetID]
+				s.mu.RUnlock()
+				if cExists {
+					clientPeer.mu.Lock()
+					_ = clientPeer.Conn.WriteJSON(protocol.SignalingMessage{
+						Action:  protocol.ActionError,
+						Message: "Conexão recusada pelo usuário remoto.",
+					})
+					clientPeer.mu.Unlock()
+				}
+				s.addLog("Conexão recusada pelo usuário remoto: Host %s rejeitou Cliente %s", peer.ID, msg.TargetID)
+			}
 
 		case protocol.ActionOffer, protocol.ActionAnswer, protocol.ActionCandidate, protocol.ActionData, protocol.ActionClose:
 			// Guard: Drop any large payload packets (video relay blocked - pure P2P only to save server bandwidth)
@@ -574,6 +904,7 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 		Monitors       int    `json:"monitors"`
 		MAC            string `json:"mac,omitempty"`
 		IsHost         bool   `json:"is_host"`
+		IsAdmin        bool   `json:"is_admin"`
 		HasPassword    bool   `json:"has_password"`
 		DurationSec    int    `json:"duration_sec"`
 		RemoteAddr     string `json:"remote_addr"`
@@ -668,6 +999,7 @@ func (s *Server) HandleStats(w http.ResponseWriter, r *http.Request) {
 			Monitors:       mons,
 			MAC:            p.MAC,
 			IsHost:         p.IsHost,
+			IsAdmin:        p.IsAdmin,
 			HasPassword:    p.Password != "",
 			DurationSec:    int(time.Since(p.ConnectedAt).Seconds()),
 			RemoteAddr:     p.RemoteAddr,
@@ -762,11 +1094,73 @@ func (s *Server) HandleLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	pageQuery := r.URL.Query().Get("page")
+	limitQuery := r.URL.Query().Get("limit")
+	searchQuery := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("search")))
+
+	page := 1
+	if p, err := strconv.Atoi(pageQuery); err == nil && p > 0 {
+		page = p
+	}
+	limit := 50
+	if l, err := strconv.Atoi(limitQuery); err == nil && l > 0 {
+		limit = l
+		if limit > 200 {
+			limit = 200
+		}
+	}
+
 	s.logsMu.RLock()
 	defer s.logsMu.RUnlock()
 
+	// Filtra por retenção de 7 dias e termo de busca
+	cutoff := time.Now().Add(-7 * 24 * time.Hour)
+	filtered := make([]LogEntry, 0, len(s.logs))
+
+	// Mais recentes primeiro (ordem decrescente)
+	for i := len(s.logs) - 1; i >= 0; i-- {
+		e := s.logs[i]
+		if e.Timestamp.Before(cutoff) {
+			continue
+		}
+		if searchQuery != "" {
+			if !strings.Contains(strings.ToLower(e.Message), searchQuery) &&
+				!strings.Contains(strings.ToLower(e.TimeStr), searchQuery) {
+				continue
+			}
+		}
+		filtered = append(filtered, e)
+	}
+
+	totalCount := len(filtered)
+	totalPages := 1
+	if totalCount > 0 {
+		totalPages = int(math.Ceil(float64(totalCount) / float64(limit)))
+	}
+	if page > totalPages && totalPages > 0 {
+		page = totalPages
+	}
+
+	start := (page - 1) * limit
+	if start > totalCount {
+		start = totalCount
+	}
+	end := start + limit
+	if end > totalCount {
+		end = totalCount
+	}
+
+	pagedLogs := filtered[start:end]
+
 	writeJSON(w, r, http.StatusOK, map[string]interface{}{
-		"logs": s.logs,
+		"status":         "ok",
+		"logs":           s.legacyLogs,
+		"entries":        pagedLogs,
+		"page":           page,
+		"limit":          limit,
+		"total_count":    totalCount,
+		"total_pages":    totalPages,
+		"retention_days": 7,
 	})
 }
 
@@ -853,7 +1247,37 @@ func (s *Server) HandleWoL(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) HandleFavicon(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/x-icon")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(faviconICO)
+}
+
+func (s *Server) HandleIcon(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(iconPNG)
+}
+
+func (s *Server) HandleIcon32(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write(icon32PNG)
+}
+
 func (s *Server) HandleDashboard(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/favicon.ico" {
+		s.HandleFavicon(w, r)
+		return
+	}
+	if r.URL.Path == "/icon.png" {
+		s.HandleIcon(w, r)
+		return
+	}
+	if r.URL.Path == "/icon_32.png" {
+		s.HandleIcon32(w, r)
+		return
+	}
 	if r.URL.Path != "/" && r.URL.Path != "/dashboard" {
 		http.NotFound(w, r)
 		return

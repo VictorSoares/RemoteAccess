@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"remoteaccess/internal/protocol"
@@ -222,5 +223,427 @@ func TestSelfConnectionRejected(t *testing.T) {
 	}
 	if !strings.Contains(respMsg.Message, "Auto-conexão não permitida") {
 		t.Errorf("Expected auto-connection error message, got %q", respMsg.Message)
+	}
+}
+
+func TestUnattendedAccessWithPassword(t *testing.T) {
+	srv := NewServer()
+	ts := httptest.NewServer(http.HandlerFunc(srv.HandleWS))
+	defer ts.Close()
+
+	wsURL := "ws" + ts.URL[4:]
+
+	// 1. Host registers
+	hostWS, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to dial host websocket: %v", err)
+	}
+	defer hostWS.Close()
+
+	var hostInit protocol.SignalingMessage
+	_ = hostWS.ReadJSON(&hostInit)
+
+	_ = hostWS.WriteJSON(protocol.SignalingMessage{
+		Action:   protocol.ActionRegister,
+		ID:       "host999",
+		Password: "secretPassword",
+	})
+	var hostRegResp protocol.SignalingMessage
+	_ = hostWS.ReadJSON(&hostRegResp)
+
+	// 2. Client connects with matching password
+	clientWS, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to dial client websocket: %v", err)
+	}
+	defer clientWS.Close()
+
+	var clientInit protocol.SignalingMessage
+	_ = clientWS.ReadJSON(&clientInit)
+
+	_ = clientWS.WriteJSON(protocol.SignalingMessage{
+		Action:   protocol.ActionConnect,
+		ID:       clientInit.ID,
+		TargetID: "host999",
+		Password: "secretPassword",
+	})
+
+	// Client should immediately receive auth_ok
+	var clientResp protocol.SignalingMessage
+	if err := clientWS.ReadJSON(&clientResp); err != nil {
+		t.Fatalf("Failed to read client response: %v", err)
+	}
+	if clientResp.Action != protocol.ActionStatus || clientResp.Status != "auth_ok" {
+		t.Fatalf("Expected immediate auth_ok for unattended access, got action=%s status=%s", clientResp.Action, clientResp.Status)
+	}
+
+	// Host should receive the connect message
+	var hostMsg protocol.SignalingMessage
+	if err := hostWS.ReadJSON(&hostMsg); err != nil {
+		t.Fatalf("Failed to read host message: %v", err)
+	}
+	if hostMsg.Action != protocol.ActionConnect {
+		t.Fatalf("Expected host to receive ActionConnect, got %s", hostMsg.Action)
+	}
+}
+
+func TestAttendedAccessInteractiveApproval(t *testing.T) {
+	srv := NewServer()
+	ts := httptest.NewServer(http.HandlerFunc(srv.HandleWS))
+	defer ts.Close()
+
+	wsURL := "ws" + ts.URL[4:]
+
+	// 1. Host registers
+	hostWS, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to dial host websocket: %v", err)
+	}
+	defer hostWS.Close()
+
+	var hostInit protocol.SignalingMessage
+	_ = hostWS.ReadJSON(&hostInit)
+
+	_ = hostWS.WriteJSON(protocol.SignalingMessage{
+		Action:   protocol.ActionRegister,
+		ID:       "host777",
+		Password: "secureLocalPassword",
+	})
+	var hostRegResp protocol.SignalingMessage
+	_ = hostWS.ReadJSON(&hostRegResp)
+
+	// 2. Client connects WITHOUT password (or wrong password)
+	clientWS, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to dial client websocket: %v", err)
+	}
+	defer clientWS.Close()
+
+	var clientInit protocol.SignalingMessage
+	_ = clientWS.ReadJSON(&clientInit)
+
+	_ = clientWS.WriteJSON(protocol.SignalingMessage{
+		Action:   protocol.ActionConnect,
+		ID:       clientInit.ID,
+		TargetID: "host777",
+		Password: "", // No password supplied
+		Alias:    "Suporte Victor",
+	})
+
+	// 3. Client should receive pending_approval
+	var clientPending protocol.SignalingMessage
+	if err := clientWS.ReadJSON(&clientPending); err != nil {
+		t.Fatalf("Failed to read client pending status: %v", err)
+	}
+	if clientPending.Action != protocol.ActionStatus || clientPending.Status != "pending_approval" {
+		t.Fatalf("Expected pending_approval, got action=%s status=%s", clientPending.Action, clientPending.Status)
+	}
+
+	// 4. Host should receive ActionIncomingRequest
+	var hostReq protocol.SignalingMessage
+	if err := hostWS.ReadJSON(&hostReq); err != nil {
+		t.Fatalf("Failed to read host request: %v", err)
+	}
+	if hostReq.Action != protocol.ActionIncomingRequest {
+		t.Fatalf("Expected ActionIncomingRequest on host, got %s", hostReq.Action)
+	}
+	if hostReq.ID != clientInit.ID {
+		t.Fatalf("Expected requester ID %s, got %s", clientInit.ID, hostReq.ID)
+	}
+
+	// 5. Host approves the connection (ActionAccept)
+	_ = hostWS.WriteJSON(protocol.SignalingMessage{
+		Action:   protocol.ActionAccept,
+		ID:       "host777",
+		TargetID: clientInit.ID,
+		Permissions: &protocol.SessionPermissions{
+			AllowInput: true,
+			AllowFiles: false,
+			AllowAudio: true,
+		},
+	})
+
+	// 6. Client receives auth_ok with granted permissions
+	var clientApproved protocol.SignalingMessage
+	if err := clientWS.ReadJSON(&clientApproved); err != nil {
+		t.Fatalf("Failed to read client approval: %v", err)
+	}
+	if clientApproved.Action != protocol.ActionStatus || clientApproved.Status != "auth_ok" {
+		t.Fatalf("Expected auth_ok after approval, got action=%s status=%s", clientApproved.Action, clientApproved.Status)
+	}
+	if clientApproved.Permissions == nil || clientApproved.Permissions.AllowFiles != false {
+		t.Fatalf("Expected permissions to be preserved on client response")
+	}
+
+	// 7. Host receives the original connect message with permissions
+	var hostConnMsg protocol.SignalingMessage
+	if err := hostWS.ReadJSON(&hostConnMsg); err != nil {
+		t.Fatalf("Failed to read host connect msg: %v", err)
+	}
+	if hostConnMsg.Action != protocol.ActionConnect {
+		t.Fatalf("Expected ActionConnect on host, got %s", hostConnMsg.Action)
+	}
+}
+
+func TestMasterKeyCannotAccessHostWithoutHostPassword(t *testing.T) {
+	srv := NewServer()
+	ts := httptest.NewServer(http.HandlerFunc(srv.HandleWS))
+	defer ts.Close()
+
+	wsURL := "ws" + ts.URL[4:]
+
+	// 1. Host registers with its own unique fixed password
+	hostWS, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to dial host: %v", err)
+	}
+	defer hostWS.Close()
+
+	var hostInit protocol.SignalingMessage
+	_ = hostWS.ReadJSON(&hostInit)
+
+	_ = hostWS.WriteJSON(protocol.SignalingMessage{
+		Action:   protocol.ActionRegister,
+		ID:       "my_pc_100",
+		Password: "MyRealFixedPassword_XYZ",
+	})
+	var hostRegResp protocol.SignalingMessage
+	_ = hostWS.ReadJSON(&hostRegResp)
+
+	// 2. Client attempts to connect using the server's admin key (or remote2026) instead of host's password
+	clientWS, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to dial client: %v", err)
+	}
+	defer clientWS.Close()
+
+	var clientInit protocol.SignalingMessage
+	_ = clientWS.ReadJSON(&clientInit)
+
+	_ = clientWS.WriteJSON(protocol.SignalingMessage{
+		Action:   protocol.ActionConnect,
+		ID:       clientInit.ID,
+		TargetID: "my_pc_100",
+		Password: "remote2026", // Master key should NOT bypass host password!
+	})
+
+	// Client must NOT get auth_ok! It must enter pending_approval
+	var clientResp protocol.SignalingMessage
+	if err := clientWS.ReadJSON(&clientResp); err != nil {
+		t.Fatalf("Failed to read client response: %v", err)
+	}
+	if clientResp.Action == protocol.ActionStatus && clientResp.Status == "auth_ok" {
+		t.Fatalf("SECURITY VIOLATION: Master key 'remote2026' was accepted for host access! Expected pending_approval.")
+	}
+	if clientResp.Status != "pending_approval" {
+		t.Fatalf("Expected pending_approval, got status=%s", clientResp.Status)
+	}
+}
+
+func TestLogs7DaysRetentionAndPagination(t *testing.T) {
+	srv := NewServer()
+
+	// Clear initial logs for precise test counting
+	srv.logsMu.Lock()
+	srv.logs = nil
+	srv.legacyLogs = nil
+	srv.logsMu.Unlock()
+
+	// Add 5 log entries with distinct messages
+	srv.addLog("Event Alpha - Connect")
+	srv.addLog("Event Beta - Transfer")
+	srv.addLog("Event Gamma - Screen Switch")
+	srv.addLog("Event Delta - Disconnect")
+	srv.addLog("Event Epsilon - Ping")
+
+	// 1. Test Page 1 with limit 2
+	req := httptest.NewRequest("GET", "/api/logs?page=1&limit=2", nil)
+	req.Header.Set("X-Admin-Key", srv.adminKey)
+	w := httptest.NewRecorder()
+	srv.HandleLogs(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK, got %d", w.Code)
+	}
+
+	var resp struct {
+		Entries       []LogEntry `json:"entries"`
+		TotalCount    int        `json:"total_count"`
+		TotalPages    int        `json:"total_pages"`
+		Page          int        `json:"page"`
+		Limit         int        `json:"limit"`
+		RetentionDays int        `json:"retention_days"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("Failed to decode response: %v", err)
+	}
+
+	if resp.TotalCount != 5 {
+		t.Errorf("Expected TotalCount 5, got %d", resp.TotalCount)
+	}
+	if resp.TotalPages != 3 {
+		t.Errorf("Expected TotalPages 3, got %d", resp.TotalPages)
+	}
+	if len(resp.Entries) != 2 {
+		t.Errorf("Expected 2 entries on page 1, got %d", len(resp.Entries))
+	}
+	// Newest first: Event Epsilon should be first
+	if !strings.Contains(resp.Entries[0].Message, "Event Epsilon") {
+		t.Errorf("Expected newest entry 'Event Epsilon' first, got %s", resp.Entries[0].Message)
+	}
+
+	// 2. Test Search filtering
+	reqSearch := httptest.NewRequest("GET", "/api/logs?search=transfer", nil)
+	reqSearch.Header.Set("X-Admin-Key", srv.adminKey)
+	wSearch := httptest.NewRecorder()
+	srv.HandleLogs(wSearch, reqSearch)
+
+	var respSearch struct {
+		Entries    []LogEntry `json:"entries"`
+		TotalCount int        `json:"total_count"`
+	}
+	_ = json.NewDecoder(wSearch.Body).Decode(&respSearch)
+	if respSearch.TotalCount != 1 || len(respSearch.Entries) != 1 {
+		t.Fatalf("Expected 1 result for 'transfer', got %d", respSearch.TotalCount)
+	}
+	if !strings.Contains(respSearch.Entries[0].Message, "Event Beta") {
+		t.Errorf("Expected 'Event Beta', got %s", respSearch.Entries[0].Message)
+	}
+
+	// 3. Test 7-Day Purge
+	srv.logsMu.Lock()
+	// Insert an expired log entry (8 days ago)
+	srv.logs = append([]LogEntry{
+		{
+			Timestamp: time.Now().Add(-8 * 24 * time.Hour),
+			TimeStr:   "Expired",
+			Message:   "Old 8-day expired log",
+		},
+	}, srv.logs...)
+	srv.logsMu.Unlock()
+
+	srv.purgeExpiredLogs()
+
+	srv.logsMu.RLock()
+	for _, entry := range srv.logs {
+		if strings.Contains(entry.Message, "Old 8-day expired") {
+			t.Errorf("Expired 8-day log was NOT purged!")
+		}
+	}
+	srv.logsMu.RUnlock()
+}
+
+func TestAdminRegistrationAndStatsBadge(t *testing.T) {
+	srv := NewServer()
+	ts := httptest.NewServer(http.HandlerFunc(srv.HandleWS))
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http")
+
+	hostWS, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("Failed to dial host: %v", err)
+	}
+	defer hostWS.Close()
+
+	var hostInit protocol.SignalingMessage
+	_ = hostWS.ReadJSON(&hostInit)
+
+	// Register with IsAdmin: true
+	_ = hostWS.WriteJSON(protocol.SignalingMessage{
+		Action:   protocol.ActionRegister,
+		ID:       "admin_pc_1",
+		Alias:    "CASAPC-Admin",
+		Password: "secretPassword",
+		IsAdmin:  true,
+		Monitors: 2,
+	})
+
+	var regResp protocol.SignalingMessage
+	if err := hostWS.ReadJSON(&regResp); err != nil {
+		t.Fatalf("Failed to read register response: %v", err)
+	}
+	if !regResp.IsAdmin {
+		t.Errorf("Expected IsAdmin: true in registration response, got false")
+	}
+
+	// Verify stats endpoint returns is_admin: true
+	req := httptest.NewRequest("GET", "/api/stats", nil)
+	req.Header.Set("X-Admin-Key", "remote2026")
+	w := httptest.NewRecorder()
+	srv.HandleStats(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200 from HandleStats, got %d", w.Code)
+	}
+
+	var statsResp struct {
+		Peers []struct {
+			ID      string `json:"id"`
+			Alias   string `json:"alias"`
+			IsAdmin bool   `json:"is_admin"`
+		} `json:"peers"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &statsResp); err != nil {
+		t.Fatalf("Failed to unmarshal stats response: %v", err)
+	}
+
+	found := false
+	for _, p := range statsResp.Peers {
+		if p.ID == "admin_pc_1" {
+			found = true
+			if !p.IsAdmin {
+				t.Errorf("Expected peer is_admin: true in /api/stats, got false")
+			}
+		}
+	}
+	if !found {
+		t.Errorf("Peer admin_pc_1 not found in /api/stats")
+	}
+}
+
+func TestStaticIconsAndFavicon(t *testing.T) {
+	srv := NewServer()
+
+	// 1. Favicon.ico
+	reqFav := httptest.NewRequest("GET", "/favicon.ico", nil)
+	wFav := httptest.NewRecorder()
+	srv.HandleDashboard(wFav, reqFav)
+	if wFav.Code != http.StatusOK {
+		t.Errorf("Expected 200 OK for /favicon.ico, got %d", wFav.Code)
+	}
+	if ct := wFav.Header().Get("Content-Type"); ct != "image/x-icon" {
+		t.Errorf("Expected Content-Type: image/x-icon, got %s", ct)
+	}
+	if wFav.Body.Len() == 0 {
+		t.Errorf("Expected non-empty favicon body")
+	}
+
+	// 2. Icon.png
+	reqIcon := httptest.NewRequest("GET", "/icon.png", nil)
+	wIcon := httptest.NewRecorder()
+	srv.HandleDashboard(wIcon, reqIcon)
+	if wIcon.Code != http.StatusOK {
+		t.Errorf("Expected 200 OK for /icon.png, got %d", wIcon.Code)
+	}
+	if ct := wIcon.Header().Get("Content-Type"); ct != "image/png" {
+		t.Errorf("Expected Content-Type: image/png, got %s", ct)
+	}
+	if wIcon.Body.Len() == 0 {
+		t.Errorf("Expected non-empty icon body")
+	}
+
+	// 3. Icon_32.png
+	reqIcon32 := httptest.NewRequest("GET", "/icon_32.png", nil)
+	wIcon32 := httptest.NewRecorder()
+	srv.HandleDashboard(wIcon32, reqIcon32)
+	if wIcon32.Code != http.StatusOK {
+		t.Errorf("Expected 200 OK for /icon_32.png, got %d", wIcon32.Code)
+	}
+	if ct := wIcon32.Header().Get("Content-Type"); ct != "image/png" {
+		t.Errorf("Expected Content-Type: image/png, got %s", ct)
+	}
+	if wIcon32.Body.Len() == 0 {
+		t.Errorf("Expected non-empty icon_32 body")
 	}
 }

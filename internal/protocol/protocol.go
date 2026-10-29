@@ -8,35 +8,47 @@ import (
 
 // Signaling Action Types
 const (
-	ActionRegister   = "register"
-	ActionUnregister = "unregister"
-	ActionConnect    = "connect"
-	ActionOffer      = "offer"
-	ActionAnswer     = "answer"
-	ActionCandidate  = "candidate"
-	ActionData       = "data"
-	ActionStatus     = "status"
-	ActionError      = "error"
-	ActionClose      = "close"
+	ActionRegister        = "register"
+	ActionUnregister      = "unregister"
+	ActionConnect         = "connect"
+	ActionOffer           = "offer"
+	ActionAnswer          = "answer"
+	ActionCandidate       = "candidate"
+	ActionData            = "data"
+	ActionStatus          = "status"
+	ActionError           = "error"
+	ActionClose           = "close"
+	ActionIncomingRequest = "incoming_request"
+	ActionAccept          = "accept"
+	ActionReject          = "reject"
 )
+
+// SessionPermissions defines features permitted by the host during interactive attended sessions
+type SessionPermissions struct {
+	AllowInput bool `json:"allow_input"`
+	AllowFiles bool `json:"allow_files"`
+	AllowAudio bool `json:"allow_audio"`
+}
 
 // SignalingMessage represents a packet routed by the signaling relay server
 type SignalingMessage struct {
-	Action    string          `json:"action"`
-	ID        string          `json:"id,omitempty"`
-	Alias     string          `json:"alias,omitempty"`
-	Monitors  int             `json:"monitors,omitempty"`
-	MAC       string          `json:"mac,omitempty"`
-	IsAdmin   bool            `json:"is_admin,omitempty"`
-	TargetID  string          `json:"targetId,omitempty"`
-	HostID    string          `json:"host_id,omitempty"`
-	Password  string          `json:"password,omitempty"`
-	SDP       string          `json:"sdp,omitempty"`
-	Candidate json.RawMessage `json:"candidate,omitempty"`
-	Payload   string          `json:"payload,omitempty"` // For WebSocket Relay fallback
-	Status    string          `json:"status,omitempty"`
-	Message   string          `json:"message,omitempty"`
-	Blocked   bool            `json:"blocked,omitempty"`
+	Action      string              `json:"action"`
+	ID          string              `json:"id,omitempty"`
+	Alias       string              `json:"alias,omitempty"`
+	Monitors    int                 `json:"monitors,omitempty"`
+	MAC         string              `json:"mac,omitempty"`
+	IsAdmin     bool                `json:"is_admin,omitempty"`
+	TargetID    string              `json:"targetId,omitempty"`
+	HostID      string              `json:"host_id,omitempty"`
+	Password    string              `json:"password,omitempty"`
+	SDP         string              `json:"sdp,omitempty"`
+	Candidate   json.RawMessage     `json:"candidate,omitempty"`
+	Payload     string              `json:"payload,omitempty"` // For WebSocket Relay fallback
+	Status      string              `json:"status,omitempty"`
+	Message     string              `json:"message,omitempty"`
+	Blocked     bool                `json:"blocked,omitempty"`
+	ClientIP    string              `json:"client_ip,omitempty"`
+	Permissions *SessionPermissions `json:"permissions,omitempty"`
 }
 
 // Control Packet Types

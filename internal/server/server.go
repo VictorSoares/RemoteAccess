@@ -38,19 +38,28 @@ type ChatMessage struct {
 	Time   string `json:"time"`
 }
 
+type PendingIncomingRequest struct {
+	ClientID    string    `json:"client_id"`
+	ClientAlias string    `json:"client_alias"`
+	ClientIP    string    `json:"client_ip"`
+	ExpiresAt   time.Time `json:"expires_at"`
+}
+
 type LocalServer struct {
-	mu           sync.RWMutex
-	Config       *config.ConfigManager
-	Signaling    *signaling.Server
-	hostSession  *webrtcmod.HostSession
-	upgrader     websocket.Upgrader
-	cloudWS      *websocket.Conn
-	cloudWsMu    sync.Mutex
-	cloudStatus  string
-	stopCloud    chan struct{}
-	chatMsgs     []ChatMessage
-	chatMu       sync.Mutex
-	sessionToken string
+	mu             sync.RWMutex
+	Config         *config.ConfigManager
+	Signaling      *signaling.Server
+	hostSession    *webrtcmod.HostSession
+	upgrader       websocket.Upgrader
+	cloudWS        *websocket.Conn
+	cloudWsMu      sync.Mutex
+	cloudStatus    string
+	stopCloud      chan struct{}
+	chatMsgs       []ChatMessage
+	chatMu         sync.Mutex
+	sessionToken   string
+	pendingMu      sync.Mutex
+	pendingRequest *PendingIncomingRequest
 }
 
 func (s *LocalServer) writeCloudJSON(msg protocol.SignalingMessage) error {
@@ -180,6 +189,12 @@ func (s *LocalServer) Start(port int) error {
 	mux.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
 		s.Signaling.HandleDashboard(w, r)
 	})
+	mux.HandleFunc("/api/stats", s.Signaling.HandleStats)
+	mux.HandleFunc("/api/history", s.Signaling.HandleHistory)
+	mux.HandleFunc("/api/block", s.Signaling.HandleBlockPeer)
+	mux.HandleFunc("/api/kick", s.Signaling.HandleKick)
+	mux.HandleFunc("/api/wol", s.Signaling.HandleWoL)
+	mux.HandleFunc("/api/auth", s.Signaling.HandleAuth)
 
 	mux.HandleFunc("/api/host-info", s.handleHostInfo)
 	mux.HandleFunc("/api/set-alias", s.handleSetAlias)
@@ -190,6 +205,8 @@ func (s *LocalServer) Start(port int) error {
 	mux.HandleFunc("/api/logs", s.handleLogs)
 	mux.HandleFunc("/api/set-log-file", s.handleSetLogFile)
 	mux.HandleFunc("/api/session-status", s.handleSessionStatus)
+	mux.HandleFunc("/api/accept-connection", s.handleAcceptConnection)
+	mux.HandleFunc("/api/reject-connection", s.handleRejectConnection)
 	mux.HandleFunc("/api/host-toggle-control", s.handleHostToggleControl)
 	mux.HandleFunc("/api/kick-session", s.handleKickSession)
 	mux.HandleFunc("/api/chat-messages", s.handleGetChatMessages)
@@ -201,6 +218,15 @@ func (s *LocalServer) Start(port int) error {
 	mux.HandleFunc("/api/app-close", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		log.Println("[Janela] Janela fechada pelo usuário. O serviço continua ativo em segundo plano na bandeja do sistema.")
+	})
+	mux.HandleFunc("/api/app-terminate", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		log.Println("[Instâncias] Pedido de encerramento para takeover recebido. Finalizando instância com segurança...")
+		go func() {
+			time.Sleep(100 * time.Millisecond)
+			s.Shutdown()
+			os.Exit(0)
+		}()
 	})
 
 	mux.HandleFunc("/ws", s.handleWS)
@@ -292,6 +318,14 @@ func (s *LocalServer) handleSessionStatus(w http.ResponseWriter, r *http.Request
 	}
 	s.mu.Unlock()
 
+	s.pendingMu.Lock()
+	pr := s.pendingRequest
+	if pr != nil && time.Now().After(pr.ExpiresAt) {
+		s.pendingRequest = nil
+		pr = nil
+	}
+	s.pendingMu.Unlock()
+
 	w.Header().Set("Content-Type", "application/json")
 	if sess != nil && sess.IsActive() {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -301,11 +335,110 @@ func (s *LocalServer) handleSessionStatus(w http.ResponseWriter, r *http.Request
 			"duration":               int(time.Since(sess.ConnectedAt).Seconds()),
 			"remote_control_enabled": sess.IsRemoteInputAllowed(),
 		})
+	} else if pr != nil {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"active":              false,
+			"has_pending_request": true,
+			"pending_request": map[string]interface{}{
+				"client_id":    pr.ClientID,
+				"client_alias": pr.ClientAlias,
+				"client_ip":    pr.ClientIP,
+				"seconds_left": int(time.Until(pr.ExpiresAt).Seconds()),
+			},
+		})
 	} else {
 		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"active": false,
 		})
 	}
+}
+
+func (s *LocalServer) handleAcceptConnection(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.validateLocalRequest(r) {
+		http.Error(w, "Acesso não autorizado", http.StatusForbidden)
+		return
+	}
+
+	var req struct {
+		AllowInput bool `json:"allow_input"`
+		AllowFiles bool `json:"allow_files"`
+		AllowAudio bool `json:"allow_audio"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&req)
+
+	s.pendingMu.Lock()
+	pr := s.pendingRequest
+	s.pendingRequest = nil
+	s.pendingMu.Unlock()
+
+	if pr == nil || time.Now().After(pr.ExpiresAt) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "error",
+			"message": "Nenhum pedido de conexão pendente ou expirou.",
+		})
+		return
+	}
+
+	perms := &protocol.SessionPermissions{
+		AllowInput: req.AllowInput,
+		AllowFiles: req.AllowFiles,
+		AllowAudio: req.AllowAudio,
+	}
+
+	err := s.writeCloudJSON(protocol.SignalingMessage{
+		Action:      protocol.ActionAccept,
+		ID:          s.Config.Data.ID,
+		TargetID:    pr.ClientID,
+		Permissions: perms,
+	})
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":  "error",
+			"message": "Falha ao enviar resposta ao servidor de sinalização.",
+		})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "ok",
+	})
+}
+
+func (s *LocalServer) handleRejectConnection(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Método não permitido", http.StatusMethodNotAllowed)
+		return
+	}
+	if !s.validateLocalRequest(r) {
+		http.Error(w, "Acesso não autorizado", http.StatusForbidden)
+		return
+	}
+
+	s.pendingMu.Lock()
+	pr := s.pendingRequest
+	s.pendingRequest = nil
+	s.pendingMu.Unlock()
+
+	if pr != nil {
+		_ = s.writeCloudJSON(protocol.SignalingMessage{
+			Action:   protocol.ActionReject,
+			ID:       s.Config.Data.ID,
+			TargetID: pr.ClientID,
+			Message:  "Conexão recusada pelo usuário remoto.",
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "ok",
+	})
 }
 
 func (s *LocalServer) handleHostToggleControl(w http.ResponseWriter, r *http.Request) {
@@ -422,9 +555,16 @@ func (s *LocalServer) handleElevate(w http.ResponseWriter, r *http.Request) {
 	})
 
 	go func() {
+		time.Sleep(200 * time.Millisecond)
+		log.Println("[Elevação] Solicitando autorização do usuário via UAC...")
+		err := config.ElevateSelf("")
+		if err != nil {
+			log.Printf("[Elevação] Elevação cancelada ou falhou: %v. Mantendo serviço ativo.", err)
+			return
+		}
+		log.Println("[Elevação] Processo elevado iniciado com sucesso! Transferindo controle...")
 		time.Sleep(300 * time.Millisecond)
 		s.Shutdown()
-		_ = config.ElevateSelf("")
 		os.Exit(0)
 	}()
 }
@@ -463,6 +603,10 @@ func (s *LocalServer) handleInstall(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *LocalServer) handleLogs(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("page") != "" || r.Header.Get("X-Admin-Key") != "" {
+		s.Signaling.HandleLogs(w, r)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	logs := logger.GetLogs()
 	_ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -770,7 +914,41 @@ func (s *LocalServer) cloudSignalingLoop() {
 
 func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.SignalingMessage) {
 	switch msg.Action {
+	case protocol.ActionIncomingRequest:
+		senderID := msg.ID
+		if senderID == "" {
+			senderID = msg.TargetID
+		}
+		senderAlias := msg.Alias
+		if senderAlias == "" {
+			senderAlias = "Operador Remoto"
+		}
+		log.Printf("[Host] Solicitação de conexão recebida de %s (%s, IP: %s)", senderAlias, senderID, msg.ClientIP)
+
+		s.pendingMu.Lock()
+		s.pendingRequest = &PendingIncomingRequest{
+			ClientID:    senderID,
+			ClientAlias: senderAlias,
+			ClientIP:    msg.ClientIP,
+			ExpiresAt:   time.Now().Add(45 * time.Second),
+		}
+		s.pendingMu.Unlock()
+
+		go func() {
+			tray.ShowBalloonNotification(
+				"RemoteAccess — Pedido de Conexão",
+				fmt.Sprintf("%s (%s) deseja conectar ao seu computador.", senderAlias, senderID),
+			)
+			input.BringAppToFront()
+			input.FlashAppWindow()
+			input.PlayNotificationSound()
+		}()
+
 	case protocol.ActionConnect, protocol.ActionOffer:
+		s.pendingMu.Lock()
+		s.pendingRequest = nil
+		s.pendingMu.Unlock()
+
 		senderID := msg.ID
 		if senderID == "" {
 			senderID = msg.TargetID
@@ -796,6 +974,10 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 				s.mu.Unlock()
 				log.Printf("[Conexão] Erro ao criar sessão host: %v", err)
 				return
+			}
+
+			if msg.Permissions != nil {
+				sess.SetAllowRemoteInput(msg.Permissions.AllowInput)
 			}
 
 			sess.OnChat = func(sender string, text string) {
@@ -867,6 +1049,11 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 		}
 
 	case protocol.ActionClose:
+		s.pendingMu.Lock()
+		if s.pendingRequest != nil && s.pendingRequest.ClientID == msg.ID {
+			s.pendingRequest = nil
+		}
+		s.pendingMu.Unlock()
 		log.Printf("[Conexão] Sessão remota encerrada via sinalização")
 		s.mu.Lock()
 		sess := s.hostSession
@@ -912,8 +1099,10 @@ func (s *LocalServer) Shutdown() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.cloudWsMu.Lock()
 	if s.cloudWS != nil {
 		log.Printf("[RemoteAccess] Notificando servidor Cloud que o Host %s foi encerrado...", s.Config.Data.ID)
+		_ = s.cloudWS.SetWriteDeadline(time.Now().Add(300 * time.Millisecond))
 		_ = s.cloudWS.WriteJSON(protocol.SignalingMessage{
 			Action: protocol.ActionUnregister,
 			ID:     s.Config.Data.ID,
@@ -922,6 +1111,7 @@ func (s *LocalServer) Shutdown() {
 		_ = s.cloudWS.Close()
 		s.cloudWS = nil
 	}
+	s.cloudWsMu.Unlock()
 
 	if s.hostSession != nil {
 		s.hostSession.Close()

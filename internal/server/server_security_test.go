@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"remoteaccess/internal/config"
 )
@@ -135,4 +136,66 @@ func TestLocalCheckOrigin(t *testing.T) {
 	if srv.upgrader.CheckOrigin(req) {
 		t.Errorf("Expected external origin evil-attacker.com to be REJECTED")
 	}
+}
+
+func TestInteractiveConnectionAcceptance(t *testing.T) {
+	srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	// 1. Initial state: no pending requests
+	req := httptest.NewRequest("GET", "/api/session-status", nil)
+	w := httptest.NewRecorder()
+	srv.handleSessionStatus(w, req)
+	var status map[string]interface{}
+	_ = json.NewDecoder(w.Body).Decode(&status)
+	if status["active"] != false || status["has_pending_request"] == true {
+		t.Fatalf("Expected no active session and no pending request")
+	}
+
+	// 2. Simulate incoming request from signaling
+	srv.pendingMu.Lock()
+	srv.pendingRequest = &PendingIncomingRequest{
+		ClientID:    "c_12345",
+		ClientAlias: "Suporte Técnico",
+		ClientIP:    "192.168.1.100",
+		ExpiresAt:   time.Now().Add(45 * time.Second),
+	}
+	srv.pendingMu.Unlock()
+
+	// 3. Polling /api/session-status should now reflect has_pending_request
+	req = httptest.NewRequest("GET", "/api/session-status", nil)
+	w = httptest.NewRecorder()
+	srv.handleSessionStatus(w, req)
+	var pendingStatus map[string]interface{}
+	_ = json.NewDecoder(w.Body).Decode(&pendingStatus)
+	if pendingStatus["has_pending_request"] != true {
+		t.Fatalf("Expected has_pending_request to be true")
+	}
+	prData, ok := pendingStatus["pending_request"].(map[string]interface{})
+	if !ok || prData["client_id"] != "c_12345" || prData["client_alias"] != "Suporte Técnico" {
+		t.Fatalf("Expected pending_request details for c_12345, got %v", pendingStatus)
+	}
+
+	// 4. Rejecting connection without token should fail (403)
+	rejReq := httptest.NewRequest("POST", "/api/reject-connection", nil)
+	w = httptest.NewRecorder()
+	srv.handleRejectConnection(w, rejReq)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("Expected 403 Forbidden without CSRF token")
+	}
+
+	// 5. Rejecting with valid token should succeed and clear pending request
+	rejReq = httptest.NewRequest("POST", "/api/reject-connection", nil)
+	rejReq.Header.Set("X-Local-Token", srv.sessionToken)
+	w = httptest.NewRecorder()
+	srv.handleRejectConnection(w, rejReq)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK on reject")
+	}
+
+	srv.pendingMu.Lock()
+	if srv.pendingRequest != nil {
+		t.Fatalf("Expected pendingRequest to be cleared after rejection")
+	}
+	srv.pendingMu.Unlock()
 }
