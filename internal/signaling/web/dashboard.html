@@ -1598,7 +1598,22 @@
       const existing = list.find(x => x.id === id);
       const finalAlias = alias || (existing ? existing.alias : '');
       const finalPwd = password || (existing ? existing.password : '');
-      list = [{ id: id, password: finalPwd, alias: finalAlias, lastSeen: Date.now() }, ...list.filter(x => x.id !== id)].slice(0, 10);
+      const isPinned = existing ? !!existing.pinned : false;
+      list = [{ id: id, password: finalPwd, alias: finalAlias, pinned: isPinned, lastSeen: Date.now() }, ...list.filter(x => x.id !== id)].slice(0, 15);
+      // Ordena garantindo que favoritos fiquem no topo
+      list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+      try {
+        localStorage.setItem('ra_dashboard_recent_hosts', JSON.stringify(list));
+      } catch(e) {}
+      renderDashboardRecent();
+    }
+
+    function toggleDashboardRecentPin(id) {
+      let list = loadDashboardRecentHosts();
+      const item = list.find(x => x.id === id);
+      if (!item) return;
+      item.pinned = !item.pinned;
+      list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
       try {
         localStorage.setItem('ra_dashboard_recent_hosts', JSON.stringify(list));
       } catch(e) {}
@@ -1639,17 +1654,23 @@
       grid.innerHTML = '';
       list.forEach(item => {
         const card = document.createElement('div');
-        card.style.cssText = 'background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); border-radius: 10px; padding: 0.75rem 0.9rem; display: flex; flex-direction: column; gap: 0.4rem; transition: all 0.15s ease;';
-        card.onmouseenter = () => { card.style.borderColor = 'rgba(56, 189, 248, 0.4)'; card.style.background = 'rgba(56, 189, 248, 0.05)'; };
-        card.onmouseleave = () => { card.style.borderColor = 'var(--border)'; card.style.background = 'rgba(255, 255, 255, 0.03)'; };
+        const isFav = !!item.pinned;
+        const borderStyle = isFav ? '1px solid rgba(245, 158, 11, 0.45)' : '1px solid var(--border)';
+        const bgStyle = isFav ? 'linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)' : 'rgba(255, 255, 255, 0.03)';
+        card.style.cssText = `background: ${bgStyle}; border: ${borderStyle}; border-radius: 10px; padding: 0.75rem 0.9rem; display: flex; flex-direction: column; gap: 0.4rem; transition: all 0.15s ease;`;
+        card.onmouseenter = () => { card.style.borderColor = isFav ? '#f59e0b' : 'rgba(56, 189, 248, 0.4)'; card.style.background = isFav ? 'rgba(245, 158, 11, 0.12)' : 'rgba(56, 189, 248, 0.05)'; };
+        card.onmouseleave = () => { card.style.borderColor = borderStyle; card.style.background = bgStyle; };
 
         const displayName = item.alias || 'Computador Remoto';
         const formattedId = formatID(item.id);
+        const pinIcon = isFav ? '⭐' : '☆';
+        const pinTitle = isFav ? 'Desafixar dos Favoritos' : 'Fixar nos Favoritos';
 
         card.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: center;">
             <span style="font-weight: 700; font-size: 0.88rem; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${displayName}">💻 ${displayName}</span>
             <div style="display: flex; gap: 4px;">
+              <button onclick="toggleDashboardRecentPin('${item.id}')" title="${pinTitle}" class="btn-pwd-icon" style="font-size: 0.76rem; color: ${isFav ? '#f59e0b' : '#94a3b8'};">${pinIcon}</button>
               <button onclick="editDashboardRecentAlias('${item.id}')" title="Alterar Apelido" class="btn-pwd-icon" style="font-size: 0.72rem;">✏️</button>
               <button onclick="removeDashboardRecentHost('${item.id}')" title="Remover dos Recentes" class="btn-pwd-icon" style="font-size: 0.72rem; color: #f87171;">✕</button>
             </div>
@@ -2266,14 +2287,23 @@
     function updateViewerLatency(rtt) {
       const latEl = document.getElementById('web-stat-lat');
       if (!latEl) return;
-      latEl.innerText = '⚡ ' + rtt + ' ms';
+      let badge = '🟢';
+      let title = 'Qualidade Excelente';
       if (rtt < 50) {
         latEl.style.color = '#4ade80';
-      } else if (rtt <= 150) {
+        badge = '🟢';
+        title = 'Qualidade Excelente (< 50ms)';
+      } else if (rtt <= 120) {
         latEl.style.color = '#fbbf24';
+        badge = '🟡';
+        title = 'Qualidade Moderada (50-120ms)';
       } else {
         latEl.style.color = '#f87171';
+        badge = '🔴';
+        title = 'Conexão Lenta (> 120ms)';
       }
+      latEl.innerText = `${badge} ${rtt} ms`;
+      latEl.title = title;
     }
 
     // User Activity Tracking & Inactivity Timeout Watchdog (2 Minutes)

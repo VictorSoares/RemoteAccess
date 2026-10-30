@@ -1826,14 +1826,23 @@ function sendControl(ctrlObj) {
 function updateAppLatency(rtt) {
   const latEl = document.getElementById('stat-latency');
   if (!latEl) return;
-  latEl.innerText = `⚡ ${rtt} ms`;
+  let badge = '🟢';
+  let title = 'Qualidade Excelente';
   if (rtt < 50) {
     latEl.style.color = '#4ade80';
-  } else if (rtt <= 150) {
+    badge = '🟢';
+    title = 'Qualidade Excelente (< 50ms)';
+  } else if (rtt <= 120) {
     latEl.style.color = '#fbbf24';
+    badge = '🟡';
+    title = 'Qualidade Moderada (50-120ms)';
   } else {
     latEl.style.color = '#f87171';
+    badge = '🔴';
+    title = 'Conexão Lenta (> 120ms)';
   }
+  latEl.innerText = `${badge} ${rtt} ms`;
+  latEl.title = title;
 }
 
 function startPingLoop() {
@@ -2303,7 +2312,7 @@ function sendSpecialKey(type) {
 // Saved Connections with Passwords and WoL (1-Click Reconnect & Wake-on-LAN)
 function loadRecentConnections() {
   const raw = localStorage.getItem('ra_saved_devices');
-  const list = raw ? JSON.parse(raw) : [];
+  let list = raw ? JSON.parse(raw) : [];
   const container = document.getElementById('recent-list');
 
   if (list.length === 0) {
@@ -2311,11 +2320,22 @@ function loadRecentConnections() {
     return;
   }
 
+  // Ordena garantindo favoritos no topo
+  list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+
   container.innerHTML = '';
   list.forEach((item, idx) => {
     const chip = document.createElement('div');
     chip.className = 'recent-chip';
+    const isFav = !!item.pinned;
+    if (isFav) {
+      chip.style.borderColor = 'rgba(245, 158, 11, 0.45)';
+      chip.style.background = 'linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, rgba(255, 255, 255, 0.03) 100%)';
+    }
+
     const label = item.alias ? `${item.alias} (${formatID(item.id)})` : formatID(item.id);
+    const pinIcon = isFav ? '⭐' : '☆';
+    const pinTitle = isFav ? 'Desafixar dos Favoritos' : 'Fixar nos Favoritos';
     
     let wolHtml = '';
     if (item.mac) {
@@ -2326,12 +2346,43 @@ function loadRecentConnections() {
 
     chip.innerHTML = `
       <div style="display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">
+        <span onclick="event.stopPropagation(); toggleRecentPin(${idx})" title="${pinTitle}" style="cursor: pointer; font-size: 0.85rem; color: ${isFav ? '#f59e0b' : '#94a3b8'};">${pinIcon}</span>
         <span>💻 <strong>${label}</strong></span>
         ${wolHtml}
         <span class="btn-connect-chip" style="font-size: 0.75rem; background: rgba(59,130,246,0.3); padding: 0.2rem 0.5rem; border-radius: 6px; cursor: pointer; font-weight: 700; color: #93c5fd;">🚀 Conectar</span>
         <span class="btn-remove-recent" title="Remover dos Recentes" style="margin-left: 0.3rem; opacity: 0.6; cursor: pointer; padding: 0.1rem 0.3rem;">✕</span>
       </div>
     `;
+    
+    chip.querySelector('.btn-connect-chip').onclick = (e) => {
+      e.stopPropagation();
+      document.getElementById('target-id').value = formatID(item.id);
+      document.getElementById('target-pwd').value = item.password || '';
+      connectToRemote();
+    };
+
+    chip.querySelector('.btn-remove-recent').onclick = (e) => {
+      e.stopPropagation();
+      removeRecentConnection(idx);
+    };
+
+    chip.onclick = () => {
+      document.getElementById('target-id').value = formatID(item.id);
+      document.getElementById('target-pwd').value = item.password || '';
+      connectToRemote();
+    };
+    container.appendChild(chip);
+  });
+}
+
+function toggleRecentPin(idx) {
+  let list = JSON.parse(localStorage.getItem('ra_saved_devices') || '[]');
+  if (!list[idx]) return;
+  list[idx].pinned = !list[idx].pinned;
+  list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+  localStorage.setItem('ra_saved_devices', JSON.stringify(list));
+  loadRecentConnections();
+}
     
     chip.querySelector('.btn-connect-chip').onclick = (e) => {
       e.stopPropagation();
