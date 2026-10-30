@@ -944,11 +944,7 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 			input.PlayNotificationSound()
 		}()
 
-	case protocol.ActionConnect, protocol.ActionOffer:
-		s.pendingMu.Lock()
-		s.pendingRequest = nil
-		s.pendingMu.Unlock()
-
+	case protocol.ActionConnect:
 		senderID := msg.ID
 		if senderID == "" {
 			senderID = msg.TargetID
@@ -957,7 +953,24 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 		if senderAlias == "" {
 			senderAlias = "Controlador"
 		}
-		log.Printf("[Conexão] Cliente remoto conectado: %s (%s) (iniciando captura de tela)", senderAlias, senderID)
+
+		// Validação local adicional de segurança (Defense-in-Depth):
+		// O Host só aceita ActionConnect se a senha local coincidir (acesso desassistido) OU
+		// se houver concessão explícita de permissões concedida pelo usuário na tela (acesso assistido)
+		if s.Config.Data.Password != "" {
+			hasValidPwd := msg.Password != "" && subtle.ConstantTimeCompare([]byte(s.Config.Data.Password), []byte(msg.Password)) == 1
+			hasExplicitApproval := msg.Permissions != nil
+			if !hasValidPwd && !hasExplicitApproval {
+				log.Printf("[Segurança] ActionConnect rejeitado para cliente %s: senha local não coincide e não houve aprovação na tela.", senderID)
+				return
+			}
+		}
+
+		s.pendingMu.Lock()
+		s.pendingRequest = nil
+		s.pendingMu.Unlock()
+
+		log.Printf("[Conexão] Cliente remoto autorizado: %s (%s) (iniciando sessão host)", senderAlias, senderID)
 
 		s.mu.Lock()
 		sess := s.hostSession
@@ -1025,6 +1038,25 @@ func (s *LocalServer) handleSignalingMessage(conn *websocket.Conn, msg protocol.
 			sess.ClientAlias = msg.Alias
 		}
 		s.mu.Unlock()
+
+		if msg.SDP != "" {
+			_ = sess.HandleRemoteOffer(senderID, msg.SDP)
+		}
+
+	case protocol.ActionOffer:
+		senderID := msg.ID
+		if senderID == "" {
+			senderID = msg.TargetID
+		}
+
+		s.mu.RLock()
+		sess := s.hostSession
+		s.mu.RUnlock()
+
+		if sess == nil || (sess.ClientID != senderID) {
+			log.Printf("[Segurança] ActionOffer descartado: nenhuma sessão autorizada ativa para o cliente %s", senderID)
+			return
+		}
 
 		if msg.SDP != "" {
 			_ = sess.HandleRemoteOffer(senderID, msg.SDP)

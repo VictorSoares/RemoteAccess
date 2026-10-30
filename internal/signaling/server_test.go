@@ -427,16 +427,32 @@ func TestMasterKeyCannotAccessHostWithoutHostPassword(t *testing.T) {
 		Password: "remote2026", // Master key should NOT bypass host password!
 	})
 
-	// Client must NOT get auth_ok! It must enter pending_approval
+	// Client must NOT get auth_ok! It must be immediately rejected with ActionError (Senha incorreta)
 	var clientResp protocol.SignalingMessage
 	if err := clientWS.ReadJSON(&clientResp); err != nil {
 		t.Fatalf("Failed to read client response: %v", err)
 	}
 	if clientResp.Action == protocol.ActionStatus && clientResp.Status == "auth_ok" {
-		t.Fatalf("SECURITY VIOLATION: Master key 'remote2026' was accepted for host access! Expected pending_approval.")
+		t.Fatalf("SECURITY VIOLATION: Master key 'remote2026' was accepted for host access!")
 	}
-	if clientResp.Status != "pending_approval" {
-		t.Fatalf("Expected pending_approval, got status=%s", clientResp.Status)
+	if clientResp.Action != protocol.ActionError || !strings.Contains(clientResp.Message, "Senha incorreta") {
+		t.Fatalf("Expected ActionError with 'Senha incorreta', got action=%s msg=%s", clientResp.Action, clientResp.Message)
+	}
+
+	// 3. Client attempts to send ActionOffer directly without authorization -> must be blocked
+	_ = clientWS.WriteJSON(protocol.SignalingMessage{
+		Action:   protocol.ActionOffer,
+		ID:       clientInit.ID,
+		TargetID: "my_pc_100",
+		SDP:      "v=0\r\no=fake 123 123 IN IP4 127.0.0.1...",
+	})
+
+	var unauthResp protocol.SignalingMessage
+	if err := clientWS.ReadJSON(&unauthResp); err != nil {
+		t.Fatalf("Failed to read unauth response: %v", err)
+	}
+	if unauthResp.Action != protocol.ActionError || !strings.Contains(unauthResp.Message, "não autorizada") {
+		t.Fatalf("Expected ActionError for unauthorized ActionOffer, got action=%s msg=%s", unauthResp.Action, unauthResp.Message)
 	}
 }
 

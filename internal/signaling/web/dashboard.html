@@ -2588,6 +2588,24 @@
       if (vPingTimer) clearInterval(vPingTimer);
       viewerWS = new WebSocket(wsUrl);
 
+      async function sendWebRTCOffer() {
+        try {
+          if (!vPeerConnection) return;
+          const offer = await vPeerConnection.createOffer();
+          await vPeerConnection.setLocalDescription(offer);
+          if (viewerWS && viewerWS.readyState === WebSocket.OPEN) {
+            viewerWS.send(JSON.stringify({
+              action: 'offer',
+              id: sessionId,
+              targetId: targetId,
+              sdp: offer.sdp
+            }));
+          }
+        } catch (err) {
+          console.warn('WebRTC offer error in web dashboard:', err);
+        }
+      }
+
       viewerWS.onopen = async () => {
         viewerWS.send(JSON.stringify({
           action: 'connect',
@@ -2601,20 +2619,6 @@
         vPingTimer = setInterval(() => {
           sendViewerCtrl({ t: 'ping', ts: performance.now() });
         }, 1200);
-
-        try {
-          const offer = await vPeerConnection.createOffer();
-          await vPeerConnection.setLocalDescription(offer);
-          viewerWS.send(JSON.stringify({
-            action: 'offer',
-            id: sessionId,
-            targetId: targetId,
-            password: targetPwd,
-            sdp: offer.sdp
-          }));
-        } catch (err) {
-          console.warn('WebRTC offer error in web dashboard:', err);
-        }
       };
 
       viewerWS.onmessage = async (event) => {
@@ -2623,6 +2627,7 @@
           if (msg.action === 'status') {
             if (msg.status === 'auth_ok') {
               hideWebViewerPendingModal();
+              await sendWebRTCOffer();
             } else if (msg.status === 'pending_approval') {
               showWebViewerPendingModal(msg.alias || 'o computador remoto');
             }

@@ -1345,6 +1345,7 @@ function connectSignaling() {
             hidePendingApprovalModal();
             openViewer();
             startPingLoop();
+            await sendClientWebRTCOffer();
           } else if (msg.status === 'pending_approval') {
             showPendingApprovalModal(msg.alias || 'o computador remoto');
           }
@@ -1352,7 +1353,11 @@ function connectSignaling() {
 
         case 'error':
           hidePendingApprovalModal();
-          await showModalAlert('Erro na Conexão', msg.message || 'Falha ao conectar com o computador remoto.', '❌');
+          if (peerConnection) {
+            try { peerConnection.close(); } catch(e) {}
+            peerConnection = null;
+          }
+          await showModalAlert('Conexão Não Autorizada', msg.message || 'Falha ao conectar com o computador remoto.', '❌');
           resetConnectButton();
           break;
 
@@ -1562,7 +1567,10 @@ async function connectToRemote(e) {
       }));
     }
   };
+}
 
+async function sendClientWebRTCOffer() {
+  if (!peerConnection) return;
   try {
     const offer = await peerConnection.createOffer();
     await peerConnection.setLocalDescription(offer);
@@ -1571,13 +1579,12 @@ async function connectToRemote(e) {
       signalingWS.send(JSON.stringify({
         action: 'offer',
         id: currentClientSessionId,
-        targetId: rawTargetId,
-        password: targetPwd,
+        targetId: currentTargetId,
         sdp: offer.sdp
       }));
     }
   } catch (err) {
-    console.warn('WebRTC offer fallback to Relay:', err);
+    console.warn('WebRTC offer error:', err);
   }
 }
 

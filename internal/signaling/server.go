@@ -601,72 +601,79 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			isUnattended := false
 			if targetPeer.Password != "" && msg.Password != "" {
 				if subtle.ConstantTimeCompare([]byte(targetPeer.Password), []byte(msg.Password)) == 1 {
-					isUnattended = true
+					s.resetFailedAttempts(clientIP, msg.TargetID)
+
+					if msg.ID == "" {
+						msg.ID = peer.ID
+					}
+					if msg.Alias != "" {
+						peer.Alias = msg.Alias
+					}
+					peer.IsHost = false
+
+					peer.ActiveTargetID = msg.TargetID
+					targetPeer.ActiveTargetID = peer.ID
+
+					s.addLog("Sessão iniciada (acesso direto com senha): %s (%s) está controlando o Host %s (%s)", peer.Alias, peer.ID, targetPeer.Alias, msg.TargetID)
+
+					// Record in session history
+					s.addHistory(SessionRecord{
+						ID:          fmt.Sprintf("sess_%d", time.Now().UnixNano()),
+						StartedAt:   time.Now(),
+						HostID:      targetPeer.ID,
+						HostAlias:   targetPeer.Alias,
+						ClientID:    peer.ID,
+						ClientAlias: peer.Alias,
+						Status:      "active",
+					})
+
+					targetPeer.mu.Lock()
+					_ = targetPeer.Conn.WriteJSON(msg)
+					targetPeer.mu.Unlock()
+
+					_ = conn.WriteJSON(protocol.SignalingMessage{
+						Action:  protocol.ActionStatus,
+						Status:  "auth_ok",
+						Message: "Autenticado com sucesso! Conectando à tela remota...",
+						ID:      msg.TargetID,
+						Alias:   targetPeer.Alias,
+					})
+					continue
+				} else {
+					// Senha informada mas incorreta: Rejeição imediata e registro de rate-limit
+					s.recordFailedAttempt(clientIP, msg.TargetID)
+					s.addLog("Tentativa de acesso não autorizada: senha incorreta de %s (%s) para Host %s", peer.Alias, peer.ID, targetPeer.ID)
+					_ = conn.WriteJSON(protocol.SignalingMessage{
+						Action:  protocol.ActionError,
+						Message: "Senha incorreta. Acesso negado ao computador remoto.",
+						ID:      msg.TargetID,
+					})
+					continue
 				}
 			}
 
-			if isUnattended {
-				s.resetFailedAttempts(clientIP, msg.TargetID)
+			// Attended Access: Sem senha informada -> Requer aprovação explícita na tela do Host
+			if msg.ID == "" {
+				msg.ID = peer.ID
+			}
+			if msg.Alias != "" {
+				peer.Alias = msg.Alias
+			}
+			peer.IsHost = false
 
-				if msg.ID == "" {
-					msg.ID = peer.ID
-				}
-				if msg.Alias != "" {
-					peer.Alias = msg.Alias
-				}
-				peer.IsHost = false
-
-				peer.ActiveTargetID = msg.TargetID
-				targetPeer.ActiveTargetID = peer.ID
-
-				s.addLog("Sessão iniciada (acesso direto com senha): %s (%s) está controlando o Host %s (%s)", peer.Alias, peer.ID, targetPeer.Alias, msg.TargetID)
-
-				// Record in session history
-				s.addHistory(SessionRecord{
-					ID:          fmt.Sprintf("sess_%d", time.Now().UnixNano()),
-					StartedAt:   time.Now(),
-					HostID:      targetPeer.ID,
-					HostAlias:   targetPeer.Alias,
-					ClientID:    peer.ID,
-					ClientAlias: peer.Alias,
-					Status:      "active",
-				})
-
-				targetPeer.mu.Lock()
-				_ = targetPeer.Conn.WriteJSON(msg)
-				targetPeer.mu.Unlock()
-
-				_ = conn.WriteJSON(protocol.SignalingMessage{
-					Action:  protocol.ActionStatus,
-					Status:  "auth_ok",
-					Message: "Autenticado com sucesso! Conectando à tela remota...",
-					ID:      msg.TargetID,
-					Alias:   targetPeer.Alias,
-				})
-			} else {
-				// Attended Access: Sem senha ou senha divergente -> Requer aprovação explícita na tela do Host
-				if msg.ID == "" {
-					msg.ID = peer.ID
-				}
-				if msg.Alias != "" {
-					peer.Alias = msg.Alias
-				}
-				peer.IsHost = false
-
-				s.pendingMu.Lock()
-				s.pendingRequests[peer.ID] = &PendingRequest{
-					ClientID:    peer.ID,
-					ClientAlias: peer.Alias,
-					ClientIP:    clientIP,
-					TargetID:    msg.TargetID,
-					ClientConn:  conn,
-					RequestedAt: time.Now(),
-					OriginalMsg: msg,
-				}
-				s.pendingMu.Unlock()
+			s.pendingMu.Lock()
+			s.pendingRequests[peer.ID] = &PendingRequest{
+				ClientID:    peer.ID,
+				ClientAlias: peer.Alias,
+				ClientIP:    clientIP,
+				TargetID:    msg.TargetID,
+				ClientConn:  conn,
+				RequestedAt: time.Now(),
+				OriginalMsg: msg,
+			}
+			s.pendingMu.Unlock()
 
 				s.addLog("Solicitação de autorização pendente: %s (%s) pediu para acessar o Host %s (%s)", peer.Alias, peer.ID, targetPeer.Alias, msg.TargetID)
 
@@ -715,7 +722,6 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 						s.pendingMu.Unlock()
 					}
 				}(peer.ID, msg.TargetID)
-			}
 
 		case protocol.ActionAccept:
 			s.pendingMu.Lock()
@@ -828,6 +834,20 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 			s.mu.RUnlock()
 
 			if exists {
+				// Validação estrita de autorização: Oferta, Resposta, ICE Candidates e Dados
+				// só podem trafegar entre peers com sessão ativa e validada bilateralmente.
+				if msg.Action != protocol.ActionClose {
+					isAuthorized := (peer.ActiveTargetID == targetPeer.ID && targetPeer.ActiveTargetID == peer.ID)
+					if !isAuthorized {
+						s.addLog("Pacote %s bloqueado: Tentativa de comunicação sem autorização ativa entre %s e %s", msg.Action, peer.ID, targetPeer.ID)
+						_ = conn.WriteJSON(protocol.SignalingMessage{
+							Action:  protocol.ActionError,
+							Message: "Sessão não autorizada ou expirada.",
+							ID:      targetPeer.ID,
+						})
+						continue
+					}
+				}
 				if msg.ID == "" {
 					msg.ID = peer.ID
 				}
