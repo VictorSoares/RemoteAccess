@@ -15,6 +15,7 @@ import (
 	pion "github.com/pion/webrtc/v3"
 	"remoteaccess/internal/audio"
 	"remoteaccess/internal/capture"
+	"remoteaccess/internal/config"
 	fsmod "remoteaccess/internal/fs"
 	"remoteaccess/internal/input"
 	"remoteaccess/internal/protocol"
@@ -428,6 +429,17 @@ func (h *HostSession) HandleControlData(data []byte) {
 		case "curtain_off":
 			_ = input.EnablePrivacyScreen(false)
 			log.Printf("[Host] Modo Cortina (Privacy Screen) DESATIVADO pelo cliente (%s)", h.ClientID)
+		case "elevate", "request_admin":
+			if config.IsAdmin() {
+				log.Printf("[Host] Solicitação de elevação ignorada: processo já é Administrador")
+			} else {
+				log.Printf("[Host] Solicitação de elevação UAC recebida do operador (%s). Disparando UAC...", h.ClientID)
+				input.PlayNotificationSound()
+				go func() {
+					time.Sleep(300 * time.Millisecond)
+					_ = config.ElevateSelf("")
+				}()
+			}
 		case "reboot":
 			_ = input.RebootMachine()
 		case "shutdown":

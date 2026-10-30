@@ -28,7 +28,12 @@
     </div>
     
     <div class="header-actions">
-      <button class="header-btn" id="btn-elevate-header" onclick="handleElevateOrInstall()" title="Instalar / Executar como Administrador para permitir controle total de telas UAC e Gerenciador de Tarefas">
+      <button class="header-btn" id="btn-install-header" onclick="handleInstallSystem()" title="Instalar o RemoteAccess no sistema (Program Files) para iniciar com o Windows e permitir acesso total UAC">
+        <span class="btn-bullet">📥</span>
+        <span class="btn-label" id="btn-install-label">Instalar</span>
+      </button>
+
+      <button class="header-btn" id="btn-elevate-header" onclick="handleElevateOrInstall()" title="Executar como Administrador para permitir controle total de telas UAC e Gerenciador de Tarefas">
         <span class="btn-bullet">🛡️</span>
         <span class="btn-label" id="btn-elevate-label">Modo Admin</span>
       </button>
@@ -73,6 +78,18 @@
 
     <!-- HOST VIEW (Servidor / Permitir Controle) -->
     <section id="host-view" class="view-panel">
+      <!-- Installation Banner (AnyDesk Style, visible only when portable) -->
+      <div id="install-banner" class="install-banner" style="display: none;">
+        <div class="install-banner-content">
+          <span class="install-banner-icon">📥</span>
+          <div>
+            <div class="install-banner-title">Instalar RemoteAccess neste computador</div>
+            <div class="install-banner-desc">Instale em Arquivos de Programas para controle total de telas UAC, inicialização com o Windows e registro em Programas e Recursos.</div>
+          </div>
+        </div>
+        <button class="btn-install-action" onclick="handleInstallSystem()">Instalar no Sistema</button>
+      </div>
+
       <!-- Incoming Connection Request Alert (Interactive Acceptance) -->
       <div id="incoming-request-box" class="incoming-request-card" style="display: none;">
         <div class="incoming-request-header">
@@ -397,6 +414,7 @@
         <div class="dock-select-wrap" title="Ações de Energia e Sistema">
           <select id="viewer-power-select" class="dock-select" onchange="handlePowerDropdown(this.value)">
             <option value="" disabled selected>⚡ Energia</option>
+            <option value="elevate">🛡️ Solicitar Modo Admin (UAC)</option>
             <option value="lock">🔒 Bloquear PC (Win+L)</option>
             <option value="reboot">🔄 Reiniciar PC</option>
             <option value="suspend">🌙 Suspender / Repouso</option>

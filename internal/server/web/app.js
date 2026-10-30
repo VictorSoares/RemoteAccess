@@ -479,6 +479,26 @@ async function fetchHostInfo() {
       if (btnElevateLabel) btnElevateLabel.innerText = 'Modo Admin';
     }
 
+    // Process installation state (AnyDesk style)
+    const installBanner = document.getElementById('install-banner');
+    const btnInstallHeader = document.getElementById('btn-install-header');
+    const btnInstallLabel = document.getElementById('btn-install-label');
+    if (data.is_installed) {
+      if (installBanner) installBanner.style.display = 'none';
+      if (btnInstallLabel) btnInstallLabel.innerText = 'Instalado';
+      if (btnInstallHeader) {
+        btnInstallHeader.title = 'RemoteAccess já está instalado em Arquivos de Programas';
+        btnInstallHeader.style.opacity = '0.7';
+      }
+    } else {
+      if (installBanner) installBanner.style.display = 'flex';
+      if (btnInstallLabel) btnInstallLabel.innerText = 'Instalar';
+      if (btnInstallHeader) {
+        btnInstallHeader.title = 'Instalar o RemoteAccess no sistema (Program Files)';
+        btnInstallHeader.style.opacity = '1';
+      }
+    }
+
     document.getElementById('autostart-toggle').checked = !!data.auto_start;
     const saveLogEl = document.getElementById('savelog-toggle');
     if (saveLogEl) saveLogEl.checked = !!data.save_log_file;
@@ -486,6 +506,33 @@ async function fetchHostInfo() {
     updateNetworkBadge(data.cloud_status, data.signaling_url);
   } catch (err) {
     console.error('Failed to fetch host info:', err);
+  }
+}
+
+async function handleInstallSystem() {
+  const confirmed = await showModalConfirm(
+    'Instalar RemoteAccess no Computador',
+    '📥 Deseja instalar o RemoteAccess permanentemente neste computador?\n\n' +
+    '• Será instalado em C:\\Program Files\\RemoteAccess\n' +
+    '• Ficará disponível no Painel de Controle (Programas e Recursos)\n' +
+    '• Terá privilégios totais para controle de telas de Administrador e UAC\n' +
+    '• Atalho oficial no Menu Iniciar e suporte a inicialização automática',
+    '📥',
+    'Instalar no Sistema',
+    'Cancelar'
+  );
+  if (confirmed) {
+    try {
+      const res = await fetch('/api/install', { method: 'POST' });
+      const data = await res.json();
+      if (data.status === 'ok') {
+        await showModalAlert('Instalação em Andamento', 'Confirme a janela do Controle de Conta de Usuário (UAC) na tela para concluir a instalação.', '🚀');
+      } else {
+        await showModalAlert('Erro', data.message || 'Falha ao instalar o RemoteAccess.', '❌');
+      }
+    } catch (e) {
+      await showModalAlert('Erro', 'Falha ao solicitar instalação no sistema.', '❌');
+    }
   }
 }
 
@@ -1107,7 +1154,9 @@ function handlePowerDropdown(action) {
   const select = document.getElementById('viewer-power-select');
   if (select) select.value = '';
   if (!action) return;
-  if (action === 'lock') {
+  if (action === 'elevate') {
+    sendPowerAction('elevate');
+  } else if (action === 'lock') {
     sendSystemAction('lock');
   } else if (action === 'reboot' || action === 'shutdown' || action === 'suspend') {
     sendPowerAction(action);
@@ -1116,6 +1165,14 @@ function handlePowerDropdown(action) {
 
 async function sendPowerAction(action) {
   if (!isConnected) return;
+  if (action === 'elevate') {
+    const confirmed = await showModalConfirm('Solicitar Modo Administrador', '🛡️ Deseja solicitar privilégios de Administrador ao usuário no computador remoto?\n\nUma confirmação do Controle de Conta de Usuário (UAC) será exibida na tela dele. Ao aceitar, o RemoteAccess reiniciará elevado permitindo controle total de todas as telas protegidas.', '🛡️', 'Solicitar Agora', 'Cancelar');
+    if (confirmed) {
+      sendSystemAction('elevate');
+      showToast('🛡️ Solicitação de Administrador transmitida ao host remoto.');
+    }
+    return;
+  }
   if (action === 'reboot') {
     const confirmed = await showModalConfirm('Reiniciar Computador Remoto', '⚠️ Deseja realmente REINICIAR o computador remoto?\n\nO sistema será reiniciado em 5 segundos e você poderá reconectar assim que ele inicializar.', '🔄', 'Reiniciar', 'Cancelar');
     if (confirmed) {

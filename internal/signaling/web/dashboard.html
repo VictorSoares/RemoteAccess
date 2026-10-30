@@ -1346,6 +1346,7 @@
       <div class="dock-select-wrap" title="Ações de Energia e Sistema">
         <select id="web-viewer-power-select" class="dock-select" onchange="handleWebViewerPowerDropdown(this.value)">
           <option value="" selected>⚡ Energia</option>
+          <option value="elevate">🛡️ Solicitar Modo Admin (UAC)</option>
           <option value="lock">🔒 Bloquear PC (Win+L)</option>
           <option value="reboot">🔄 Reiniciar PC</option>
           <option value="suspend">🌙 Suspender / Repouso</option>
@@ -3286,7 +3287,9 @@
       const select = document.getElementById('web-viewer-power-select');
       if (select) select.value = '';
       if (!action) return;
-      if (action === 'lock') {
+      if (action === 'elevate') {
+        sendViewerPower('elevate');
+      } else if (action === 'lock') {
         sendViewerSys('lock');
       } else if (action === 'reboot' || action === 'shutdown' || action === 'suspend') {
         sendViewerPower(action);
@@ -3295,6 +3298,14 @@
 
     async function sendViewerPower(action) {
       if (!viewerConnected) return;
+      if (action === 'elevate') {
+        const ok = await showModalConfirm('Solicitar Modo Administrador', '🛡️ Deseja solicitar privilégios de Administrador ao usuário no computador remoto?\n\nUma confirmação do Controle de Conta de Usuário (UAC) será exibida na tela dele. Ao aceitar, o RemoteAccess reiniciará elevado permitindo controle total de todas as telas protegidas.', '🛡️', 'Solicitar Agora', 'Cancelar');
+        if (ok) {
+          sendViewerSys('elevate');
+          showViewerToast('🛡️ Solicitação de Administrador transmitida ao host remoto.');
+        }
+        return;
+      }
       if (action === 'reboot') {
         const ok = await showModalConfirm('Reiniciar Computador', '⚠️ Deseja realmente REINICIAR este computador remoto?\n\nEle será reiniciado em 5 segundos e estará disponível para reconexão assim que inicializar.', '🔄', 'Reiniciar Agora', 'Cancelar');
         if (ok) {
