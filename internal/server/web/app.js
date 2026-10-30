@@ -2154,6 +2154,18 @@ function setupCanvasEvents() {
 }
 
 let pressedKeyCodes = new Set();
+async function requestAppKeyboardLock() {
+  if (navigator.keyboard && navigator.keyboard.lock) {
+    try {
+      await navigator.keyboard.lock();
+    } catch (_) {
+      try {
+        await navigator.keyboard.lock(['MetaLeft', 'MetaRight', 'AltLeft', 'AltRight', 'Tab', 'Escape', 'KeyD', 'KeyE', 'KeyR', 'F4']);
+      } catch (__) {}
+    }
+  }
+}
+
 function releaseAllViewerKeys() {
   if (pressedKeyCodes.size > 0) {
     for (const code of pressedKeyCodes) {
@@ -2169,6 +2181,12 @@ function setupKeyboardEvents() {
   window.addEventListener('blur', () => {
     if (isConnected) {
       releaseAllViewerKeys();
+    }
+  });
+
+  window.addEventListener('focus', () => {
+    if (isConnected) {
+      requestAppKeyboardLock();
     }
   });
 
@@ -2210,6 +2228,7 @@ function setupKeyboardEvents() {
     // Intercept Alt+F4 to prevent closing operator's desktop window
     if (e.altKey && (e.key === 'F4' || e.keyCode === 115)) {
       e.preventDefault();
+      e.stopPropagation();
       releaseAllViewerKeys();
       sendSystemAction('alt_f4');
       return;
@@ -2218,6 +2237,7 @@ function setupKeyboardEvents() {
     // Intercept Alt+Tab if captured
     if (e.altKey && (e.key === 'Tab' || e.keyCode === 9)) {
       e.preventDefault();
+      e.stopPropagation();
       releaseAllViewerKeys();
       sendSystemAction('alt_tab');
       return;
@@ -2226,6 +2246,7 @@ function setupKeyboardEvents() {
     // Intercept Win+D / Meta+D
     if ((e.metaKey || e.key === 'Meta') && (e.key === 'd' || e.key === 'D' || e.keyCode === 68)) {
       e.preventDefault();
+      e.stopPropagation();
       releaseAllViewerKeys();
       sendSystemAction('desktop');
       return;
@@ -2233,6 +2254,7 @@ function setupKeyboardEvents() {
 
     if (e.key === 'Meta' || e.code === 'MetaLeft' || e.code === 'MetaRight' || e.code === 'OSLeft' || e.code === 'OSRight') {
       e.preventDefault();
+      e.stopPropagation();
     }
 
     e.preventDefault();
@@ -2246,7 +2268,7 @@ function setupKeyboardEvents() {
       shift: e.shiftKey,
       meta: e.metaKey
     });
-  });
+  }, true);
 
   window.addEventListener('keyup', (e) => {
     if (!isConnected || isObserverMode || e.key === 'F12') return;
@@ -2256,6 +2278,7 @@ function setupKeyboardEvents() {
     }
     if (e.key === 'Meta' || e.code === 'MetaLeft' || e.code === 'MetaRight' || e.code === 'OSLeft' || e.code === 'OSRight') {
       e.preventDefault();
+      e.stopPropagation();
     }
     pressedKeyCodes.delete(e.code || e.key);
     e.preventDefault();
@@ -2269,7 +2292,7 @@ function setupKeyboardEvents() {
       shift: e.shiftKey,
       meta: e.metaKey
     });
-  });
+  }, true);
 }
 
 function sendSpecialKey(type) {

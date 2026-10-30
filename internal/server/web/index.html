@@ -369,6 +369,11 @@
           </select>
         </div>
 
+        <!-- Quick Actions: CAD, Win, Alt+Tab -->
+        <button class="dock-btn" onclick="sendSystemAction('cad')" title="Enviar Ctrl+Alt+Del para o computador remoto">⚡ <span class="dock-label">CAD</span></button>
+        <button class="dock-btn" onclick="sendSystemAction('win')" title="Pressionar Tecla Windows (Menu Iniciar Remoto)">🪟 <span class="dock-label">Iniciar</span></button>
+        <button class="dock-btn" onclick="sendSystemAction('alt_tab')" title="Alternar Janelas Remotas (Alt+Tab)">🔀 <span class="dock-label">Alt+Tab</span></button>
+
         <!-- Unified Shortcuts Dropdown -->
         <div class="dock-select-wrap" title="Atalhos do Sistema Remoto">
           <select id="viewer-shortcuts-select" class="dock-select" onchange="handleShortcutDropdown(this.value)">

@@ -75,6 +75,10 @@ var (
 	procSetTextColor             = gdi32.NewProc("SetTextColor")
 	procSetBkMode                = gdi32.NewProc("SetBkMode")
 
+	procOpenInputDesktop         = user32.NewProc("OpenInputDesktop")
+	procSetThreadDesktop         = user32.NewProc("SetThreadDesktop")
+	procCloseDesktop             = user32.NewProc("CloseDesktop")
+
 	activeBoundsMu sync.RWMutex
 	activeBounds   image.Rectangle
 
@@ -352,8 +356,19 @@ func OpenTaskManager() {
 	procShellExecute.Call(0, uintptr(unsafe.Pointer(verb)), uintptr(unsafe.Pointer(file)), 0, 0, 1)
 }
 
+// attachThreadToInputDesktop ensures the calling OS thread is attached to the active
+// interactive input desktop (handling elevated screens, Task Manager, UAC, and lock screens).
+func attachThreadToInputDesktop() {
+	hDesk, _, _ := procOpenInputDesktop.Call(0, 0, 0x10000000)
+	if hDesk != 0 {
+		procSetThreadDesktop.Call(hDesk)
+		procCloseDesktop.Call(hDesk)
+	}
+}
+
 // SendCtrlAltDel sends the Secure Attention Sequence (SAS) or launches Task Manager / Security options
 func SendCtrlAltDel() {
+	attachThreadToInputDesktop()
 	// 1. Attempt software SAS
 	if procSendSAS.Find() == nil {
 		ret, _, _ := procSendSAS.Call(0)
@@ -376,6 +391,7 @@ func SendCtrlAltDel() {
 
 // ShowDesktop minimizes or restores all windows cleanly (Win+D)
 func ShowDesktop() {
+	attachThreadToInputDesktop()
 	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey, remoteAccessMagicExtraInfo)
 	procKeybdEvent.Call(0x44, 0, 0, remoteAccessMagicExtraInfo) // 'D'
 	time.Sleep(35 * time.Millisecond)
@@ -385,6 +401,7 @@ func ShowDesktop() {
 
 // OpenStartMenu toggles the Windows Start menu (Win key)
 func OpenStartMenu() {
+	attachThreadToInputDesktop()
 	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey, remoteAccessMagicExtraInfo)
 	time.Sleep(35 * time.Millisecond)
 	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey|keyeventfKeyup, remoteAccessMagicExtraInfo)
@@ -392,6 +409,7 @@ func OpenStartMenu() {
 
 // OpenFileExplorer opens Windows File Explorer (Win+E)
 func OpenFileExplorer() {
+	attachThreadToInputDesktop()
 	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey, remoteAccessMagicExtraInfo)
 	procKeybdEvent.Call(0x45, 0, 0, remoteAccessMagicExtraInfo) // 'E'
 	time.Sleep(35 * time.Millisecond)
@@ -401,6 +419,7 @@ func OpenFileExplorer() {
 
 // OpenRunDialog opens the Windows Run dialog (Win+R)
 func OpenRunDialog() {
+	attachThreadToInputDesktop()
 	procKeybdEvent.Call(0x5B, 0, keyeventfExtendedkey, remoteAccessMagicExtraInfo)
 	procKeybdEvent.Call(0x52, 0, 0, remoteAccessMagicExtraInfo) // 'R'
 	time.Sleep(35 * time.Millisecond)
@@ -410,6 +429,7 @@ func OpenRunDialog() {
 
 // SendCtrlShortcut synthesizes Ctrl + specified Virtual Key combo cleanly
 func SendCtrlShortcut(vk uint16) {
+	attachThreadToInputDesktop()
 	procKeybdEvent.Call(0x11, 0, 0, remoteAccessMagicExtraInfo) // Ctrl down
 	procKeybdEvent.Call(uintptr(vk), 0, 0, remoteAccessMagicExtraInfo)
 	time.Sleep(35 * time.Millisecond)
@@ -419,6 +439,7 @@ func SendCtrlShortcut(vk uint16) {
 
 // CloseActiveWindow synthesizes Alt+F4 to gracefully close the active foreground window
 func CloseActiveWindow() {
+	attachThreadToInputDesktop()
 	procKeybdEvent.Call(0x12, 0, 0, remoteAccessMagicExtraInfo) // Alt down
 	procKeybdEvent.Call(0x73, 0, 0, remoteAccessMagicExtraInfo) // F4 down
 	time.Sleep(40 * time.Millisecond)
@@ -428,6 +449,7 @@ func CloseActiveWindow() {
 
 // SwitchWindowAltTab synthesizes Alt+Tab to cycle windows cleanly
 func SwitchWindowAltTab() {
+	attachThreadToInputDesktop()
 	procKeybdEvent.Call(0x12, 0, 0, remoteAccessMagicExtraInfo) // Alt down
 	procKeybdEvent.Call(0x09, 0, 0, remoteAccessMagicExtraInfo) // Tab down
 	time.Sleep(50 * time.Millisecond)
@@ -438,6 +460,7 @@ func SwitchWindowAltTab() {
 
 // MoveMouseAbsolute sets the cursor to an absolute ratio [0.0, 1.0] across the active screen monitor
 func MoveMouseAbsolute(ratioX, ratioY float64) error {
+	attachThreadToInputDesktop()
 	if ratioX < 0 {
 		ratioX = 0
 	} else if ratioX > 1 {
@@ -506,6 +529,7 @@ func MoveMouseAbsolute(ratioX, ratioY float64) error {
 
 // MouseDown triggers a mouse press (0: left, 1: middle, 2: right)
 func MouseDown(button int) error {
+	attachThreadToInputDesktop()
 	var flag uintptr
 	switch button {
 	case 0:
@@ -523,6 +547,7 @@ func MouseDown(button int) error {
 
 // MouseUp triggers a mouse release (0: left, 1: middle, 2: right)
 func MouseUp(button int) error {
+	attachThreadToInputDesktop()
 	var flag uintptr
 	switch button {
 	case 0:
@@ -540,6 +565,7 @@ func MouseUp(button int) error {
 
 // MouseWheel triggers a vertical scroll wheel action
 func MouseWheel(deltaY int) error {
+	attachThreadToInputDesktop()
 	var delta int32
 	if deltaY > 0 {
 		delta = 120
@@ -669,6 +695,7 @@ func isMetaKey(key, code string) bool {
 
 // KeyDownEx simulates key press with bidirectional modifier synchronization
 func KeyDownEx(key, code string, keyCode int, alt, ctrl, shift, meta bool) error {
+	attachThreadToInputDesktop()
 	// 1. Direct handling of standalone modifier keys
 	if isMetaKey(key, code) {
 		modifierStateMu.Lock()
@@ -773,6 +800,7 @@ func KeyDown(key, code string, keyCode int) error {
 
 // KeyUpEx simulates key release with modifier synchronization
 func KeyUpEx(key, code string, keyCode int, alt, ctrl, shift, meta bool) error {
+	attachThreadToInputDesktop()
 	// 1. Direct release of standalone modifier keys
 	if isMetaKey(key, code) {
 		modifierStateMu.Lock()

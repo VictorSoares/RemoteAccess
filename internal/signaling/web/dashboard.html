@@ -1318,13 +1318,17 @@
 
       <div class="dock-divider"></div>
 
-      <!-- Quick Action: Ctrl+Alt+Del -->
+      <!-- Quick Action: Ctrl+Alt+Del, Windows Menu, Alt+Tab -->
       <button class="btn-action" onclick="sendViewerSys('cad')" title="Enviar Ctrl+Alt+Del para o computador remoto"><span>⚡</span> <span class="dock-label">CAD</span></button>
+      <button class="btn-action" onclick="sendViewerSys('win')" title="Pressionar Tecla Windows (Menu Iniciar Remoto)"><span>🪟</span> <span class="dock-label">Iniciar</span></button>
+      <button class="btn-action" onclick="sendViewerSys('alt_tab')" title="Alternar Janelas Remotas (Alt+Tab)"><span>🔀</span> <span class="dock-label">Alt+Tab</span></button>
 
       <!-- Unified Shortcuts Dropdown -->
       <div class="dock-select-wrap" title="Atalhos do Sistema Remoto">
         <select id="web-viewer-shortcuts-select" class="dock-select" onchange="handleWebViewerShortcutDropdown(this.value)">
           <option value="" selected>⌨️ Atalhos</option>
+          <option value="win">🪟 Menu Iniciar (Win)</option>
+          <option value="alt_tab">🔀 Alternar Janelas (Alt+Tab)</option>
           <option value="taskmgr">📊 Gerenciador de Tarefas</option>
           <option value="desktop">🖥️ Mostrar Área de Trabalho (Win+D)</option>
           <option value="explorer">📂 Explorador de Arquivos (Win+E)</option>
@@ -1616,11 +1620,11 @@
       const label = document.getElementById('viewer-scale-label');
       if (isWebScale1to1) {
         if (container) container.classList.add('scale-1-1');
-        if (label) label.innerText = '🔍 1:1 (Original)';
+        if (label) label.innerText = '1:1 (Original)';
         showViewerToast('🔍 Escala 100% (Original) ativada com navegação livre.');
       } else {
         if (container) container.classList.remove('scale-1-1');
-        if (label) label.innerText = '🔍 Ajustar';
+        if (label) label.innerText = 'Ajustar';
         showViewerToast('🔍 Escala ajustada à janela.');
       }
     }
@@ -2287,8 +2291,13 @@
     async function requestKeyboardLock() {
       if (navigator.keyboard && navigator.keyboard.lock) {
         try {
-          await navigator.keyboard.lock(['MetaLeft', 'MetaRight', 'KeyD', 'KeyE', 'KeyR']);
-        } catch (_) {}
+          // Request lock for all system keys including Win (Meta) and Alt+Tab
+          await navigator.keyboard.lock();
+        } catch (_) {
+          try {
+            await navigator.keyboard.lock(['MetaLeft', 'MetaRight', 'AltLeft', 'AltRight', 'Tab', 'Escape', 'KeyD', 'KeyE', 'KeyR', 'F4']);
+          } catch (__) {}
+        }
       }
     }
 
@@ -2579,6 +2588,7 @@
       const viewerContainer = document.getElementById('web-viewer-container');
       if (viewerContainer) viewerContainer.style.display = 'flex';
       viewerConnected = true;
+      requestKeyboardLock();
       updateWebViewerMonitors(monitorsCount || 1);
       startViewerSessionTimers();
 
@@ -3117,7 +3127,7 @@
       const webViewerCont = document.getElementById('web-viewer-container');
       if (webViewerCont) webViewerCont.classList.remove('scale-1-1');
       const scaleLabel = document.getElementById('viewer-scale-label');
-      if (scaleLabel) scaleLabel.innerText = '🔍 Ajustar';
+      if (scaleLabel) scaleLabel.innerText = 'Ajustar';
 
       currentRemoteCursor = 'default';
       if (vCanvas) vCanvas.style.cursor = 'default';
@@ -3131,9 +3141,7 @@
       if (!document.fullscreenElement) {
         try {
           await container.requestFullscreen();
-          if (navigator.keyboard && navigator.keyboard.lock) {
-            await navigator.keyboard.lock(['AltLeft', 'AltRight', 'Tab', 'Escape', 'MetaLeft', 'MetaRight', 'KeyD', 'F4']);
-          }
+          await requestKeyboardLock();
         } catch(e) {}
       } else {
         if (navigator.keyboard && navigator.keyboard.unlock) {
@@ -3503,6 +3511,12 @@
       }
     });
 
+    window.addEventListener('focus', () => {
+      if (viewerConnected) {
+        requestKeyboardLock();
+      }
+    });
+
     // Emergency Escape Hotkey (Shift+Escape ou Ctrl+Shift+Q) para desconexão imediata e liberação do cursor local
     window.addEventListener('keydown', (e) => {
       if (viewerConnected && ((e.shiftKey && e.key === 'Escape') || (e.ctrlKey && e.shiftKey && (e.key === 'q' || e.key === 'Q' || e.code === 'KeyQ')))) {
@@ -3544,6 +3558,7 @@
       // Intercept Alt+Tab if captured by browser
       if (e.altKey && (e.key === 'Tab' || e.keyCode === 9)) {
         e.preventDefault();
+        e.stopPropagation();
         releaseAllWebViewerKeys();
         sendViewerSys('alt_tab');
         return;
@@ -3552,14 +3567,16 @@
       // Intercept Win+D / Meta+D if captured by browser
       if ((e.metaKey || e.key === 'Meta') && (e.key === 'd' || e.key === 'D' || e.keyCode === 68)) {
         e.preventDefault();
+        e.stopPropagation();
         releaseAllWebViewerKeys();
         sendViewerSys('desktop');
         return;
       }
 
-      // Prevent local browser default on Windows (Meta/OS) key
+      // Prevent local browser and OS default on Windows (Meta/OS) key
       if (e.key === 'Meta' || e.code === 'MetaLeft' || e.code === 'MetaRight' || e.code === 'OSLeft' || e.code === 'OSRight') {
         e.preventDefault();
+        e.stopPropagation();
       }
 
       e.preventDefault();
@@ -3573,7 +3590,7 @@
         shift: e.shiftKey,
         meta: e.metaKey
       });
-    });
+    }, true);
     window.addEventListener('keyup', (e) => {
       if (!viewerConnected || !viewerControlEnabled || e.key === 'F12') return;
       if (document.activeElement && (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'SELECT')) {
@@ -3584,6 +3601,7 @@
       }
       if (e.key === 'Meta' || e.code === 'MetaLeft' || e.code === 'MetaRight' || e.code === 'OSLeft' || e.code === 'OSRight') {
         e.preventDefault();
+        e.stopPropagation();
       }
       pressedWebKeyCodes.delete(e.code || e.key);
       e.preventDefault();
@@ -3597,7 +3615,7 @@
         shift: e.shiftKey,
         meta: e.metaKey
       });
-    });
+    }, true);
 
     // Reativação imediata ao focar na janela/aba (evita desconexão espúria por throttling de 60s do navegador)
     document.addEventListener('visibilitychange', () => {
