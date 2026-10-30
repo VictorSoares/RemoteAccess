@@ -77,36 +77,57 @@ const (
 	TypeCursor        = "cursor"
 	TypeCurtain       = "curtain"
 	TypeAutoLock      = "autolock"
+	TypeFSList        = "fs_list"
+	TypeFSListResp    = "fs_list_resp"
+	TypeFSDownload    = "fs_download"
+	TypeFSDelete      = "fs_delete"
+	TypeFSMkdir       = "fs_mkdir"
+	TypeFSDrives      = "fs_drives"
+	TypeFSOpResult    = "fs_op_result"
 )
 
-// ControlMessage represents mouse, keyboard, monitor, clipboard, chat or system action command
+// FSItem represents a single file or directory in the file manager
+type FSItem struct {
+	Name    string `json:"name"`
+	IsDir   bool   `json:"is_dir"`
+	Size    int64  `json:"size"`
+	ModTime int64  `json:"mod_time"`
+}
+
+// ControlMessage represents mouse, keyboard, monitor, clipboard, chat, file system or system action command
 type ControlMessage struct {
-	Type     string  `json:"t"`
-	X        float64 `json:"x,omitempty"`
-	Y        float64 `json:"y,omitempty"`
-	Button   int     `json:"b,omitempty"`
-	DeltaY   int     `json:"dy,omitempty"`
-	Key      string  `json:"k,omitempty"`
-	Code     string  `json:"c,omitempty"`
-	KeyCode  int     `json:"kc,omitempty"`
-	Text     string  `json:"text,omitempty"`
-	Command  string  `json:"cmd,omitempty"`
-	Block    bool    `json:"block,omitempty"`
-	Time     float64 `json:"ts,omitempty"`
-	Quality   int     `json:"q,omitempty"`
-	FPS       int     `json:"fps,omitempty"`
-	Monitor   int     `json:"mon,omitempty"`
-	ActiveMon int     `json:"active_mon,omitempty"`
-	Sender    string  `json:"sender,omitempty"`
-	Password string  `json:"pwd,omitempty"`
-	FileName string  `json:"file_name,omitempty"`
-	FileSize int64   `json:"file_size,omitempty"`
-	Chunk    string  `json:"chunk,omitempty"`
-	Seq      int     `json:"seq,omitempty"`
-	Alt      bool    `json:"alt,omitempty"`
-	Ctrl     bool    `json:"ctrl,omitempty"`
-	Shift    bool    `json:"shift,omitempty"`
-	Meta     bool    `json:"meta,omitempty"`
+	Type      string   `json:"t"`
+	X         float64  `json:"x,omitempty"`
+	Y         float64  `json:"y,omitempty"`
+	Button    int      `json:"b,omitempty"`
+	DeltaY    int      `json:"dy,omitempty"`
+	Key       string   `json:"k,omitempty"`
+	Code      string   `json:"c,omitempty"`
+	KeyCode   int      `json:"kc,omitempty"`
+	Text      string   `json:"text,omitempty"`
+	Command   string   `json:"cmd,omitempty"`
+	Block     bool     `json:"block,omitempty"`
+	Time      float64  `json:"ts,omitempty"`
+	Quality   int      `json:"q,omitempty"`
+	FPS       int      `json:"fps,omitempty"`
+	Monitor   int      `json:"mon,omitempty"`
+	ActiveMon int      `json:"active_mon,omitempty"`
+	Sender    string   `json:"sender,omitempty"`
+	Password  string   `json:"pwd,omitempty"`
+	FileName  string   `json:"file_name,omitempty"`
+	FileSize  int64    `json:"file_size,omitempty"`
+	DestDir   string   `json:"dest_dir,omitempty"`
+	Path      string   `json:"path,omitempty"`
+	Drives    []string `json:"drives,omitempty"`
+	Items     []FSItem `json:"items,omitempty"`
+	Status    string   `json:"status,omitempty"`
+	Chunk     string   `json:"chunk,omitempty"`
+	Seq       int      `json:"seq,omitempty"`
+	TotalSeqs int      `json:"total_seqs,omitempty"`
+	Alt       bool     `json:"alt,omitempty"`
+	Ctrl      bool     `json:"ctrl,omitempty"`
+	Shift     bool     `json:"shift,omitempty"`
+	Meta      bool     `json:"meta,omitempty"`
 }
 
 // EncodeVideoChunk prepends an 8-byte header [uint32 frameID, uint16 chunkIndex, uint16 totalChunks] to the chunk payload

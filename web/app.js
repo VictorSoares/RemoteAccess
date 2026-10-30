@@ -1623,6 +1623,14 @@ function setupDataChannels(targetId) {
       } else if (msg.t === 'close' || (msg.t === 'sys_cmd' && msg.cmd === 'close')) {
         closeViewer();
         showModalAlert('Sessão Encerrada', msg.text || 'A sessão remota foi encerrada pelo computador remoto.', 'ℹ️');
+      } else if (msg.t === 'fs_list_resp' || msg.t === 'fs_drives') {
+        handleFSListResponse(msg);
+      } else if (msg.t === 'file_start') {
+        handleIncomingFileStart(msg);
+      } else if (msg.t === 'file_chunk') {
+        handleIncomingFileChunk(msg);
+      } else if (msg.t === 'file_end') {
+        handleIncomingFileEnd(msg);
       }
     } catch (e) {}
   };
@@ -2383,27 +2391,6 @@ function toggleRecentPin(idx) {
   localStorage.setItem('ra_saved_devices', JSON.stringify(list));
   loadRecentConnections();
 }
-    
-    chip.querySelector('.btn-connect-chip').onclick = (e) => {
-      e.stopPropagation();
-      document.getElementById('target-id').value = formatID(item.id);
-      document.getElementById('target-pwd').value = item.password || '';
-      connectToRemote();
-    };
-
-    chip.querySelector('.btn-remove-recent').onclick = (e) => {
-      e.stopPropagation();
-      removeRecentConnection(idx);
-    };
-
-    chip.onclick = () => {
-      document.getElementById('target-id').value = formatID(item.id);
-      document.getElementById('target-pwd').value = item.password || '';
-      connectToRemote();
-    };
-    container.appendChild(chip);
-  });
-}
 
 async function triggerLocalWoL(mac, name) {
   if (!mac) return;
@@ -2442,12 +2429,33 @@ function removeRecentConnection(idx) {
   loadRecentConnections();
 }
 
+function isSavePasswordsEnabled() {
+  const pref = localStorage.getItem('ra_pref_save_passwords');
+  return pref === null ? true : pref === 'true';
+}
+
+function toggleSavePasswordsPreference(enabled) {
+  localStorage.setItem('ra_pref_save_passwords', enabled ? 'true' : 'false');
+  if (!enabled) {
+    // Limpa senhas já salvas dos dispositivos
+    let list = JSON.parse(localStorage.getItem('ra_saved_devices') || '[]');
+    list.forEach(item => { item.password = ''; });
+    localStorage.setItem('ra_saved_devices', JSON.stringify(list));
+    loadRecentConnections();
+  }
+}
+
 function saveRecentConnection(id, password, alias, mac) {
   let list = JSON.parse(localStorage.getItem('ra_saved_devices') || '[]');
   const existing = list.find((x) => x.id === id);
   const finalMac = mac || (existing ? existing.mac : '');
   const finalAlias = alias || (existing ? existing.alias : '');
-  list = [{ id: id, password: password, alias: finalAlias, mac: finalMac }, ...list.filter((x) => x.id !== id)].slice(0, 8);
+  const isPinned = existing ? !!existing.pinned : false;
+  const shouldSavePwd = isSavePasswordsEnabled();
+  const finalPassword = shouldSavePwd ? (password || (existing ? existing.password : '')) : '';
+
+  list = [{ id: id, password: finalPassword, alias: finalAlias, mac: finalMac, pinned: isPinned }, ...list.filter((x) => x.id !== id)].slice(0, 15);
+  list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
   localStorage.setItem('ra_saved_devices', JSON.stringify(list));
   loadRecentConnections();
 }
@@ -2625,6 +2633,306 @@ if (dockContentEl) {
       e.preventDefault();
     }
   }, { passive: false });
+}
+
+// Dual-Pane File Manager Engine (AnyDesk Style)
+let fmCurrentRemotePath = '';
+let fmRemoteSelectedFile = null;
+let fmIncomingDownloads = {}; // fileName -> { chunks, totalBytes, size }
+let isFileManagerOnlyMode = false;
+
+function openFileManagerModal() {
+  const modal = document.getElementById('file-manager-modal');
+  if (modal) modal.style.display = 'flex';
+  const targetBadge = document.getElementById('fm-target-badge');
+  if (targetBadge && currentTargetId) {
+    targetBadge.innerText = 'Host: ' + formatID(currentTargetId);
+  }
+  requestRemoteFSList('');
+}
+
+function closeFileManagerModal() {
+  const modal = document.getElementById('file-manager-modal');
+  if (modal) modal.style.display = 'none';
+  if (isFileManagerOnlyMode) {
+    closeViewer();
+  }
+}
+
+async function connectToFileManager() {
+  isFileManagerOnlyMode = true;
+  await connectToRemote();
+  setTimeout(() => {
+    openFileManagerModal();
+  }, 1000);
+}
+
+function requestRemoteFSList(path) {
+  sendControl({ t: 'fs_list', path: path || fmCurrentRemotePath });
+}
+
+function handleFSListResponse(msg) {
+  if (msg.drives && msg.drives.length > 0) {
+    const drivesSelect = document.getElementById('fm-remote-drives');
+    if (drivesSelect) {
+      drivesSelect.innerHTML = msg.drives.map(d => `<option value="${d}" ${msg.path && msg.path.startsWith(d) ? 'selected' : ''}>${d}</option>`).join('');
+    }
+  }
+
+  if (msg.path) {
+    fmCurrentRemotePath = msg.path;
+    const pathInput = document.getElementById('fm-remote-path-input');
+    if (pathInput) pathInput.value = msg.path;
+  }
+
+  const tbody = document.getElementById('fm-remote-table-body');
+  if (!tbody) return;
+
+  if (msg.status && msg.status !== 'ok') {
+    tbody.innerHTML = `<tr><td colspan="4" style="color: #f87171; text-align: center; padding: 1.5rem;">⚠️ ${msg.status}</td></tr>`;
+    return;
+  }
+
+  const items = msg.items || [];
+  if (items.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" style="color: #94a3b8; text-align: center; padding: 1.5rem;">(Pasta vazia)</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = items.map((it) => {
+    const icon = it.is_dir ? '📁' : '📄';
+    const sizeStr = it.is_dir ? '' : formatFileSize(it.size);
+    const dateStr = it.mod_time ? new Date(it.mod_time * 1000).toLocaleString('pt-BR') : '-';
+    return `
+      <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); cursor: pointer;"
+          onmouseenter="this.style.background='rgba(56,189,248,0.08)'"
+          onmouseleave="this.style.background='transparent'"
+          onclick="fmSelectRemoteItem('${escapeQuotes(it.name)}', ${it.is_dir})"
+          ondblclick="fmItemDblClick('${escapeQuotes(it.name)}', ${it.is_dir})">
+        <td style="padding: 0.45rem 0.75rem; color: #fff; font-weight: ${it.is_dir ? '700' : '500'};">
+          <span style="margin-right: 6px;">${icon}</span>${it.name}
+        </td>
+        <td style="padding: 0.45rem 0.5rem; color: #94a3b8; font-family: monospace;">${sizeStr}</td>
+        <td style="padding: 0.45rem 0.5rem; color: #94a3b8; font-size: 0.72rem;">${dateStr}</td>
+        <td style="padding: 0.45rem 0.5rem; text-align: right;">
+          ${!it.is_dir ? `<button onclick="event.stopPropagation(); fmDownloadFile('${escapeQuotes(it.name)}')" title="Baixar Arquivo" style="background: rgba(34,197,94,0.2); border: 1px solid rgba(34,197,94,0.4); color: #4ade80; border-radius: 4px; padding: 2px 6px; font-size: 0.7rem; cursor: pointer; margin-right: 4px;">⬇️</button>` : ''}
+          <button onclick="event.stopPropagation(); fmDeleteItem('${escapeQuotes(it.name)}')" title="Excluir" style="background: rgba(239,68,68,0.2); border: 1px solid rgba(239,68,68,0.4); color: #f87171; border-radius: 4px; padding: 2px 6px; font-size: 0.7rem; cursor: pointer;">🗑️</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function escapeQuotes(str) {
+  return (str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+function formatFileSize(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+function fmSelectRemoteItem(name, isDir) {
+  if (!isDir) {
+    fmRemoteSelectedFile = name;
+  }
+}
+
+function fmItemDblClick(name, isDir) {
+  if (isDir) {
+    const newPath = fmCurrentRemotePath.endsWith('\\') || fmCurrentRemotePath.endsWith('/') 
+      ? fmCurrentRemotePath + name 
+      : fmCurrentRemotePath + '\\' + name;
+    requestRemoteFSList(newPath);
+  } else {
+    fmDownloadFile(name);
+  }
+}
+
+function fmNavigateUp() {
+  if (!fmCurrentRemotePath) return;
+  const parts = fmCurrentRemotePath.replace(/[\\/]+$/, '').split(/[\\/]/);
+  if (parts.length <= 1) return;
+  parts.pop();
+  let upPath = parts.join('\\');
+  if (upPath.endsWith(':')) upPath += '\\';
+  requestRemoteFSList(upPath);
+}
+
+function fmRefreshRemote() {
+  requestRemoteFSList(fmCurrentRemotePath);
+}
+
+function fmChangeRemoteDrive(drive) {
+  requestRemoteFSList(drive);
+}
+
+async function fmPromptNewFolder() {
+  const folderName = await showModalPrompt('Nova Pasta Remota', 'Nome da nova pasta a ser criada em ' + fmCurrentRemotePath + ':', '', '➕');
+  if (folderName && folderName.trim()) {
+    sendControl({ t: 'fs_mkdir', path: fmCurrentRemotePath, file_name: folderName.trim() });
+  }
+}
+
+async function fmDeleteItem(name) {
+  const targetPath = fmCurrentRemotePath.endsWith('\\') ? fmCurrentRemotePath + name : fmCurrentRemotePath + '\\' + name;
+  const ok = await showModalConfirm('Excluir Arquivo/Pasta', 'Deseja realmente excluir permanentemente:\n' + targetPath + ' ?', '🗑️', 'Excluir', 'Cancelar');
+  if (ok) {
+    sendControl({ t: 'fs_delete', path: targetPath });
+  }
+}
+
+function fmDownloadFile(name) {
+  const targetPath = fmCurrentRemotePath.endsWith('\\') ? fmCurrentRemotePath + name : fmCurrentRemotePath + '\\' + name;
+  sendControl({ t: 'fs_download', path: targetPath });
+  addFMQueueItem(name, 'download', 'Iniciando download...');
+}
+
+function handleIncomingFileStart(msg) {
+  fmIncomingDownloads[msg.file_name] = {
+    chunks: [],
+    receivedBytes: 0,
+    size: msg.file_size || 0
+  };
+  addFMQueueItem(msg.file_name, 'download', 'Baixando...');
+}
+
+function handleIncomingFileChunk(msg) {
+  const dl = fmIncomingDownloads[msg.file_name];
+  if (dl && msg.chunk) {
+    dl.chunks.push(msg.chunk);
+    dl.receivedBytes += Math.round((msg.chunk.length * 3) / 4);
+    const pct = dl.size > 0 ? Math.min(100, Math.round((dl.receivedBytes / dl.size) * 100)) : 50;
+    updateFMQueueProgress(msg.file_name, pct);
+  }
+}
+
+function handleIncomingFileEnd(msg) {
+  const dl = fmIncomingDownloads[msg.file_name];
+  if (dl) {
+    const byteArrays = [];
+    for (const b64 of dl.chunks) {
+      const byteCharacters = atob(b64);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      byteArrays.push(new Uint8Array(byteNumbers));
+    }
+    const blob = new Blob(byteArrays);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = msg.file_name;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    delete fmIncomingDownloads[msg.file_name];
+    updateFMQueueProgress(msg.file_name, 100, '✅ Concluído');
+  }
+}
+
+async function handleFileManagerUpload(files) {
+  if (!files || files.length === 0) return;
+  const localList = document.getElementById('fm-local-list');
+  if (localList) {
+    localList.innerHTML = Array.from(files).map(f => `
+      <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 0.4rem 0.6rem; display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem;">
+        <span>📄 ${f.name}</span>
+        <span style="color: #94a3b8; font-family: monospace;">${formatFileSize(f.size)}</span>
+      </div>
+    `).join('');
+  }
+
+  for (const file of files) {
+    await sendFileInChunksToDir(file, fmCurrentRemotePath);
+  }
+  fmRefreshRemote();
+}
+
+async function sendFileInChunksToDir(file, destDir) {
+  addFMQueueItem(file.name, 'upload', 'Enviando...');
+  const chunkSize = 48 * 1024;
+  const totalChunks = Math.ceil(file.size / chunkSize);
+
+  sendControl({ t: 'file_start', file_name: file.name, file_size: file.size, dest_dir: destDir });
+
+  let sentBytes = 0;
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * chunkSize;
+    const end = Math.min(file.size, start + chunkSize);
+    const slice = file.slice(start, end);
+
+    const base64Chunk = await new Promise((resolve) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result.split(',')[1]);
+      r.readAsDataURL(slice);
+    });
+
+    sendControl({
+      t: 'file_chunk',
+      file_name: file.name,
+      chunk: base64Chunk,
+      seq: i + 1
+    });
+
+    sentBytes += (end - start);
+    const pct = Math.round((sentBytes / file.size) * 100);
+    updateFMQueueProgress(file.name, pct);
+    await new Promise(r => setTimeout(r, 6));
+  }
+
+  sendControl({ t: 'file_end', file_name: file.name });
+  updateFMQueueProgress(file.name, 100, '✅ Concluído');
+}
+
+function addFMQueueItem(fileName, type, status) {
+  const queue = document.getElementById('fm-queue-list');
+  if (!queue) return;
+  const countEl = document.getElementById('fm-queue-count');
+  if (countEl) countEl.innerText = parseInt(countEl.innerText || 0) + 1;
+
+  const item = document.createElement('div');
+  item.id = 'fm-queue-' + btoa(fileName).replace(/=/g, '');
+  item.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 0.5rem; font-size: 0.75rem;';
+  item.innerHTML = `
+    <div style="display: flex; justify-content: space-between; font-weight: 600; color: #fff; margin-bottom: 4px;">
+      <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px;">${type === 'upload' ? '⬆️' : '⬇️'} ${fileName}</span>
+      <span id="${item.id}-pct" style="color: #38bdf8;">0%</span>
+    </div>
+    <div style="width: 100%; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;">
+      <div id="${item.id}-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #38bdf8, #4ade80); transition: width 0.1s ease;"></div>
+    </div>
+    <div id="${item.id}-status" style="font-size: 0.7rem; color: #94a3b8; margin-top: 4px;">${status}</div>
+  `;
+  queue.prepend(item);
+}
+
+function updateFMQueueProgress(fileName, pct, statusText) {
+  const safeId = 'fm-queue-' + btoa(fileName).replace(/=/g, '');
+  const pctEl = document.getElementById(safeId + '-pct');
+  const barEl = document.getElementById(safeId + '-bar');
+  const statusEl = document.getElementById(safeId + '-status');
+
+  if (pctEl) pctEl.innerText = pct + '%';
+  if (barEl) barEl.style.width = pct + '%';
+  if (statusText && statusEl) statusEl.innerText = statusText;
+}
+
+function triggerFMPushUpload() {
+  document.getElementById('fm-local-file-picker').click();
+}
+
+function triggerFMPullDownload() {
+  if (fmRemoteSelectedFile) {
+    fmDownloadFile(fmRemoteSelectedFile);
+  } else {
+    showToast('Selecione um arquivo na lista remota para baixar.');
+  }
 }
 
 

@@ -15,6 +15,7 @@ import (
 	pion "github.com/pion/webrtc/v3"
 	"remoteaccess/internal/audio"
 	"remoteaccess/internal/capture"
+	fsmod "remoteaccess/internal/fs"
 	"remoteaccess/internal/input"
 	"remoteaccess/internal/protocol"
 	"remoteaccess/internal/tray"
@@ -460,11 +461,14 @@ func (h *HostSession) HandleControlData(data []byte) {
 	case protocol.TypeFileStart:
 		if ctrl.FileName != "" {
 			cleanName := filepath.Base(ctrl.FileName)
-			userProfile := os.Getenv("USERPROFILE")
-			if userProfile == "" {
-				userProfile = "."
+			destDir := ctrl.DestDir
+			if destDir == "" {
+				userProfile := os.Getenv("USERPROFILE")
+				if userProfile == "" {
+					userProfile = "."
+				}
+				destDir = filepath.Join(userProfile, "Downloads", "RemoteAccess_Transfers")
 			}
-			destDir := filepath.Join(userProfile, "Downloads", "RemoteAccess_Transfers")
 			_ = os.MkdirAll(destDir, 0755)
 			destPath := filepath.Join(destDir, cleanName)
 
@@ -500,12 +504,123 @@ func (h *HostSession) HandleControlData(data []byte) {
 			h.mu.Unlock()
 			if exists && f != nil {
 				_ = f.Close()
-				tray.ShowBalloonNotification("RemoteAccess — Arquivo Recebido", fmt.Sprintf("📁 %s\nSalvo em Downloads\\RemoteAccess_Transfers", cleanName))
+				tray.ShowBalloonNotification("RemoteAccess — Arquivo Recebido", fmt.Sprintf("📁 %s\nTransferência concluída com sucesso.", cleanName))
 				if h.OnChat != nil {
-					h.OnChat("Sistema", fmt.Sprintf("📁 Arquivo recebido: %s (Salvo em Downloads\\RemoteAccess_Transfers)", cleanName))
+					h.OnChat("Sistema", fmt.Sprintf("📁 Arquivo recebido: %s", cleanName))
 				}
 			}
 		}
+
+	case protocol.TypeFSDrives:
+		drives := fsmod.ListDrives()
+		h.SendControl(protocol.ControlMessage{
+			Type:   protocol.TypeFSDrives,
+			Drives: drives,
+			Path:   fsmod.GetDefaultRoot(),
+		})
+
+	case protocol.TypeFSList:
+		targetPath := ctrl.Path
+		absPath, items, err := fsmod.ListDirectory(targetPath)
+		errMsg := ""
+		if err != nil {
+			errMsg = err.Error()
+		}
+		h.SendControl(protocol.ControlMessage{
+			Type:   protocol.TypeFSListResp,
+			Path:   absPath,
+			Items:  items,
+			Status: errMsg,
+			Drives: fsmod.ListDrives(),
+		})
+
+	case protocol.TypeFSDelete:
+		err := fsmod.DeleteItem(ctrl.Path)
+		status := "ok"
+		if err != nil {
+			status = err.Error()
+		}
+		// Responde com listagem atualizada do pai
+		parentDir := filepath.Dir(ctrl.Path)
+		absPath, items, _ := fsmod.ListDirectory(parentDir)
+		h.SendControl(protocol.ControlMessage{
+			Type:   protocol.TypeFSListResp,
+			Path:   absPath,
+			Items:  items,
+			Status: status,
+			Drives: fsmod.ListDrives(),
+		})
+
+	case protocol.TypeFSMkdir:
+		createdPath, err := fsmod.CreateDirectory(ctrl.Path, ctrl.FileName)
+		status := "ok"
+		if err != nil {
+			status = err.Error()
+		}
+		absPath, items, _ := fsmod.ListDirectory(ctrl.Path)
+		h.SendControl(protocol.ControlMessage{
+			Type:     protocol.TypeFSListResp,
+			Path:     absPath,
+			Items:    items,
+			Status:   status,
+			FileName: createdPath,
+			Drives:   fsmod.ListDrives(),
+		})
+
+	case protocol.TypeFSDownload:
+		// Cliente solicitou o download de um arquivo do Host para a máquina do operador
+		go func(filePath string) {
+			file, err := os.Open(filePath)
+			if err != nil {
+				h.SendControl(protocol.ControlMessage{
+					Type:   protocol.TypeFSOpResult,
+					Status: fmt.Sprintf("Erro ao abrir arquivo: %v", err),
+					Path:   filePath,
+				})
+				return
+			}
+			defer file.Close()
+
+			fi, err := file.Stat()
+			if err != nil || fi.IsDir() {
+				return
+			}
+
+			fileName := fi.Name()
+			fileSize := fi.Size()
+
+			// Notifica início do download
+			h.SendControl(protocol.ControlMessage{
+				Type:     protocol.TypeFileStart,
+				FileName: fileName,
+				FileSize: fileSize,
+			})
+
+			buf := make([]byte, 48*1024)
+			seq := 1
+			for {
+				n, readErr := file.Read(buf)
+				if n > 0 {
+					b64 := base64.StdEncoding.EncodeToString(buf[:n])
+					h.SendControl(protocol.ControlMessage{
+						Type:     protocol.TypeFileChunk,
+						FileName: fileName,
+						Chunk:    b64,
+						Seq:      seq,
+					})
+					seq++
+					time.Sleep(2 * time.Millisecond) // controle de vazão
+				}
+				if readErr != nil {
+					break
+				}
+			}
+
+			h.SendControl(protocol.ControlMessage{
+				Type:     protocol.TypeFileEnd,
+				FileName: fileName,
+			})
+		}(ctrl.Path)
 	case protocol.TypeChat:
 		if h.OnChat != nil {
 			h.OnChat(h.ClientID, ctrl.Text)

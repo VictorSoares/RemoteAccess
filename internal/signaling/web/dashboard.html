@@ -1133,9 +1133,12 @@
             <button type="button" onclick="toggleQcPwdVisibility()" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: transparent; border: none; cursor: pointer; color: #94a3b8; font-size: 1rem;" title="Mostrar/Ocultar Senha">👁️</button>
           </div>
         </div>
-        <div>
+        <div style="display: flex; gap: 0.6rem;">
           <button type="submit" class="btn-action btn-connect-direct" style="padding: 0.65rem 1.6rem; font-size: 0.95rem; font-weight: 700; height: 42px;">
             🚀 Conectar
+          </button>
+          <button type="button" onclick="handleQuickConnectFileManager()" class="btn-action" style="padding: 0.65rem 1.2rem; font-size: 0.95rem; font-weight: 700; height: 42px; background: linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%); color: #fff;">
+            📁 Arquivos
           </button>
         </div>
       </form>
@@ -1354,7 +1357,7 @@
       <button id="btn-viewer-curtain-toggle" class="btn-action" onclick="toggleViewerCurtain()" title="Modo Cortina: Oculta a tela física no host remoto"><span id="viewer-curtain-icon">🕶️</span></button>
       <button id="btn-viewer-autolock-toggle" class="btn-action" onclick="toggleViewerAutoLock()" title="Bloquear automaticamente o computador remoto ao desconectar"><span id="viewer-autolock-icon">🔓</span></button>
       <button id="btn-viewer-audio-toggle" class="btn-action" onclick="toggleViewerAudio()" title="Alternar Áudio Remoto" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4);"><span id="viewer-audio-icon">🔊</span></button>
-      <button class="btn-action" onclick="triggerWebFileUpload()" title="Enviar/Colar Arquivo"><span>📁</span></button>
+      <button class="btn-action" onclick="openWebFileManagerModal()" title="Gerenciador de Arquivos Bidirecional"><span>📁</span> <span class="dock-label">Arquivos</span></button>
       <input type="file" id="web-viewer-file-input" style="display: none;" multiple onchange="handleWebFileSelect(this.files)">
       <button class="btn-action" onclick="toggleViewerChat()" title="Bate-Papo"><span>💬</span> <span class="dock-label">Chat</span> <span id="viewer-chat-badge" class="chat-badge" style="display: none;">0</span></button>
       <button class="btn-action" onclick="toggleViewerFullscreen()" title="Alternar Tela Cheia"><span>⛶</span></button>
@@ -1435,6 +1438,93 @@
       <div id="dialog-actions" style="display: flex; gap: 0.6rem; justify-content: center;">
         <button id="dialog-btn-cancel" class="btn-action" style="display: none; background: rgba(255,255,255,0.08); color: #cbd5e1; padding: 0.55rem 1.1rem; border-radius: 8px; font-size: 0.85rem;" onclick="closeAppDialog(false)">Cancelar</button>
         <button id="dialog-btn-ok" class="btn-action btn-connect-direct" style="padding: 0.55rem 1.4rem; border-radius: 8px; font-size: 0.85rem;" onclick="closeAppDialog(true)">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dual-Pane File Manager Modal for Web Dashboard (AnyDesk Style) -->
+  <div id="web-file-manager-modal" class="modal-backdrop" style="display: none; z-index: 150000; align-items: stretch; padding: 1.5rem;">
+    <div class="modal-card" style="width: 100%; max-width: 1240px; height: 85vh; display: flex; flex-direction: column; background: #0f172a; border: 1px solid rgba(255,255,255,0.15); border-radius: 14px; overflow: hidden; box-shadow: 0 25px 60px rgba(0,0,0,0.8);">
+      <!-- Header -->
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1.25rem; background: rgba(15,23,42,0.95); border-bottom: 1px solid rgba(255,255,255,0.1);">
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+          <span style="font-size: 1.3rem;">📁</span>
+          <span style="font-weight: 800; font-size: 1rem; color: #fff;">Transferência de Arquivos</span>
+          <span id="web-fm-target-badge" style="background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.35); color: #38bdf8; font-size: 0.75rem; font-weight: 700; padding: 0.2rem 0.6rem; border-radius: 6px;">Host Remoto</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <button class="btn-action" onclick="closeWebFileManagerModal()" style="background: rgba(239,68,68,0.2); color: #fca5a5; border: 1px solid rgba(239,68,68,0.4); font-size: 0.8rem; padding: 0.35rem 0.8rem; border-radius: 6px; cursor: pointer;">✕ Fechar</button>
+        </div>
+      </div>
+
+      <!-- Main Dual Pane Body -->
+      <div style="display: flex; flex: 1; overflow: hidden; min-height: 0;">
+        <!-- Left Pane: Local Machine -->
+        <div style="flex: 1; display: flex; flex-direction: column; border-right: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.6);">
+          <div style="padding: 0.6rem 1rem; background: rgba(255,255,255,0.03); border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-weight: 700; font-size: 0.85rem; color: #94a3b8; display: flex; align-items: center; gap: 0.4rem;">
+              <span>💻</span> <span>Este Computador (Navegador)</span>
+            </div>
+            <button onclick="document.getElementById('web-fm-local-file-picker').click()" class="btn-action" style="font-size: 0.75rem; background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56,189,248,0.4); padding: 0.25rem 0.6rem; border-radius: 6px; cursor: pointer;">
+              ⬆️ Selecionar para Enviar
+            </button>
+            <input type="file" id="web-fm-local-file-picker" style="display: none;" multiple onchange="handleWebFileManagerUpload(this.files)">
+          </div>
+          <div id="web-fm-local-list" style="flex: 1; overflow-y: auto; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.4rem;">
+            <div style="text-align: center; color: var(--text-muted); font-size: 0.85rem; margin-top: 2rem;">
+              <div style="font-size: 2.2rem; margin-bottom: 0.5rem;">📥</div>
+              Clique em "Selecionar para Enviar" ou arraste arquivos aqui para transferir para o diretório remoto aberto ao lado.
+            </div>
+          </div>
+        </div>
+
+        <!-- Middle Action Column -->
+        <div style="width: 50px; background: rgba(255,255,255,0.02); border-right: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;">
+          <button onclick="triggerWebFMPushUpload()" title="Enviar para Remoto (Upload)" style="background: rgba(56, 189, 248, 0.2); border: 1px solid rgba(56, 189, 248, 0.5); color: #38bdf8; width: 34px; height: 34px; border-radius: 8px; cursor: pointer; font-size: 1rem;">➔</button>
+          <button onclick="triggerWebFMPullDownload()" title="Baixar do Remoto (Download)" style="background: rgba(34, 197, 94, 0.2); border: 1px solid rgba(34, 197, 94, 0.5); color: #4ade80; width: 34px; height: 34px; border-radius: 8px; cursor: pointer; font-size: 1rem;">⬅</button>
+        </div>
+
+        <!-- Right Pane: Remote Machine -->
+        <div style="flex: 1.4; display: flex; flex-direction: column; background: rgba(15,23,42,0.8);">
+          <!-- Remote Navigation Bar -->
+          <div style="padding: 0.6rem 1rem; background: rgba(255,255,255,0.03); border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; gap: 0.5rem; align-items: center;">
+            <select id="web-fm-remote-drives" onchange="webFMChangeRemoteDrive(this.value)" style="background: rgba(15,23,42,0.9); border: 1px solid rgba(255,255,255,0.15); color: #38bdf8; font-weight: 700; border-radius: 6px; padding: 0.25rem 0.5rem; font-size: 0.8rem; outline: none; cursor: pointer;">
+              <option value="C:\">C:\</option>
+            </select>
+            <button onclick="webFMNavigateUp()" title="Subir um nível (Pasta Pai)" class="btn-action" style="padding: 0.25rem 0.55rem; font-size: 0.8rem; background: rgba(255,255,255,0.06); color: #fff; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">⬆️</button>
+            <button onclick="webFMRefreshRemote()" title="Atualizar Pasta" class="btn-action" style="padding: 0.25rem 0.55rem; font-size: 0.8rem; background: rgba(255,255,255,0.06); color: #fff; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">🔄</button>
+            <button onclick="webFMPromptNewFolder()" title="Criar Nova Pasta" class="btn-action" style="padding: 0.25rem 0.55rem; font-size: 0.8rem; background: rgba(255,255,255,0.06); color: #fff; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1); cursor: pointer;">➕</button>
+            <input type="text" id="web-fm-remote-path-input" readonly style="flex: 1; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 0.25rem 0.6rem; color: #94a3b8; font-size: 0.78rem; font-family: monospace;">
+          </div>
+
+          <!-- Remote Items Table -->
+          <div style="flex: 1; overflow-y: auto; min-height: 0;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem; text-align: left;">
+              <thead>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.08); color: #94a3b8; font-size: 0.72rem; text-transform: uppercase;">
+                  <th style="padding: 0.5rem 0.75rem;">Nome</th>
+                  <th style="padding: 0.5rem 0.5rem; width: 90px;">Tamanho</th>
+                  <th style="padding: 0.5rem 0.5rem; width: 140px;">Modificado</th>
+                  <th style="padding: 0.5rem 0.5rem; width: 90px; text-align: right;">Ações</th>
+                </tr>
+              </thead>
+              <tbody id="web-fm-remote-table-body">
+                <tr><td colspan="4" style="text-align: center; padding: 2rem; color: #94a3b8;">Carregando diretório remoto...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Transfer Queue Sidebar -->
+        <div style="width: 280px; border-left: 1px solid rgba(255,255,255,0.1); background: rgba(15,23,42,0.95); display: flex; flex-direction: column;">
+          <div style="padding: 0.6rem 0.9rem; border-bottom: 1px solid rgba(255,255,255,0.08); font-weight: 700; font-size: 0.8rem; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center;">
+            <span>⚡ Fila de Transferência</span>
+            <span id="web-fm-queue-count" style="background: rgba(255,255,255,0.1); padding: 0.1rem 0.4rem; border-radius: 4px; font-size: 0.7rem;">0</span>
+          </div>
+          <div id="web-fm-queue-list" style="flex: 1; overflow-y: auto; padding: 0.6rem; display: flex; flex-direction: column; gap: 0.5rem;">
+            <div style="color: var(--text-muted); font-size: 0.75rem; text-align: center; margin-top: 2rem;">Nenhuma transferência em andamento.</div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -2606,6 +2696,14 @@
           } else if (msg.t === 'close' || (msg.t === 'sys_cmd' && msg.cmd === 'close')) {
             closeWebViewer();
             showModalAlert('Sessão Encerrada', msg.text || 'A sessão remota foi encerrada pelo computador remoto.', 'ℹ️');
+          } else if (msg.t === 'fs_list_resp' || msg.t === 'fs_drives') {
+            handleWebFSListResponse(msg);
+          } else if (msg.t === 'file_start') {
+            handleWebIncomingFileStart(msg);
+          } else if (msg.t === 'file_chunk') {
+            handleWebIncomingFileChunk(msg);
+          } else if (msg.t === 'file_end') {
+            handleWebIncomingFileEnd(msg);
           }
         } catch(e) {}
       };
@@ -3520,6 +3618,303 @@
           e.preventDefault();
         }
       }, { passive: false });
+    }
+
+    // Dual-Pane File Manager Engine for Web Dashboard (AnyDesk Style)
+    let webFMCurrentRemotePath = '';
+    let webFMRemoteSelectedFile = null;
+    let webFMIncomingDownloads = {};
+    let isWebFileManagerOnly = false;
+
+    function openWebFileManagerModal() {
+      const modal = document.getElementById('web-file-manager-modal');
+      if (modal) modal.style.display = 'flex';
+      const targetBadge = document.getElementById('web-fm-target-badge');
+      if (targetBadge && currentSessionTarget) {
+        targetBadge.innerText = 'Host: ' + formatID(currentSessionTarget);
+      }
+      requestWebRemoteFSList('');
+    }
+
+    function closeWebFileManagerModal() {
+      const modal = document.getElementById('web-file-manager-modal');
+      if (modal) modal.style.display = 'none';
+      if (isWebFileManagerOnly) {
+        closeWebViewer();
+      }
+    }
+
+    async function handleQuickConnectFileManager() {
+      const targetInput = document.getElementById('qc-target-id');
+      const pwdInput = document.getElementById('qc-target-pwd');
+      const cleanId = (targetInput ? targetInput.value : '').replace(/\D/g, '');
+      const pwd = pwdInput ? pwdInput.value : '';
+
+      if (!cleanId) {
+        await showModalAlert('ID Obrigatório', 'Informe o ID do computador que deseja acessar.', '⚠️');
+        return;
+      }
+      isWebFileManagerOnly = true;
+      connectDirect(cleanId, pwd, 1);
+      setTimeout(() => {
+        openWebFileManagerModal();
+      }, 1000);
+    }
+
+    function requestWebRemoteFSList(path) {
+      sendViewerCtrl({ t: 'fs_list', path: path || webFMCurrentRemotePath });
+    }
+
+    function handleWebFSListResponse(msg) {
+      if (msg.drives && msg.drives.length > 0) {
+        const drivesSelect = document.getElementById('web-fm-remote-drives');
+        if (drivesSelect) {
+          drivesSelect.innerHTML = msg.drives.map(d => `<option value="${d}" ${msg.path && msg.path.startsWith(d) ? 'selected' : ''}>${d}</option>`).join('');
+        }
+      }
+
+      if (msg.path) {
+        webFMCurrentRemotePath = msg.path;
+        const pathInput = document.getElementById('web-fm-remote-path-input');
+        if (pathInput) pathInput.value = msg.path;
+      }
+
+      const tbody = document.getElementById('web-fm-remote-table-body');
+      if (!tbody) return;
+
+      if (msg.status && msg.status !== 'ok') {
+        tbody.innerHTML = `<tr><td colspan="4" style="color: #f87171; text-align: center; padding: 1.5rem;">⚠️ ${msg.status}</td></tr>`;
+        return;
+      }
+
+      const items = msg.items || [];
+      if (items.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" style="color: #94a3b8; text-align: center; padding: 1.5rem;">(Pasta vazia)</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = items.map((it) => {
+        const icon = it.is_dir ? '📁' : '📄';
+        const sizeStr = it.is_dir ? '' : formatFileSize(it.size);
+        const dateStr = it.mod_time ? new Date(it.mod_time * 1000).toLocaleString('pt-BR') : '-';
+        return `
+          <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); cursor: pointer;"
+              onmouseenter="this.style.background='rgba(56,189,248,0.08)'"
+              onmouseleave="this.style.background='transparent'"
+              onclick="webFMSelectRemoteItem('${escapeQuotes(it.name)}', ${it.is_dir})"
+              ondblclick="webFMItemDblClick('${escapeQuotes(it.name)}', ${it.is_dir})">
+            <td style="padding: 0.45rem 0.75rem; color: #fff; font-weight: ${it.is_dir ? '700' : '500'};">
+              <span style="margin-right: 6px;">${icon}</span>${it.name}
+            </td>
+            <td style="padding: 0.45rem 0.5rem; color: #94a3b8; font-family: monospace;">${sizeStr}</td>
+            <td style="padding: 0.45rem 0.5rem; color: #94a3b8; font-size: 0.72rem;">${dateStr}</td>
+            <td style="padding: 0.45rem 0.5rem; text-align: right;">
+              ${!it.is_dir ? `<button onclick="event.stopPropagation(); webFMDownloadFile('${escapeQuotes(it.name)}')" title="Baixar Arquivo" style="background: rgba(34,197,94,0.2); border: 1px solid rgba(34,197,94,0.4); color: #4ade80; border-radius: 4px; padding: 2px 6px; font-size: 0.7rem; cursor: pointer; margin-right: 4px;">⬇️</button>` : ''}
+              <button onclick="event.stopPropagation(); webFMDeleteItem('${escapeQuotes(it.name)}')" title="Excluir" style="background: rgba(239,68,68,0.2); border: 1px solid rgba(239,68,68,0.4); color: #f87171; border-radius: 4px; padding: 2px 6px; font-size: 0.7rem; cursor: pointer;">🗑️</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function webFMSelectRemoteItem(name, isDir) {
+      if (!isDir) {
+        webFMRemoteSelectedFile = name;
+      }
+    }
+
+    function webFMItemDblClick(name, isDir) {
+      if (isDir) {
+        const newPath = webFMCurrentRemotePath.endsWith('\\') || webFMCurrentRemotePath.endsWith('/') 
+          ? webFMCurrentRemotePath + name 
+          : webFMCurrentRemotePath + '\\' + name;
+        requestWebRemoteFSList(newPath);
+      } else {
+        webFMDownloadFile(name);
+      }
+    }
+
+    function webFMNavigateUp() {
+      if (!webFMCurrentRemotePath) return;
+      const parts = webFMCurrentRemotePath.replace(/[\\/]+$/, '').split(/[\\/]/);
+      if (parts.length <= 1) return;
+      parts.pop();
+      let upPath = parts.join('\\');
+      if (upPath.endsWith(':')) upPath += '\\';
+      requestWebRemoteFSList(upPath);
+    }
+
+    function webFMRefreshRemote() {
+      requestWebRemoteFSList(webFMCurrentRemotePath);
+    }
+
+    function webFMChangeRemoteDrive(drive) {
+      requestWebRemoteFSList(drive);
+    }
+
+    async function webFMPromptNewFolder() {
+      const folderName = await showModalPrompt('Nova Pasta Remota', 'Nome da nova pasta a ser criada em ' + webFMCurrentRemotePath + ':', '', '➕');
+      if (folderName && folderName.trim()) {
+        sendViewerCtrl({ t: 'fs_mkdir', path: webFMCurrentRemotePath, file_name: folderName.trim() });
+      }
+    }
+
+    async function webFMDeleteItem(name) {
+      const targetPath = webFMCurrentRemotePath.endsWith('\\') ? webFMCurrentRemotePath + name : webFMCurrentRemotePath + '\\' + name;
+      const ok = await showModalConfirm('Excluir Arquivo/Pasta', 'Deseja realmente excluir permanentemente:\n' + targetPath + ' ?', '🗑️', 'Excluir', 'Cancelar');
+      if (ok) {
+        sendViewerCtrl({ t: 'fs_delete', path: targetPath });
+      }
+    }
+
+    function webFMDownloadFile(name) {
+      const targetPath = webFMCurrentRemotePath.endsWith('\\') ? webFMCurrentRemotePath + name : webFMCurrentRemotePath + '\\' + name;
+      sendViewerCtrl({ t: 'fs_download', path: targetPath });
+      addWebFMQueueItem(name, 'download', 'Iniciando download...');
+    }
+
+    function handleWebIncomingFileStart(msg) {
+      webFMIncomingDownloads[msg.file_name] = {
+        chunks: [],
+        receivedBytes: 0,
+        size: msg.file_size || 0
+      };
+      addWebFMQueueItem(msg.file_name, 'download', 'Baixando...');
+    }
+
+    function handleWebIncomingFileChunk(msg) {
+      const dl = webFMIncomingDownloads[msg.file_name];
+      if (dl && msg.chunk) {
+        dl.chunks.push(msg.chunk);
+        dl.receivedBytes += Math.round((msg.chunk.length * 3) / 4);
+        const pct = dl.size > 0 ? Math.min(100, Math.round((dl.receivedBytes / dl.size) * 100)) : 50;
+        updateWebFMQueueProgress(msg.file_name, pct);
+      }
+    }
+
+    function handleWebIncomingFileEnd(msg) {
+      const dl = webFMIncomingDownloads[msg.file_name];
+      if (dl) {
+        const byteArrays = [];
+        for (const b64 of dl.chunks) {
+          const byteCharacters = atob(b64);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          byteArrays.push(new Uint8Array(byteNumbers));
+        }
+        const blob = new Blob(byteArrays);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = msg.file_name;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        delete webFMIncomingDownloads[msg.file_name];
+        updateWebFMQueueProgress(msg.file_name, 100, '✅ Concluído');
+      }
+    }
+
+    async function handleWebFileManagerUpload(files) {
+      if (!files || files.length === 0) return;
+      const localList = document.getElementById('web-fm-local-list');
+      if (localList) {
+        localList.innerHTML = Array.from(files).map(f => `
+          <div style="background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 0.4rem 0.6rem; display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem;">
+            <span>📄 ${f.name}</span>
+            <span style="color: #94a3b8; font-family: monospace;">${formatFileSize(f.size)}</span>
+          </div>
+        `).join('');
+      }
+
+      for (const file of files) {
+        await sendWebFileInChunksToDir(file, webFMCurrentRemotePath);
+      }
+      webFMRefreshRemote();
+    }
+
+    async function sendWebFileInChunksToDir(file, destDir) {
+      addWebFMQueueItem(file.name, 'upload', 'Enviando...');
+      const chunkSize = 48 * 1024;
+      const totalChunks = Math.ceil(file.size / chunkSize);
+
+      sendViewerCtrl({ t: 'file_start', file_name: file.name, file_size: file.size, dest_dir: destDir });
+
+      let sentBytes = 0;
+      for (let i = 0; i < totalChunks; i++) {
+        const start = i * chunkSize;
+        const end = Math.min(file.size, start + chunkSize);
+        const slice = file.slice(start, end);
+
+        const base64Chunk = await new Promise((resolve) => {
+          const r = new FileReader();
+          r.onload = () => resolve(r.result.split(',')[1]);
+          r.readAsDataURL(slice);
+        });
+
+        sendViewerCtrl({
+          t: 'file_chunk',
+          file_name: file.name,
+          chunk: base64Chunk,
+          seq: i + 1
+        });
+
+        sentBytes += (end - start);
+        const pct = Math.round((sentBytes / file.size) * 100);
+        updateWebFMQueueProgress(file.name, pct);
+        await new Promise(r => setTimeout(r, 6));
+      }
+
+      sendViewerCtrl({ t: 'file_end', file_name: file.name });
+      updateWebFMQueueProgress(file.name, 100, '✅ Concluído');
+    }
+
+    function addWebFMQueueItem(fileName, type, status) {
+      const queue = document.getElementById('web-fm-queue-list');
+      if (!queue) return;
+      const countEl = document.getElementById('web-fm-queue-count');
+      if (countEl) countEl.innerText = parseInt(countEl.innerText || 0) + 1;
+
+      const item = document.createElement('div');
+      item.id = 'web-fm-queue-' + btoa(fileName).replace(/=/g, '');
+      item.style.cssText = 'background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 0.5rem; font-size: 0.75rem;';
+      item.innerHTML = `
+        <div style="display: flex; justify-content: space-between; font-weight: 600; color: #fff; margin-bottom: 4px;">
+          <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 170px;">${type === 'upload' ? '⬆️' : '⬇️'} ${fileName}</span>
+          <span id="${item.id}-pct" style="color: #38bdf8;">0%</span>
+        </div>
+        <div style="width: 100%; height: 4px; background: rgba(255,255,255,0.1); border-radius: 2px; overflow: hidden;">
+          <div id="${item.id}-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #38bdf8, #4ade80); transition: width 0.1s ease;"></div>
+        </div>
+        <div id="${item.id}-status" style="font-size: 0.7rem; color: #94a3b8; margin-top: 4px;">${status}</div>
+      `;
+      queue.prepend(item);
+    }
+
+    function updateWebFMQueueProgress(fileName, pct, statusText) {
+      const safeId = 'web-fm-queue-' + btoa(fileName).replace(/=/g, '');
+      const pctEl = document.getElementById(safeId + '-pct');
+      const barEl = document.getElementById(safeId + '-bar');
+      const statusEl = document.getElementById(safeId + '-status');
+
+      if (pctEl) pctEl.innerText = pct + '%';
+      if (barEl) barEl.style.width = pct + '%';
+      if (statusText && statusEl) statusEl.innerText = statusText;
+    }
+
+    function triggerWebFMPushUpload() {
+      document.getElementById('web-fm-local-file-picker').click();
+    }
+
+    function triggerWebFMPullDownload() {
+      if (webFMRemoteSelectedFile) {
+        webFMDownloadFile(webFMRemoteSelectedFile);
+      } else {
+        showToast('Selecione um arquivo na lista remota para baixar.');
+      }
     }
 
     renderDashboardRecent();
