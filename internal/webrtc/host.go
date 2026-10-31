@@ -520,6 +520,12 @@ func (h *HostSession) HandleControlData(data []byte) {
 				if h.OnChat != nil {
 					h.OnChat("Sistema", fmt.Sprintf("📁 Arquivo recebido: %s", cleanName))
 				}
+				h.SendControl(protocol.ControlMessage{
+					Type:     protocol.TypeFSOpResult,
+					Status:   "upload_ok",
+					FileName: cleanName,
+					Path:     ctrl.DestDir,
+				})
 			}
 		}
 
