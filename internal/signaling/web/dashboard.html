@@ -4,11 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>RemoteAccess Cloud Relay Hub</title>
-  <link rel="icon" type="image/png" sizes="32x32" href="/icon_32.png">
+  <!-- App Icons for Window Titlebar, Taskbar & Browser Tabs (Alta Definição 256px -> 16px) -->
   <link rel="icon" type="image/png" sizes="256x256" href="/icon.png">
-  <link rel="shortcut icon" href="/favicon.ico">
-  <link rel="apple-touch-icon" href="/icon.png">
-  <link rel="icon" type="image/png" href="data:image/png;base64,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">
+  <link rel="icon" type="image/png" sizes="128x128" href="/icon_128.png">
+  <link rel="icon" type="image/png" sizes="96x96" href="/icon_96.png">
+  <link rel="icon" type="image/png" sizes="64x64" href="/icon_64.png">
+  <link rel="icon" type="image/png" sizes="48x48" href="/icon_48.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/icon_32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/icon_16.png">
+  <link rel="shortcut icon" type="image/png" href="/icon.png">
+  <link rel="apple-touch-icon" sizes="256x256" href="/icon.png">
+  <link rel="manifest" href="/manifest.json">
   <style>
     :root {
       --bg-app: #080c14;

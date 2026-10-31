@@ -54,7 +54,18 @@ var (
 	procConvertStringSecurityDescriptorToSecurityDescriptorW = advapi32.NewProc("ConvertStringSecurityDescriptorToSecurityDescriptorW")
 	procLocalFree                                            = kernel32.NewProc("LocalFree")
 
+	shell32                                     = syscall.NewLazyDLL("shell32.dll")
+	procExtractIconExW                          = shell32.NewProc("ExtractIconExW")
+	procSetCurrentProcessExplicitAppUserModelID = shell32.NewProc("SetCurrentProcessExplicitAppUserModelID")
+	procSendMessageW                            = user32.NewProc("SendMessageW")
+
 	appMutex uintptr
+)
+
+const (
+	wmSetIcon = 0x0080
+	iconSmall = 0
+	iconBig   = 1
 )
 
 type securityAttributes struct {
@@ -436,6 +447,7 @@ func startWindowSizeGuard() {
 			}
 
 			var targetHWND uintptr
+			var iconApplied bool
 			// Allocate callback ONCE outside the loop to avoid exhausting Go runtime callback table
 			findCb := syscall.NewCallback(func(hwnd uintptr, lParam uintptr) uintptr {
 				if !isVis(hwnd) {
@@ -451,10 +463,29 @@ func startWindowSizeGuard() {
 			for range ticker.C {
 				if targetHWND == 0 || !isVis(targetHWND) {
 					targetHWND = 0
+					iconApplied = false
 					procEnumWindows.Call(findCb, 0)
 				}
 
 				if targetHWND != 0 {
+					if !iconApplied {
+						iconApplied = true
+						go func(h uintptr) {
+							exePath, err := os.Executable()
+							if err == nil {
+								exeUtf16, _ := syscall.UTF16PtrFromString(exePath)
+								var hLarge, hSmall uintptr
+								procExtractIconExW.Call(uintptr(unsafe.Pointer(exeUtf16)), 0, uintptr(unsafe.Pointer(&hLarge)), uintptr(unsafe.Pointer(&hSmall)), 1)
+								if hLarge != 0 {
+									procSendMessageW.Call(h, wmSetIcon, iconBig, hLarge)
+								}
+								if hSmall != 0 {
+									procSendMessageW.Call(h, wmSetIcon, iconSmall, hSmall)
+								}
+							}
+						}(targetHWND)
+					}
+
 					isMin, _, _ := procIsIconic.Call(targetHWND)
 					if isMin != 0 {
 						continue
@@ -505,6 +536,7 @@ func runNativeAppWindow(url string) {
 				cmd := exec.Command(edgePath,
 					fmt.Sprintf("--app=%s", url),
 					fmt.Sprintf("--user-data-dir=%s", profileDir),
+					"--app-id=RemoteAccess.Portable",
 					"--window-size=960,720",
 					"--new-window",
 					"--no-first-run",
@@ -567,6 +599,13 @@ func main() {
 	elevateFlag := flag.Bool("elevate", false, "Reiniciar como Administrador")
 	defaultPwd := flag.String("password", "", "Definir senha padrao")
 	flag.Parse()
+
+	if runtime.GOOS == "windows" {
+		if procSetCurrentProcessExplicitAppUserModelID.Find() == nil {
+			appID, _ := syscall.UTF16PtrFromString("RemoteAccess.Portable")
+			procSetCurrentProcessExplicitAppUserModelID.Call(uintptr(unsafe.Pointer(appID)))
+		}
+	}
 
 	// 0a. Estágio 2 interno da desinstalação
 	if *uninstallStage2Flag {
